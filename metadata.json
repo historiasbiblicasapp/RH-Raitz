@@ -1,0 +1,10 @@
+{
+  "name": "Admissão Digital",
+  "description": "Sistema web responsivo para gestão e conferência do processo de admissão de novos colaboradores com conformidade à LGPD.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

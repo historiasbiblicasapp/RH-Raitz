@@ -1,0 +1,138 @@
+import React from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { 
+  LayoutDashboard, 
+  Users, 
+  FileCheck2, 
+  Bell, 
+  BarChart3, 
+  History, 
+  Settings, 
+  LogOut, 
+  ShieldCheck,
+  X
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext.tsx';
+
+interface SidebarProps {
+  isOpen: boolean;
+  onClose: () => void;
+  unreadNotificationsCount?: number;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotificationsCount = 0 }) => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const menuItems = [
+    { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { to: '/admissoes', label: 'Admissões', icon: Users },
+    { to: '/documentos', label: 'Documentos', icon: FileCheck2 },
+    { 
+      to: '/notificacoes', 
+      label: 'Notificações', 
+      icon: Bell, 
+      badge: unreadNotificationsCount > 0 ? unreadNotificationsCount : null 
+    },
+    { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
+    { to: '/historico', label: 'Histórico', icon: History },
+    { to: '/configuracoes', label: 'Configurações', icon: Settings },
+  ];
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  return (
+    <>
+      {/* Backdrop para mobile */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-40 lg:hidden"
+          onClick={onClose}
+        />
+      )}
+
+      <aside
+        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-white border-r border-slate-200 flex flex-col transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Topo do Menu com Marca */}
+        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/raitz-logo.jpg"
+              alt="Logo Raitz"
+              referrerPolicy="no-referrer"
+              className="w-9 h-9 rounded-lg object-cover shadow-xs border border-slate-200 shrink-0"
+            />
+            <div>
+              <span className="font-bold text-slate-900 tracking-tight text-base block leading-none">
+                Admissão Digital
+              </span>
+              <span className="text-[11px] text-slate-400 font-medium">Raitz • Gestão de RH</span>
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 lg:hidden"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Itens de Navegação */}
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {menuItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => onClose()}
+              className={({ isActive }) =>
+                `flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`
+              }
+            >
+              <div className="flex items-center gap-3">
+                <item.icon className="w-4 h-4 text-slate-500 group-hover:text-blue-600" />
+                <span>{item.label}</span>
+              </div>
+              {item.badge && (
+                <span className="bg-rose-500 text-white text-[11px] font-bold px-1.5 py-0.5 rounded-full min-w-5 text-center">
+                  {item.badge}
+                </span>
+              )}
+            </NavLink>
+          ))}
+        </nav>
+
+        {/* Rodapé do Menu com Perfil do RH e Logout */}
+        <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+          <div className="flex items-center gap-3 px-2 py-2 mb-1">
+            <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-semibold flex items-center justify-center text-xs">
+              {user?.name ? user.name.slice(0, 2).toUpperCase() : 'RH'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-slate-800 truncate">{user?.name || 'Recursos Humanos'}</p>
+              <p className="text-[11px] text-slate-400 truncate">{user?.email || 'rh@empresa.com'}</p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-600 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Sair do sistema</span>
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+};
