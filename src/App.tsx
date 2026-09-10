@@ -14,6 +14,7 @@ import { AuditLogPage } from './pages/AuditLogPage.tsx';
 import { NotificationsPage } from './pages/NotificationsPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
+import { InvitesPage } from './pages/InvitesPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -35,7 +36,9 @@ export function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admissoes" element={<AdmissionsList />} />
             <Route path="/admissoes/nova" element={<NewAdmission />} />
+            <Route path="/nova-admissao" element={<NewAdmission />} />
             <Route path="/admissoes/:id" element={<AdmissionDetails />} />
+            <Route path="/convites" element={<InvitesPage />} />
             <Route path="/documentos" element={<DocumentReviewPage />} />
             <Route path="/historico" element={<AuditLogPage />} />
             <Route path="/notificacoes" element={<NotificationsPage />} />

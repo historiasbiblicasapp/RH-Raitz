@@ -119,6 +119,9 @@ export interface Admission {
   inviteLastSentAt?: string;
   inviteAccessCount?: number;
   inviteLastAccessedAt?: string;
+  inviteRevoked?: boolean;
+  inviteRevokedAt?: string;
+  inviteRevokedBy?: string;
   consentGiven: boolean;
   consentDate?: string;
   consentTextVersion?: string;
@@ -136,6 +139,32 @@ export interface Admission {
   cancelledAt?: string;
   cancelledBy?: string;
   cancellationReason?: string;
+}
+
+export interface InviteItem {
+  admissionId: string;
+  employeeId: string;
+  employeeName: string;
+  employeeEmail: string;
+  employeePhone: string;
+  employeeCpf: string;
+  employeeRole: string;
+  employeeDepartment: string;
+  employeeUnit: string;
+  admissionStatus: AdmissionStatus;
+  inviteToken: string;
+  inviteExpiresAt: string;
+  inviteSentViaWhatsApp: boolean;
+  inviteSentAt?: string;
+  inviteLastSentAt?: string;
+  inviteAccessCount: number;
+  inviteLastAccessedAt?: string;
+  inviteRevoked: boolean;
+  inviteRevokedAt?: string;
+  inviteRevokedBy?: string;
+  isExpired: boolean;
+  statusLabel: 'Ativo' | 'Acessado' | 'Pendente de envio' | 'Expirado' | 'Revogado';
+  createdAt: string;
 }
 
 export interface AdmissionsListResponse {

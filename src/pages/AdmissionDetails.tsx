@@ -30,13 +30,19 @@ import {
   X,
   UserCheck,
   ArrowUpRight,
-  Smartphone
+  Smartphone,
+  Edit3,
+  Trash2,
+  KeyRound
 } from 'lucide-react';
 import { Admission, AdmissionDocument, AuditLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { DocumentReviewModal } from '../components/DocumentReviewModal.tsx';
 import { InviteModal } from '../components/InviteModal.tsx';
 import { MobileSimulatorModal } from '../components/MobileSimulatorModal.tsx';
+import { EditAdmissionModal } from '../components/EditAdmissionModal.tsx';
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
+import { ManageInviteModal } from '../components/ManageInviteModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
 type ActiveTab = 'resumo' | 'dados' | 'documentos' | 'pendencias' | 'historico' | 'convite';
@@ -62,6 +68,12 @@ export const AdmissionDetails: React.FC = () => {
 
   const [showResendModal, setShowResendModal] = useState(false);
   const [isResending, setIsResending] = useState(false);
+
+  // CRUD Modais: Editar Cadastro, Gerenciar Convite e Excluir
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isManageInviteModalOpen, setIsManageInviteModalOpen] = useState(false);
+  const [showDeleteAdmissionModal, setShowDeleteAdmissionModal] = useState(false);
+  const [isDeletingAdmission, setIsDeletingAdmission] = useState(false);
 
   // Menu "Mais ações"
   const [showMoreActions, setShowMoreActions] = useState(false);
@@ -207,6 +219,25 @@ export const AdmissionDetails: React.FC = () => {
     }
   };
 
+  const handleDeleteAdmission = async () => {
+    if (!admission) return;
+    try {
+      setIsDeletingAdmission(true);
+      const res = await fetch(`/api/admissions/${admission.id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erro ao excluir admissão.');
+      }
+      navigate('/admissoes');
+    } catch (err: any) {
+      alert(err.message || 'Falha ao excluir admissão.');
+    } finally {
+      setIsDeletingAdmission(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="py-24 text-center text-slate-400">
@@ -287,6 +318,26 @@ export const AdmissionDetails: React.FC = () => {
         </button>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Ação CRUD: Editar Cadastro */}
+          <button
+            onClick={() => setIsEditModalOpen(true)}
+            className="flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+            title="Editar informações cadastrais do funcionário"
+          >
+            <Edit3 className="w-3.5 h-3.5 text-blue-600" />
+            <span>Editar Cadastro</span>
+          </button>
+
+          {/* Ação CRUD: Gerenciar Convite */}
+          <button
+            onClick={() => setIsManageInviteModalOpen(true)}
+            className="flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+            title="Gerenciar token, prorrogar ou revogar convite"
+          >
+            <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+            <span>Gerenciar Convite</span>
+          </button>
+
           {/* Ação 1: Enviar convite novamente */}
           <button
             onClick={() => setShowResendModal(true)}
@@ -294,7 +345,7 @@ export const AdmissionDetails: React.FC = () => {
             className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
-            <span>Enviar convite novamente</span>
+            <span>Reenviar WhatsApp</span>
           </button>
 
           {/* Ação 2: Copiar link */}
@@ -360,6 +411,22 @@ export const AdmissionDetails: React.FC = () => {
                   </button>
                 )}
 
+                <button
+                  onClick={() => { setShowMoreActions(false); setIsEditModalOpen(true); }}
+                  className="w-full text-left px-3.5 py-2 hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
+                >
+                  <Edit3 className="w-4 h-4 text-blue-600" />
+                  <span>Editar Cadastro</span>
+                </button>
+
+                <button
+                  onClick={() => { setShowMoreActions(false); setIsManageInviteModalOpen(true); }}
+                  className="w-full text-left px-3.5 py-2 hover:bg-slate-50 font-semibold text-slate-700 flex items-center gap-2"
+                >
+                  <KeyRound className="w-4 h-4 text-amber-600" />
+                  <span>Gerenciar Convite</span>
+                </button>
+
                 {!isCancelled && (
                   <button
                     onClick={() => { setShowMoreActions(false); setShowCancelModal(true); }}
@@ -369,6 +436,14 @@ export const AdmissionDetails: React.FC = () => {
                     <span>Cancelar Admissão</span>
                   </button>
                 )}
+
+                <button
+                  onClick={() => { setShowMoreActions(false); setShowDeleteAdmissionModal(true); }}
+                  className="w-full text-left px-3.5 py-2 hover:bg-rose-50 font-semibold text-rose-600 flex items-center gap-2 border-t border-slate-100"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <span>Excluir Admissão</span>
+                </button>
               </div>
             )}
           </div>
@@ -731,7 +806,7 @@ export const AdmissionDetails: React.FC = () => {
       {/* ABA 2: DADOS PESSOAIS (Item 13) */}
       {activeTab === 'dados' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100 flex-wrap gap-3">
             <div>
               <h2 className="text-sm font-bold text-slate-900">Dados Cadastrais do Colaborador</h2>
               <p className="text-xs text-slate-500">
@@ -739,17 +814,28 @@ export const AdmissionDetails: React.FC = () => {
               </p>
             </div>
 
-            {admission.dataConfirmed ? (
-              <span className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl font-semibold">
-                <Check className="w-3.5 h-3.5" />
-                <span>Dados confirmados em {new Date(admission.dataConfirmedAt || admission.updatedAt).toLocaleString('pt-BR')}</span>
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl font-semibold">
-                <Clock className="w-3.5 h-3.5" />
-                <span>Aguardando confirmação do colaborador</span>
-              </span>
-            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => setIsEditModalOpen(true)}
+                className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-xl border border-blue-200 transition-colors"
+                title="Editar informações cadastrais"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Editar Dados</span>
+              </button>
+
+              {admission.dataConfirmed ? (
+                <span className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl font-semibold">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Dados confirmados</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl font-semibold">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Aguardando confirmação</span>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Alerta caso haja solicitação de alteração cadastral */}
@@ -1142,7 +1228,15 @@ export const AdmissionDetails: React.FC = () => {
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setIsManageInviteModalOpen(true)}
+                  className="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>Gerenciar Token & Validade</span>
+                </button>
+
                 <button
                   onClick={handleCopyLink}
                   className="flex items-center gap-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
@@ -1169,6 +1263,13 @@ export const AdmissionDetails: React.FC = () => {
               </div>
             </div>
 
+            {admission.inviteRevoked && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center gap-2 font-semibold">
+                <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Este convite foi REVOGADO pelo RH. O colaborador não consegue acessar o portal por este link.</span>
+              </div>
+            )}
+
             <p className="text-[11px] text-slate-400">
               O link contém um token de segurança de alta entropia exclusivo para {admission.employee.name}.
             </p>
@@ -1191,6 +1292,46 @@ export const AdmissionDetails: React.FC = () => {
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
       />
+
+      {/* Modal de Gerenciamento do Convite (CRUD Convite: Regenerar / Revogar / Prorrogar) */}
+      {isManageInviteModalOpen && (
+        <ManageInviteModal
+          admission={admission}
+          isOpen={isManageInviteModalOpen}
+          onClose={() => setIsManageInviteModalOpen(false)}
+          onUpdate={(updated) => {
+            setAdmission(updated);
+            fetchAdmission();
+          }}
+        />
+      )}
+
+      {/* Modal de Edição de Cadastro (CRUD Cadastro: Update) */}
+      {isEditModalOpen && (
+        <EditAdmissionModal
+          admission={admission}
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          onSuccess={(updated) => {
+            setAdmission(updated);
+            fetchAdmission();
+          }}
+        />
+      )}
+
+      {/* Modal de Exclusão de Admissão (CRUD Cadastro: Delete) */}
+      {showDeleteAdmissionModal && (
+        <DeleteConfirmModal
+          isOpen={showDeleteAdmissionModal}
+          title="Excluir Admissão Permanentemente"
+          description={`Tem certeza que deseja excluir o cadastro e todo o processo admissional de "${admission.employee.name}"? Todos os documentos anexados e registros de auditoria serão removidos.`}
+          itemName={admission.employee.name}
+          confirmLabel="Sim, Excluir Admissão"
+          isDeleting={isDeletingAdmission}
+          onClose={() => setShowDeleteAdmissionModal(false)}
+          onConfirm={handleDeleteAdmission}
+        />
+      )}
 
       {/* Simulador Mobile */}
       <MobileSimulatorModal

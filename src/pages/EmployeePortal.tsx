@@ -64,10 +64,10 @@ export const EmployeePortal: React.FC = () => {
     try {
       setLoading(true);
       const res = await fetch(`/api/invite/${token}`);
+      const data = await res.json();
       if (!res.ok) {
-        throw new Error('Convite de admissão inválido, expirado ou cancelado.');
+        throw new Error(data.error || 'Convite de admissão inválido, expirado ou cancelado.');
       }
-      const data: Admission = await res.json();
       setAdmission(data);
 
       // Determina a etapa adequada baseada no progresso real do candidato

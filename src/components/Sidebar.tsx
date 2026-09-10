@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Users, 
+  KeyRound,
   FileCheck2, 
   Bell, 
   BarChart3, 
@@ -27,6 +28,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
   const menuItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/admissoes', label: 'Admissões', icon: Users },
+    { to: '/convites', label: 'Convites & Acessos', icon: KeyRound },
     { to: '/documentos', label: 'Documentos', icon: FileCheck2 },
     { 
       to: '/notificacoes', 

@@ -19,11 +19,17 @@ import {
   AlertTriangle,
   CheckCircle2,
   ArrowUpRight,
-  UserPlus
+  UserPlus,
+  Edit3,
+  Trash2,
+  KeyRound
 } from 'lucide-react';
 import { Admission, AdmissionStatus, DashboardStats } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { InviteModal } from '../components/InviteModal.tsx';
+import { EditAdmissionModal } from '../components/EditAdmissionModal.tsx';
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
+import { ManageInviteModal } from '../components/ManageInviteModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
 export const AdmissionsList: React.FC = () => {
@@ -34,6 +40,12 @@ export const AdmissionsList: React.FC = () => {
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedInviteAdmission, setSelectedInviteAdmission] = useState<Admission | null>(null);
+
+  // Modais de CRUD de Cadastro e Convite
+  const [editingAdmission, setEditingAdmission] = useState<Admission | null>(null);
+  const [deletingAdmission, setDeletingAdmission] = useState<{ id: string; name: string } | null>(null);
+  const [managingInviteAdmission, setManagingInviteAdmission] = useState<Admission | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const initialStatus = searchParams.get('status') || 'TODOS';
@@ -163,6 +175,27 @@ export const AdmissionsList: React.FC = () => {
     const newParams = new URLSearchParams(searchParams);
     newParams.delete('status');
     setSearchParams(newParams);
+  };
+
+  const handleDeleteAdmission = async () => {
+    if (!deletingAdmission) return;
+    try {
+      setIsDeleting(true);
+      const res = await fetch(`/api/admissions/${deletingAdmission.id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erro ao excluir admissão.');
+      }
+      setDeletingAdmission(null);
+      loadAdmissions();
+      loadStats();
+    } catch (err: any) {
+      alert(err.message || 'Falha ao excluir admissão.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const statusCards = [
@@ -633,11 +666,35 @@ export const AdmissionsList: React.FC = () => {
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
+                          onClick={() => setManagingInviteAdmission(adm)}
+                          title="Gerenciar convite e token"
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        >
+                          <KeyRound className="w-4 h-4" />
+                        </button>
+
+                        <button
                           onClick={() => setSelectedInviteAdmission(adm)}
                           title="Enviar convite WhatsApp"
                           className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 transition-colors"
                         >
                           <MessageCircle className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => setEditingAdmission(adm)}
+                          title="Editar dados cadastrais"
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => setDeletingAdmission({ id: adm.id, name: adm.employee.name })}
+                          title="Excluir admissão"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
                         </button>
 
                         <button
@@ -715,16 +772,38 @@ export const AdmissionsList: React.FC = () => {
                     Previsto: {new Date(adm.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}
                   </span>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => setManagingInviteAdmission(adm)}
+                      title="Gerenciar convite"
+                      className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 border border-slate-200"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={() => setSelectedInviteAdmission(adm)}
+                      title="WhatsApp"
                       className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-50 border border-emerald-200"
                     >
                       <MessageCircle className="w-3.5 h-3.5" />
                     </button>
                     <button
+                      onClick={() => setEditingAdmission(adm)}
+                      title="Editar cadastro"
+                      className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-50 border border-amber-200"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeletingAdmission({ id: adm.id, name: adm.employee.name })}
+                      title="Excluir cadastro"
+                      className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
                       onClick={() => navigate(`/admissoes/${adm.id}`)}
-                      className="flex items-center gap-1 bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
+                      className="flex items-center gap-1 bg-blue-600 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg"
                     >
                       <span>Ver</span>
                       <ChevronRight className="w-3.5 h-3.5" />
@@ -784,6 +863,46 @@ export const AdmissionsList: React.FC = () => {
         isOpen={!!selectedInviteAdmission}
         onClose={() => setSelectedInviteAdmission(null)}
       />
+
+      {/* Modal de Gerenciamento de Convite (CRUD Convite) */}
+      {managingInviteAdmission && (
+        <ManageInviteModal
+          admission={managingInviteAdmission}
+          isOpen={!!managingInviteAdmission}
+          onClose={() => setManagingInviteAdmission(null)}
+          onUpdate={(updated) => {
+            setManagingInviteAdmission(updated);
+            loadAdmissions();
+          }}
+        />
+      )}
+
+      {/* Modal de Edição de Cadastro (CRUD Admissão: Update) */}
+      {editingAdmission && (
+        <EditAdmissionModal
+          admission={editingAdmission}
+          isOpen={!!editingAdmission}
+          onClose={() => setEditingAdmission(null)}
+          onSuccess={() => {
+            loadAdmissions();
+            loadStats();
+          }}
+        />
+      )}
+
+      {/* Modal de Exclusão de Cadastro (CRUD Admissão: Delete) */}
+      {deletingAdmission && (
+        <DeleteConfirmModal
+          isOpen={!!deletingAdmission}
+          title="Excluir Admissão"
+          description={`Tem certeza que deseja excluir permanentemente o cadastro de "${deletingAdmission.name}"? Todos os documentos e histórico deste processo serão removidos.`}
+          itemName={deletingAdmission.name}
+          confirmLabel="Sim, Excluir Admissão"
+          isDeleting={isDeleting}
+          onClose={() => setDeletingAdmission(null)}
+          onConfirm={handleDeleteAdmission}
+        />
+      )}
     </div>
   );
 };

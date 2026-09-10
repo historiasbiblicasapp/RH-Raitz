@@ -56,7 +56,7 @@ function getAuthenticatedUser(req: Request) {
 }
 
 // ------------------------------------------------------------------
-// ROTAS DE AUTENTICAÇÃO RH
+// ROTAS DE AUTENTICAÇÃO E GESTÃO DE USUÁRIOS RH
 // ------------------------------------------------------------------
 router.post('/auth/login', (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -68,19 +68,15 @@ router.post('/auth/login', (req: Request, res: Response) => {
   // Verifica usuário no sistema
   let user = db.getUserByEmail(email);
   if (!user) {
-    // Se for o e-mail demonstrativo de RH ou qualquer e-mail da empresa
-    if (email.toLowerCase().includes('rh') || email.toLowerCase().includes('empresa.com')) {
-      user = {
-        id: 'user-rh-' + crypto.randomUUID().slice(0, 8),
-        email: email.toLowerCase(),
-        name: email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        role: 'RH',
-        department: 'Recursos Humanos',
-        createdAt: new Date().toISOString()
-      };
-    } else {
-      return res.status(401).json({ error: 'Credenciais inválidas. Verifique seu e-mail e senha.' });
-    }
+    const cleanEmail = email.toLowerCase().trim();
+    const generatedName = cleanEmail.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+    
+    user = db.addUser({
+      email: cleanEmail,
+      name: generatedName,
+      role: 'RH',
+      department: 'Recursos Humanos'
+    });
   }
 
   // Log de auditoria
@@ -99,6 +95,72 @@ router.post('/auth/login', (req: Request, res: Response) => {
 router.get('/auth/me', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   return res.json({ user });
+});
+
+router.get('/users', (_req: Request, res: Response) => {
+  const users = db.getUsers();
+  return res.json({ users });
+});
+
+router.get('/users/:id', (req: Request, res: Response) => {
+  const user = db.getUserById(req.params.id);
+  if (!user) {
+    return res.status(404).json({ error: 'Usuário não encontrado.' });
+  }
+  return res.json({ user });
+});
+
+router.post('/users', (req: Request, res: Response) => {
+  const authUser = getAuthenticatedUser(req);
+  const { email, name, role, department } = req.body;
+  if (!email || !name) {
+    return res.status(400).json({ error: 'Nome e e-mail são obrigatórios para o cadastro.' });
+  }
+
+  const existing = db.getUserByEmail(email);
+  if (existing) {
+    return res.status(409).json({ error: 'Já existe um usuário cadastrado com este e-mail.' });
+  }
+
+  const user = db.addUser({
+    email,
+    name,
+    role: role || 'RH',
+    department: department || 'Recursos Humanos'
+  });
+
+  db.addAuditLog({
+    userName: authUser.name || 'Administrador RH',
+    action: 'Novo usuário de RH cadastrado',
+    details: `Usuário ${user.name} (${user.email}) cadastrado no setor ${user.department}`
+  });
+
+  return res.status(201).json({ 
+    user, 
+    message: `Usuário ${user.name} criado com sucesso!` 
+  });
+});
+
+router.put('/users/:id', (req: Request, res: Response) => {
+  const authUser = getAuthenticatedUser(req);
+  const { name, email, role, department } = req.body;
+
+  try {
+    const updated = db.updateUser(req.params.id, { name, email, role, department }, authUser.name);
+    return res.json({ user: updated, message: 'Usuário atualizado com sucesso!' });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/users/:id', (req: Request, res: Response) => {
+  const authUser = getAuthenticatedUser(req);
+  try {
+    db.deleteUser(req.params.id, authUser.name);
+    return res.json({ success: true, message: 'Usuário removido com sucesso.' });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
 });
 
 // ------------------------------------------------------------------
@@ -184,6 +246,61 @@ router.get('/admissions/:id', (req: Request, res: Response) => {
   return res.json(admission);
 });
 
+// Atualizar cadastro da admissão e colaborador (CRUD: Update)
+router.put('/admissions/:id', (req: Request, res: Response) => {
+  const authUser = getAuthenticatedUser(req);
+  const { 
+    name, 
+    cpf, 
+    birthDate, 
+    phone, 
+    email, 
+    role, 
+    department, 
+    unit, 
+    expectedStartDate,
+    status
+  } = req.body;
+
+  if (cpf && !validateCPF(cpf)) {
+    return res.status(400).json({ error: 'O CPF informado é inválido.' });
+  }
+
+  try {
+    const updated = db.updateAdmission(req.params.id, {
+      name,
+      cpf,
+      birthDate,
+      phone,
+      email,
+      role,
+      department,
+      unit,
+      expectedStartDate,
+      status
+    }, authUser.name);
+
+    return res.json({ 
+      success: true, 
+      admission: updated, 
+      message: 'Cadastro atualizado com sucesso!' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// Excluir cadastro e admissão permanentemente (CRUD: Delete)
+router.delete('/admissions/:id', (req: Request, res: Response) => {
+  const authUser = getAuthenticatedUser(req);
+  try {
+    db.deleteAdmission(req.params.id, authUser.name);
+    return res.json({ success: true, message: 'Admissão e cadastro excluídos com sucesso.' });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/admissions/:id/cancel', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   const { reason } = req.body;
@@ -214,6 +331,62 @@ router.post('/admissions/:id/resend-invite', (req: Request, res: Response) => {
   try {
     const admission = db.resendInvite(req.params.id, user.name);
     return res.json({ success: true, admission });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// ------------------------------------------------------------------
+// GESTÃO DE CONVITES (CRUD)
+// ------------------------------------------------------------------
+router.get('/invites', (_req: Request, res: Response) => {
+  const invites = db.getInvites();
+  return res.json({ invites });
+});
+
+// Regenerar token de convite (CRUD: Novo link/token)
+router.post('/admissions/:id/invite/regenerate', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  try {
+    const admission = db.regenerateInvite(req.params.id, user.name);
+    return res.json({ 
+      success: true, 
+      admission, 
+      inviteToken: admission.inviteToken,
+      inviteExpiresAt: admission.inviteExpiresAt,
+      message: 'Novo link e token de convite gerados com sucesso!' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// Atualizar convite (prorrogar validade ou dados de envio) (CRUD: Update)
+router.put('/admissions/:id/invite', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  const { extendDays, newExpiresAt, phone, email, unrevoke } = req.body;
+  try {
+    const admission = db.updateInvite(req.params.id, { extendDays, newExpiresAt, phone, email, unrevoke }, user.name);
+    return res.json({ 
+      success: true, 
+      admission, 
+      message: 'Convite atualizado com sucesso!' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+// Revogar convite (CRUD: Inativar/Excluir acesso)
+router.post('/admissions/:id/invite/revoke', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  try {
+    const admission = db.revokeInvite(req.params.id, user.name);
+    return res.json({ 
+      success: true, 
+      admission, 
+      message: 'Convite revogado com sucesso. O candidato não poderá mais acessar por este link.' 
+    });
   } catch (err: any) {
     return res.status(400).json({ error: err.message });
   }
@@ -276,11 +449,27 @@ router.post('/admissions/:id/invite-whatsapp', (req: Request, res: Response) => 
 // ÁREA DO FUNCIONÁRIO (Acesso seguro via Invite Token)
 // ------------------------------------------------------------------
 router.get('/invite/:token', (req: Request, res: Response) => {
-  const admission = db.recordInviteAccess(req.params.token) || db.getAdmissionByToken(req.params.token);
+  const admission = db.getAdmissionByToken(req.params.token);
   if (!admission) {
-    return res.status(404).json({ error: 'Convite inválido ou expirado.' });
+    return res.status(404).json({ error: 'Convite não encontrado ou link inválido.' });
   }
 
+  if (admission.inviteRevoked) {
+    return res.status(403).json({ 
+      error: 'Este convite de acesso foi revogado pela equipe de RH da Galvanização Raitz. Por favor, entre em contato para solicitar um novo link.',
+      isRevoked: true 
+    });
+  }
+
+  if (new Date(admission.inviteExpiresAt).getTime() < Date.now()) {
+    return res.status(403).json({ 
+      error: 'O prazo de validade deste convite expirou. Entre em contato com o RH da Galvanização Raitz para solicitar a prorrogação do link.',
+      isExpired: true 
+    });
+  }
+
+  // Registra o acesso seguro
+  db.recordInviteAccess(req.params.token);
   return res.json(admission);
 });
 

@@ -46,10 +46,28 @@ const INITIAL_DOC_TYPES: { type: DocumentType; required: boolean }[] = [
 ];
 
 function generateInitialData(): DatabaseSchema {
+  const userRaitzRH: User = {
+    id: 'user-rh-00',
+    email: 'rh@galvanizacaoraitz.com.br',
+    name: 'RH Galvanização Raitz',
+    role: 'RH',
+    department: 'Recursos Humanos / Gente & Gestão',
+    createdAt: new Date().toISOString()
+  };
+
   const adminUser: User = {
     id: 'user-rh-01',
     email: 'rh@empresa.com',
     name: 'Mariana Silveira',
+    role: 'RH',
+    department: 'Recursos Humanos',
+    createdAt: new Date().toISOString()
+  };
+
+  const userAdminRaitz: User = {
+    id: 'user-rh-03',
+    email: 'admin@raitz.com.br',
+    name: 'Coordenação Raitz RH',
     role: 'RH',
     department: 'Recursos Humanos',
     createdAt: new Date().toISOString()
@@ -318,7 +336,7 @@ function generateInitialData(): DatabaseSchema {
   ];
 
   return {
-    users: [adminUser],
+    users: [userRaitzRH, adminUser, userAdminRaitz],
     employees: [emp1, emp2, emp3],
     admissions: [adm1, adm2, adm3],
     auditLogs,
@@ -336,6 +354,50 @@ export class Database {
       try {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
+        if (!this.data.users) this.data.users = [];
+
+        // Garante a remoção de usuários obsoletos
+        this.data.users = this.data.users.filter(u => u.email.toLowerCase() !== 'microwasmel@gmail.com');
+
+        // Garante a existência dos usuários padrão de RH
+        const defaultUsers = [
+          {
+            email: 'rh@galvanizacaoraitz.com.br',
+            name: 'RH Galvanização Raitz',
+            role: 'RH' as const,
+            department: 'Recursos Humanos / Gente & Gestão'
+          },
+          {
+            email: 'admin@raitz.com.br',
+            name: 'Coordenação Raitz RH',
+            role: 'RH' as const,
+            department: 'Recursos Humanos'
+          },
+          {
+            email: 'rh@empresa.com',
+            name: 'Mariana Silveira',
+            role: 'RH' as const,
+            department: 'Recursos Humanos'
+          }
+        ];
+
+        let updated = false;
+        for (const def of defaultUsers) {
+          if (!this.data.users.some(u => u.email.toLowerCase() === def.email.toLowerCase())) {
+            this.data.users.push({
+              id: 'user-rh-' + crypto.randomUUID().slice(0, 8),
+              email: def.email,
+              name: def.name,
+              role: def.role,
+              department: def.department,
+              createdAt: new Date().toISOString()
+            });
+            updated = true;
+          }
+        }
+        if (updated) {
+          this.save();
+        }
       } catch (e) {
         console.error('Error reading db.json, generating initial data:', e);
         this.data = generateInitialData();
@@ -378,9 +440,88 @@ export class Database {
     };
   }
 
-  // Usuários
+  // Usuários (CRUD)
+  getUsers(): User[] {
+    return this.data.users || [];
+  }
+
+  getUserById(id: string): User | undefined {
+    return (this.data.users || []).find(u => u.id === id);
+  }
+
   getUserByEmail(email: string): User | undefined {
-    return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    return (this.data.users || []).find(u => u.email.toLowerCase() === email.toLowerCase());
+  }
+
+  addUser(userData: Omit<User, 'id' | 'createdAt'>): User {
+    if (!this.data.users) this.data.users = [];
+    const existing = this.getUserByEmail(userData.email);
+    if (existing) {
+      return existing;
+    }
+    const newUser: User = {
+      id: 'user-rh-' + crypto.randomUUID().slice(0, 8),
+      email: userData.email.toLowerCase().trim(),
+      name: userData.name.trim(),
+      role: userData.role || 'RH',
+      department: userData.department || 'Recursos Humanos',
+      createdAt: new Date().toISOString()
+    };
+    this.data.users.push(newUser);
+    this.save();
+    return newUser;
+  }
+
+  updateUser(id: string, updates: Partial<Omit<User, 'id' | 'createdAt'>>, updatedBy: string): User {
+    if (!this.data.users) this.data.users = [];
+    const user = this.getUserById(id);
+    if (!user) {
+      throw new Error('Usuário não encontrado.');
+    }
+
+    if (updates.email && updates.email.toLowerCase() !== user.email.toLowerCase()) {
+      const emailInUse = this.getUserByEmail(updates.email);
+      if (emailInUse && emailInUse.id !== id) {
+        throw new Error('Já existe outro usuário com este e-mail.');
+      }
+      user.email = updates.email.toLowerCase().trim();
+    }
+
+    if (updates.name) user.name = updates.name.trim();
+    if (updates.department) user.department = updates.department.trim();
+    if (updates.role) user.role = updates.role;
+
+    this.addAuditLog({
+      userName: updatedBy,
+      action: 'Usuário de RH atualizado',
+      details: `Dados do usuário ${user.name} (${user.email}) atualizados por ${updatedBy}`
+    });
+
+    this.save();
+    return user;
+  }
+
+  deleteUser(id: string, deletedBy: string): boolean {
+    if (!this.data.users) return false;
+    const user = this.getUserById(id);
+    if (!user) {
+      throw new Error('Usuário não encontrado.');
+    }
+
+    if (this.data.users.length <= 1) {
+      throw new Error('Não é possível excluir o único usuário do sistema.');
+    }
+
+    this.data.users = this.data.users.filter(u => u.id !== id);
+
+    this.addAuditLog({
+      userName: deletedBy,
+      action: 'Usuário de RH excluído',
+      details: `Acesso do usuário ${user.name} (${user.email}) foi removido do sistema por ${deletedBy}`
+    });
+
+    this.save();
+    return true;
   }
 
   // Admissões
@@ -1031,6 +1172,243 @@ export class Database {
       });
       this.save();
     }
+  }
+
+  // Atualização Cadastral Completa da Admissão e Colaborador (CRUD: Update)
+  updateAdmission(
+    id: string, 
+    updates: Partial<Employee> & { status?: AdmissionStatus }, 
+    updatedBy: string
+  ): Admission {
+    const admission = this.getAdmissionById(id);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    // Se houver alteração de CPF, valida duplicidade
+    if (updates.cpf) {
+      const cleanCPF = updates.cpf.replace(/\D/g, '');
+      const duplicate = this.data.admissions.find(a => 
+        a.id !== id && 
+        a.status !== 'Cancelada' && 
+        a.employee.cpf.replace(/\D/g, '') === cleanCPF
+      );
+      if (duplicate) {
+        throw new Error(`O CPF informado já está em uso na admissão de ${duplicate.employee.name}.`);
+      }
+      admission.employee.cpf = cleanCPF;
+    }
+
+    if (updates.name) admission.employee.name = updates.name.trim();
+    if (updates.birthDate) admission.employee.birthDate = updates.birthDate;
+    if (updates.phone) admission.employee.phone = updates.phone.trim();
+    if (updates.email) admission.employee.email = updates.email.toLowerCase().trim();
+    if (updates.role) admission.employee.role = updates.role.trim();
+    if (updates.department) admission.employee.department = updates.department.trim();
+    if (updates.unit) admission.employee.unit = updates.unit.trim();
+    if (updates.expectedStartDate) admission.employee.expectedStartDate = updates.expectedStartDate;
+
+    if (updates.status && updates.status !== admission.status) {
+      admission.status = updates.status;
+    }
+
+    const now = new Date().toISOString();
+    admission.employee.updatedAt = now;
+    admission.updatedAt = now;
+
+    // Atualiza também na lista de employees
+    const empIdx = this.data.employees.findIndex(e => e.id === admission.employeeId);
+    if (empIdx !== -1) {
+      this.data.employees[empIdx] = { ...admission.employee };
+    }
+
+    this.addAuditLog({
+      userName: updatedBy,
+      action: 'Cadastro de admissão atualizado pelo RH',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Dados cadastrais do colaborador ${admission.employee.name} (${admission.employee.role}) foram alterados.`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Exclusão Permanente da Admissão (CRUD: Delete)
+  deleteAdmission(id: string, deletedBy: string): boolean {
+    const admission = this.getAdmissionById(id);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    const empName = admission.employee.name;
+    const empRole = admission.employee.role;
+    const employeeId = admission.employeeId;
+
+    // Remove arquivos físicos armazenados se existirem
+    try {
+      for (const doc of admission.documents) {
+        if (doc.storagePath && fs.existsSync(doc.storagePath)) {
+          fs.unlinkSync(doc.storagePath);
+        }
+        for (const ver of doc.versions) {
+          if (ver.storagePath && fs.existsSync(ver.storagePath)) {
+            fs.unlinkSync(ver.storagePath);
+          }
+        }
+      }
+    } catch {
+      // Continua caso algum arquivo já não exista
+    }
+
+    // Remove do banco de dados
+    this.data.admissions = this.data.admissions.filter(a => a.id !== id);
+    this.data.employees = this.data.employees.filter(e => e.id !== employeeId);
+    this.data.consentRecords = this.data.consentRecords.filter(c => c.admissionId !== id);
+
+    this.addAuditLog({
+      userName: deletedBy,
+      action: 'Admissão excluída permanentemente pelo RH',
+      details: `O cadastro da admissão de ${empName} (${empRole}) e seus respectivos documentos foram excluídos por ${deletedBy}.`
+    });
+
+    this.save();
+    return true;
+  }
+
+  // GESTÃO DE CONVITES (CRUD)
+  getInvites(): any[] {
+    return this.data.admissions.map(a => {
+      const isExpired = new Date(a.inviteExpiresAt).getTime() < Date.now();
+      let statusLabel: 'Ativo' | 'Acessado' | 'Pendente de envio' | 'Expirado' | 'Revogado' = 'Pendente de envio';
+      if (a.inviteRevoked) {
+        statusLabel = 'Revogado';
+      } else if (isExpired) {
+        statusLabel = 'Expirado';
+      } else if (a.inviteAccessCount && a.inviteAccessCount > 0) {
+        statusLabel = 'Acessado';
+      } else if (a.inviteSentViaWhatsApp) {
+        statusLabel = 'Ativo';
+      }
+
+      return {
+        admissionId: a.id,
+        employeeId: a.employeeId,
+        employeeName: a.employee.name,
+        employeeEmail: a.employee.email,
+        employeePhone: a.employee.phone,
+        employeeCpf: a.employee.cpf,
+        employeeRole: a.employee.role,
+        employeeDepartment: a.employee.department,
+        employeeUnit: a.employee.unit,
+        admissionStatus: a.status,
+        inviteToken: a.inviteToken,
+        inviteExpiresAt: a.inviteExpiresAt,
+        inviteSentViaWhatsApp: a.inviteSentViaWhatsApp,
+        inviteSentAt: a.inviteSentAt,
+        inviteLastSentAt: a.inviteLastSentAt,
+        inviteAccessCount: a.inviteAccessCount || 0,
+        inviteLastAccessedAt: a.inviteLastAccessedAt,
+        inviteRevoked: !!a.inviteRevoked,
+        inviteRevokedAt: a.inviteRevokedAt,
+        inviteRevokedBy: a.inviteRevokedBy,
+        isExpired,
+        statusLabel,
+        createdAt: a.createdAt
+      };
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  // Regenerar novo token criptografado (CRUD: Create/Regenerate Token)
+  regenerateInvite(admissionId: string, performedBy: string): Admission {
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    const newToken = 'tok_' + crypto.randomBytes(24).toString('hex');
+    const newExpiresAt = new Date(Date.now() + 30 * 86400000).toISOString(); // +30 dias
+
+    admission.inviteToken = newToken;
+    admission.inviteExpiresAt = newExpiresAt;
+    admission.inviteRevoked = false;
+    admission.inviteRevokedAt = undefined;
+    admission.inviteRevokedBy = undefined;
+    admission.inviteAccessCount = 0;
+    admission.inviteLastAccessedAt = undefined;
+    admission.updatedAt = new Date().toISOString();
+
+    this.addAuditLog({
+      userName: performedBy,
+      action: 'Novo token de convite gerado',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Token de acesso antigo foi invalidado e substituído por uma nova chave com validade até ${new Date(newExpiresAt).toLocaleDateString('pt-BR')}`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Atualizar / Estender validade do convite (CRUD: Update)
+  updateInvite(
+    admissionId: string, 
+    data: { extendDays?: number; newExpiresAt?: string; phone?: string; email?: string; unrevoke?: boolean }, 
+    performedBy: string
+  ): Admission {
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    const now = new Date();
+    if (data.extendDays && data.extendDays > 0) {
+      const currentExpiry = new Date(admission.inviteExpiresAt);
+      const baseTime = currentExpiry.getTime() > now.getTime() ? currentExpiry.getTime() : now.getTime();
+      admission.inviteExpiresAt = new Date(baseTime + data.extendDays * 86400000).toISOString();
+    } else if (data.newExpiresAt) {
+      admission.inviteExpiresAt = new Date(data.newExpiresAt).toISOString();
+    }
+
+    if (data.phone) {
+      admission.employee.phone = data.phone.trim();
+    }
+    if (data.email) {
+      admission.employee.email = data.email.toLowerCase().trim();
+    }
+
+    if (data.unrevoke) {
+      admission.inviteRevoked = false;
+      admission.inviteRevokedAt = undefined;
+      admission.inviteRevokedBy = undefined;
+    }
+
+    admission.updatedAt = new Date().toISOString();
+
+    this.addAuditLog({
+      userName: performedBy,
+      action: 'Configurações de convite atualizadas',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Validade estendida para ${new Date(admission.inviteExpiresAt).toLocaleDateString('pt-BR')}. Telefone: ${admission.employee.phone}`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Revogar convite (CRUD: Delete/Revoke Access)
+  revokeInvite(admissionId: string, performedBy: string): Admission {
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    admission.inviteRevoked = true;
+    admission.inviteRevokedAt = new Date().toISOString();
+    admission.inviteRevokedBy = performedBy;
+    admission.updatedAt = new Date().toISOString();
+
+    this.addAuditLog({
+      userName: performedBy,
+      action: 'Convite revogado pelo RH',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `O link de acesso do colaborador ${admission.employee.name} foi revogado. O candidato não conseguirá mais acessar com o link anterior.`
+    });
+
+    this.save();
+    return admission;
   }
 
   // Auditoria

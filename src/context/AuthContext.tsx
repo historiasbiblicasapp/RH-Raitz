@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const demoLogin = async () => {
-    return login('rh@empresa.com', 'senha123');
+    return login('rh@galvanizacaoraitz.com.br', 'senha123');
   };
 
   const logout = () => {

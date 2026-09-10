@@ -7,6 +7,22 @@
       "role": "RH",
       "department": "Recursos Humanos",
       "createdAt": "2026-09-10T12:27:44.765Z"
+    },
+    {
+      "id": "user-rh-03",
+      "email": "admin@raitz.com.br",
+      "name": "Coordenação Raitz RH",
+      "role": "RH",
+      "department": "Recursos Humanos",
+      "createdAt": "2026-09-10T13:03:29.473Z"
+    },
+    {
+      "id": "user-rh-b5ddacb4",
+      "email": "rh@galvanizacaoraitz.com.br",
+      "name": "RH Galvanização Raitz",
+      "role": "RH",
+      "department": "Recursos Humanos / Gente & Gestão",
+      "createdAt": "2026-09-10T13:05:46.968Z"
     }
   ],
   "employees": [
@@ -501,12 +517,12 @@
         "createdAt": "2026-09-10T12:31:33.955Z",
         "updatedAt": "2026-09-10T12:31:33.955Z"
       },
-      "status": "Aguardando documentos",
+      "status": "Em conferência",
       "inviteToken": "tok_0b288d92a31dc1e23f393f8f4a5c288dd1a9ae6d70fb1821",
       "inviteExpiresAt": "2026-10-10T12:31:33.955Z",
       "inviteSentViaWhatsApp": false,
-      "consentGiven": false,
-      "dataConfirmed": false,
+      "consentGiven": true,
+      "dataConfirmed": true,
       "documents": [
         {
           "id": "doc-70881538-246a-470a-b7f7-4d447f36a577",
@@ -546,11 +562,26 @@
           "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
           "documentType": "Comprovante de residência",
           "required": true,
-          "status": "Não enviado",
-          "currentVersion": 0,
-          "versions": [],
+          "status": "Em análise",
+          "currentVersion": 1,
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "Screenshot_20260907_181104_Instagram.jpg",
+              "fileSize": 720373,
+              "mimeType": "image/jpeg",
+              "storagePath": "8f761793-6ad5-49ab-9da8-aab38f635445.jpg",
+              "uploadedAt": "2026-09-10T12:54:40.916Z",
+              "status": "Em análise"
+            }
+          ],
           "createdAt": "2026-09-10T12:31:33.955Z",
-          "updatedAt": "2026-09-10T12:31:33.955Z"
+          "updatedAt": "2026-09-10T12:54:40.916Z",
+          "fileName": "Screenshot_20260907_181104_Instagram.jpg",
+          "fileSize": 720373,
+          "mimeType": "image/jpeg",
+          "storagePath": "8f761793-6ad5-49ab-9da8-aab38f635445.jpg",
+          "uploadedAt": "2026-09-10T12:54:40.916Z"
         },
         {
           "id": "doc-9987eeea-f47d-4baa-bccf-f1d5ef9d0003",
@@ -568,12 +599,80 @@
       "totalDocuments": 5,
       "approvedDocuments": 0,
       "createdAt": "2026-09-10T12:31:33.955Z",
-      "updatedAt": "2026-09-10T12:38:03.520Z",
-      "inviteAccessCount": 2,
-      "inviteLastAccessedAt": "2026-09-10T12:38:03.520Z"
+      "updatedAt": "2026-09-10T12:54:40.916Z",
+      "inviteAccessCount": 6,
+      "inviteLastAccessedAt": "2026-09-10T12:53:39.866Z",
+      "consentDate": "2026-09-10T12:53:57.967Z",
+      "consentTextVersion": "1.0-2025",
+      "dataConfirmedAt": "2026-09-10T12:54:08.731Z"
     }
   ],
   "auditLogs": [
+    {
+      "id": "audit-c9cacf64-2a54-45c4-ba6e-c961b73dc4cb",
+      "timestamp": "2026-09-10T12:54:40.916Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário enviou Comprovante de residência",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "documentType": "Comprovante de residência",
+      "details": "Arquivo Screenshot_20260907_181104_Instagram.jpg (703.5 KB) - Versão 1"
+    },
+    {
+      "id": "audit-ea89eb81-9d1d-423d-a4f1-3e7fd5288225",
+      "timestamp": "2026-09-10T12:54:08.731Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário confirmou seus dados",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Colaborador verificou e validou todos os seus dados cadastrais pré-preenchidos."
+    },
+    {
+      "id": "audit-3e6c85fa-0c46-4879-bc8e-fb7a0b6cc179",
+      "timestamp": "2026-09-10T12:53:57.967Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário aceitou o termo de consentimento LGPD",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Consentimento formal registrado sob a versão 1.0-2025. IP: 2804:388:4247:e43:c81b:836f:18ee:bd6b, 169.254.169.126",
+      "ipAddress": "2804:388:4247:e43:c81b:836f:18ee:bd6b, 169.254.169.126"
+    },
+    {
+      "id": "audit-c0216fc6-e10e-4607-9d97-f2a60b1144b3",
+      "timestamp": "2026-09-10T12:53:39.866Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário acessou o convite",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Acesso nº 6 realizado pelo portal do colaborador."
+    },
+    {
+      "id": "audit-122df8c0-e123-466b-ad29-4557b4601aa5",
+      "timestamp": "2026-09-10T12:53:39.652Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário acessou o convite",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Acesso nº 5 realizado pelo portal do colaborador."
+    },
+    {
+      "id": "audit-094074ca-907b-4943-bfba-3b385576c308",
+      "timestamp": "2026-09-10T12:52:49.431Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário acessou o convite",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Acesso nº 4 realizado pelo portal do colaborador."
+    },
+    {
+      "id": "audit-225a66e1-6e62-45a3-bd05-f0ced4245c9c",
+      "timestamp": "2026-09-10T12:52:49.215Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário acessou o convite",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Acesso nº 3 realizado pelo portal do colaborador."
+    },
     {
       "id": "audit-52a85dc1-9baf-418b-92e8-6d2faa1a1d29",
       "timestamp": "2026-09-10T12:38:03.520Z",
@@ -663,6 +762,16 @@
   ],
   "notifications": [
     {
+      "id": "notif-a3e1cc94-0d1c-4f13-b2d1-e8ddd691c776",
+      "timestamp": "2026-09-10T12:54:40.916Z",
+      "read": false,
+      "title": "Documento recebido para conferência",
+      "message": "WELLINGTON AUGUSTO DOS SANTOS enviou o documento: Comprovante de residência",
+      "type": "document_uploaded",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "link": "/admissoes/adm-9582f771-02d8-40f4-900a-54e870e5d254"
+    },
+    {
       "id": "notif-2238c1e9-abd3-4267-962b-392d4702dba1",
       "timestamp": "2026-09-10T12:31:33.979Z",
       "read": false,
@@ -693,5 +802,17 @@
       "link": "/admissoes/adm-03"
     }
   ],
-  "consentRecords": []
+  "consentRecords": [
+    {
+      "id": "consent-e3bed40c-8060-4665-b564-1efe2a596ac6",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeId": "emp-d2103d1e-cb71-4f77-97c8-eefecb073261",
+      "employeeCpf": "08096017705",
+      "timestamp": "2026-09-10T12:53:57.967Z",
+      "termVersion": "1.0-2025",
+      "termSummary": "Ciência do tratamento de dados pessoais e documentos estritamente para o processo de admissão (LGPD Art. 7º, V e IX)",
+      "ipAddress": "2804:388:4247:e43:c81b:836f:18ee:bd6b, 169.254.169.126",
+      "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Mobile Safari/537.36"
+    }
+  ]
 }
