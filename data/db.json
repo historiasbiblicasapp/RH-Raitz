@@ -1,0 +1,697 @@
+{
+  "users": [
+    {
+      "id": "user-rh-01",
+      "email": "rh@empresa.com",
+      "name": "Mariana Silveira",
+      "role": "RH",
+      "department": "Recursos Humanos",
+      "createdAt": "2026-09-10T12:27:44.765Z"
+    }
+  ],
+  "employees": [
+    {
+      "id": "emp-01",
+      "name": "Lucas Gabriel Albuquerque",
+      "cpf": "12345678901",
+      "birthDate": "1995-04-12",
+      "phone": "11987654321",
+      "email": "lucas.albuquerque@email.com",
+      "role": "Desenvolvedor Frontend Pleno",
+      "department": "Tecnologia da Informação",
+      "unit": "Matriz - São Paulo",
+      "expectedStartDate": "2026-10-01",
+      "createdAt": "2026-09-08T12:27:44.765Z",
+      "updatedAt": "2026-09-08T12:27:44.765Z"
+    },
+    {
+      "id": "emp-02",
+      "name": "Camila Fernandes Rocha",
+      "cpf": "98765432100",
+      "birthDate": "1992-08-25",
+      "phone": "21976543210",
+      "email": "camila.rocha@email.com",
+      "role": "Analista de Recursos Humanos",
+      "department": "Gente e Gestão",
+      "unit": "Filial - Rio de Janeiro",
+      "expectedStartDate": "2026-09-20",
+      "createdAt": "2026-09-06T12:27:44.766Z",
+      "updatedAt": "2026-09-09T12:27:44.766Z"
+    },
+    {
+      "id": "emp-03",
+      "name": "Rodrigo Santoro Maia",
+      "cpf": "45678912300",
+      "birthDate": "1988-11-03",
+      "phone": "31988776655",
+      "email": "rodrigo.maia@email.com",
+      "role": "Engenheiro de Dados",
+      "department": "Tecnologia da Informação",
+      "unit": "Matriz - São Paulo",
+      "expectedStartDate": "2026-09-18",
+      "createdAt": "2026-09-04T12:27:44.766Z",
+      "updatedAt": "2026-09-09T12:27:44.766Z"
+    },
+    {
+      "id": "emp-d2103d1e-cb71-4f77-97c8-eefecb073261",
+      "name": "WELLINGTON AUGUSTO DOS SANTOS",
+      "cpf": "08096017705",
+      "birthDate": "1979-09-26",
+      "phone": "(24) 98811-2657",
+      "email": "wellingtonpoeta@hotmail.com",
+      "role": "Analista de TI Pleno",
+      "department": "Tecnologia da Informação",
+      "unit": "Matriz - Resende",
+      "expectedStartDate": "2023-07-03",
+      "createdAt": "2026-09-10T12:31:33.955Z",
+      "updatedAt": "2026-09-10T12:31:33.955Z"
+    }
+  ],
+  "admissions": [
+    {
+      "id": "adm-01",
+      "employeeId": "emp-01",
+      "employee": {
+        "id": "emp-01",
+        "name": "Lucas Gabriel Albuquerque",
+        "cpf": "12345678901",
+        "birthDate": "1995-04-12",
+        "phone": "11987654321",
+        "email": "lucas.albuquerque@email.com",
+        "role": "Desenvolvedor Frontend Pleno",
+        "department": "Tecnologia da Informação",
+        "unit": "Matriz - São Paulo",
+        "expectedStartDate": "2026-10-01",
+        "createdAt": "2026-09-08T12:27:44.765Z",
+        "updatedAt": "2026-09-08T12:27:44.765Z"
+      },
+      "status": "Aguardando documentos",
+      "inviteToken": "tok_c3b014eafcc4a64a7da9b388b49398ef",
+      "inviteExpiresAt": "2026-09-25T12:27:44.766Z",
+      "inviteSentViaWhatsApp": true,
+      "inviteSentAt": "2026-09-08T12:27:44.766Z",
+      "consentGiven": false,
+      "dataConfirmed": false,
+      "documents": [
+        {
+          "id": "doc-96108780-b51e-480b-a452-10e4758b8024",
+          "admissionId": "adm-01",
+          "documentType": "CPF",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-08T12:27:44.766Z",
+          "updatedAt": "2026-09-08T12:27:44.766Z"
+        },
+        {
+          "id": "doc-1c0d1ada-e87d-4ca7-8eac-dc1c27ef6d28",
+          "admissionId": "adm-01",
+          "documentType": "RG",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-08T12:27:44.766Z",
+          "updatedAt": "2026-09-08T12:27:44.766Z"
+        },
+        {
+          "id": "doc-0ef7f602-829e-431c-8716-a1240767f421",
+          "admissionId": "adm-01",
+          "documentType": "Carteira de Trabalho",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-08T12:27:44.766Z",
+          "updatedAt": "2026-09-08T12:27:44.766Z"
+        },
+        {
+          "id": "doc-06a04f44-5d8e-4e61-864a-36bca5b9fcde",
+          "admissionId": "adm-01",
+          "documentType": "Comprovante de residência",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-08T12:27:44.766Z",
+          "updatedAt": "2026-09-08T12:27:44.766Z"
+        },
+        {
+          "id": "doc-fb0b58de-8f92-4c66-8549-b3d0e3630f91",
+          "admissionId": "adm-01",
+          "documentType": "Diploma/Certificado",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-08T12:27:44.766Z",
+          "updatedAt": "2026-09-08T12:27:44.766Z"
+        }
+      ],
+      "progressPercent": 0,
+      "totalDocuments": 5,
+      "approvedDocuments": 0,
+      "createdAt": "2026-09-08T12:27:44.766Z",
+      "updatedAt": "2026-09-10T12:30:22.063Z",
+      "inviteLastSentAt": "2026-09-10T12:30:22.063Z"
+    },
+    {
+      "id": "adm-02",
+      "employeeId": "emp-02",
+      "employee": {
+        "id": "emp-02",
+        "name": "Camila Fernandes Rocha",
+        "cpf": "98765432100",
+        "birthDate": "1992-08-25",
+        "phone": "21976543210",
+        "email": "camila.rocha@email.com",
+        "role": "Analista de Recursos Humanos",
+        "department": "Gente e Gestão",
+        "unit": "Filial - Rio de Janeiro",
+        "expectedStartDate": "2026-09-20",
+        "createdAt": "2026-09-06T12:27:44.766Z",
+        "updatedAt": "2026-09-09T12:27:44.766Z"
+      },
+      "status": "Em conferência",
+      "inviteToken": "tok_56472144a8a4fc9eecdcfb0e2c40308b",
+      "inviteExpiresAt": "2026-09-25T12:27:44.766Z",
+      "inviteSentViaWhatsApp": true,
+      "inviteSentAt": "2026-09-06T12:27:44.766Z",
+      "consentGiven": true,
+      "consentDate": "2026-09-07T12:27:44.766Z",
+      "consentTextVersion": "1.0-2025",
+      "dataConfirmed": true,
+      "dataConfirmedAt": "2026-09-07T12:27:44.766Z",
+      "documents": [
+        {
+          "id": "doc-ae5e25d6-abac-424c-92b4-8ab66bffc485",
+          "admissionId": "adm-02",
+          "documentType": "CPF",
+          "required": true,
+          "status": "Aprovado",
+          "currentVersion": 1,
+          "fileName": "cpf_camila.pdf",
+          "fileSize": 1420500,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-09T12:27:44.766Z",
+          "reviewedAt": "2026-09-10T12:27:44.766Z",
+          "reviewedBy": "Mariana Silveira (RH)",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "cpf_camila.pdf",
+              "fileSize": 1420500,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-09T12:27:44.766Z",
+              "status": "Aprovado",
+              "reviewedAt": "2026-09-10T12:27:44.766Z",
+              "reviewedBy": "Mariana Silveira (RH)"
+            }
+          ],
+          "createdAt": "2026-09-06T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-eb826642-13c6-4cd5-ba15-1f2f5c10e493",
+          "admissionId": "adm-02",
+          "documentType": "RG",
+          "required": true,
+          "status": "Em análise",
+          "currentVersion": 1,
+          "fileName": "rg_camila.pdf",
+          "fileSize": 1420500,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-09T12:27:44.766Z",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "rg_camila.pdf",
+              "fileSize": 1420500,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-09T12:27:44.766Z",
+              "status": "Em análise"
+            }
+          ],
+          "createdAt": "2026-09-06T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-58e0dd06-3ede-493f-8dff-b36a8e8441b3",
+          "admissionId": "adm-02",
+          "documentType": "Carteira de Trabalho",
+          "required": true,
+          "status": "Em análise",
+          "currentVersion": 1,
+          "fileName": "carteira_de_trabalho_camila.pdf",
+          "fileSize": 1420500,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-09T12:27:44.766Z",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "carteira_de_trabalho_camila.pdf",
+              "fileSize": 1420500,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-09T12:27:44.766Z",
+              "status": "Em análise"
+            }
+          ],
+          "createdAt": "2026-09-06T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-4b8b8473-f37b-4b31-826b-8113b4f96aed",
+          "admissionId": "adm-02",
+          "documentType": "Comprovante de residência",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-06T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-502d66e1-c60f-4fb7-94d2-9898f6583373",
+          "admissionId": "adm-02",
+          "documentType": "Diploma/Certificado",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-06T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        }
+      ],
+      "progressPercent": 20,
+      "totalDocuments": 5,
+      "approvedDocuments": 1,
+      "createdAt": "2026-09-06T12:27:44.766Z",
+      "updatedAt": "2026-09-09T12:27:44.766Z"
+    },
+    {
+      "id": "adm-03",
+      "employeeId": "emp-03",
+      "employee": {
+        "id": "emp-03",
+        "name": "Rodrigo Santoro Maia",
+        "cpf": "45678912300",
+        "birthDate": "1988-11-03",
+        "phone": "31988776655",
+        "email": "rodrigo.maia@email.com",
+        "role": "Engenheiro de Dados",
+        "department": "Tecnologia da Informação",
+        "unit": "Matriz - São Paulo",
+        "expectedStartDate": "2026-09-18",
+        "createdAt": "2026-09-04T12:27:44.766Z",
+        "updatedAt": "2026-09-09T12:27:44.766Z"
+      },
+      "status": "Pendência",
+      "inviteToken": "tok_e7e7ab7c20888b8df5f3c56b3699cdbc",
+      "inviteExpiresAt": "2026-09-25T12:27:44.767Z",
+      "inviteSentViaWhatsApp": true,
+      "inviteSentAt": "2026-09-04T12:27:44.767Z",
+      "consentGiven": true,
+      "consentDate": "2026-09-05T12:27:44.767Z",
+      "consentTextVersion": "1.0-2025",
+      "dataConfirmed": true,
+      "dataConfirmedAt": "2026-09-05T12:27:44.767Z",
+      "documents": [
+        {
+          "id": "doc-eda70dde-b10b-4ce8-ad92-2872f24f8ea0",
+          "admissionId": "adm-03",
+          "documentType": "CPF",
+          "required": true,
+          "status": "Aprovado",
+          "currentVersion": 1,
+          "fileName": "cpf_rodrigo.pdf",
+          "fileSize": 1024000,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-07T12:27:44.766Z",
+          "reviewedAt": "2026-09-09T12:27:44.766Z",
+          "reviewedBy": "Mariana Silveira (RH)",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "cpf_rodrigo.pdf",
+              "fileSize": 1024000,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-07T12:27:44.766Z",
+              "status": "Aprovado",
+              "reviewedAt": "2026-09-09T12:27:44.766Z",
+              "reviewedBy": "Mariana Silveira (RH)"
+            }
+          ],
+          "createdAt": "2026-09-04T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-2d83a70f-d878-493f-9cee-c04cbc1bcada",
+          "admissionId": "adm-03",
+          "documentType": "RG",
+          "required": true,
+          "status": "Aprovado",
+          "currentVersion": 1,
+          "fileName": "rg_rodrigo.pdf",
+          "fileSize": 1024000,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-07T12:27:44.766Z",
+          "reviewedAt": "2026-09-09T12:27:44.766Z",
+          "reviewedBy": "Mariana Silveira (RH)",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "rg_rodrigo.pdf",
+              "fileSize": 1024000,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-07T12:27:44.766Z",
+              "status": "Aprovado",
+              "reviewedAt": "2026-09-09T12:27:44.766Z",
+              "reviewedBy": "Mariana Silveira (RH)"
+            }
+          ],
+          "createdAt": "2026-09-04T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-a432f6e3-98a2-4441-bfda-ddea98c892f7",
+          "admissionId": "adm-03",
+          "documentType": "Carteira de Trabalho",
+          "required": true,
+          "status": "Aprovado",
+          "currentVersion": 1,
+          "fileName": "carteira_de_trabalho_rodrigo.pdf",
+          "fileSize": 1024000,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-07T12:27:44.766Z",
+          "reviewedAt": "2026-09-09T12:27:44.766Z",
+          "reviewedBy": "Mariana Silveira (RH)",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "carteira_de_trabalho_rodrigo.pdf",
+              "fileSize": 1024000,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-07T12:27:44.766Z",
+              "status": "Aprovado",
+              "reviewedAt": "2026-09-09T12:27:44.766Z",
+              "reviewedBy": "Mariana Silveira (RH)"
+            }
+          ],
+          "createdAt": "2026-09-04T12:27:44.766Z",
+          "updatedAt": "2026-09-09T12:27:44.766Z"
+        },
+        {
+          "id": "doc-508a758b-9303-44e1-a3f3-05da0b096ab4",
+          "admissionId": "adm-03",
+          "documentType": "Comprovante de residência",
+          "required": true,
+          "status": "Rejeitado",
+          "currentVersion": 1,
+          "fileName": "comprovante_de_residência_rodrigo.pdf",
+          "fileSize": 1024000,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-07T12:27:44.766Z",
+          "reviewedAt": "2026-09-09T12:27:44.766Z",
+          "reviewedBy": "Mariana Silveira (RH)",
+          "rejectionReason": "Documento ilegível",
+          "rejectionNotes": "Comprovante emitido há mais de 90 dias e com foto embaçada. Favor enviar conta recente de água ou energia com boa resolução.",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "comprovante_de_residência_rodrigo.pdf",
+              "fileSize": 1024000,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-07T12:27:44.767Z",
+              "status": "Rejeitado",
+              "reviewedAt": "2026-09-09T12:27:44.767Z",
+              "reviewedBy": "Mariana Silveira (RH)",
+              "rejectionReason": "Documento ilegível",
+              "rejectionNotes": "Comprovante emitido há mais de 90 dias e com foto embaçada."
+            }
+          ],
+          "createdAt": "2026-09-04T12:27:44.767Z",
+          "updatedAt": "2026-09-09T12:27:44.767Z"
+        },
+        {
+          "id": "doc-33bbde67-4ab7-4b4c-9216-a58fddc52afd",
+          "admissionId": "adm-03",
+          "documentType": "Diploma/Certificado",
+          "required": true,
+          "status": "Aprovado",
+          "currentVersion": 1,
+          "fileName": "diploma_certificado_rodrigo.pdf",
+          "fileSize": 1024000,
+          "mimeType": "application/pdf",
+          "storagePath": "sample-file.pdf",
+          "uploadedAt": "2026-09-07T12:27:44.767Z",
+          "reviewedAt": "2026-09-09T12:27:44.767Z",
+          "reviewedBy": "Mariana Silveira (RH)",
+          "versions": [
+            {
+              "version": 1,
+              "fileName": "diploma_certificado_rodrigo.pdf",
+              "fileSize": 1024000,
+              "mimeType": "application/pdf",
+              "storagePath": "sample-file.pdf",
+              "uploadedAt": "2026-09-07T12:27:44.767Z",
+              "status": "Aprovado",
+              "reviewedAt": "2026-09-09T12:27:44.767Z",
+              "reviewedBy": "Mariana Silveira (RH)"
+            }
+          ],
+          "createdAt": "2026-09-04T12:27:44.767Z",
+          "updatedAt": "2026-09-09T12:27:44.767Z"
+        }
+      ],
+      "progressPercent": 80,
+      "totalDocuments": 5,
+      "approvedDocuments": 4,
+      "createdAt": "2026-09-04T12:27:44.767Z",
+      "updatedAt": "2026-09-09T12:27:44.767Z"
+    },
+    {
+      "id": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeId": "emp-d2103d1e-cb71-4f77-97c8-eefecb073261",
+      "employee": {
+        "id": "emp-d2103d1e-cb71-4f77-97c8-eefecb073261",
+        "name": "WELLINGTON AUGUSTO DOS SANTOS",
+        "cpf": "08096017705",
+        "birthDate": "1979-09-26",
+        "phone": "(24) 98811-2657",
+        "email": "wellingtonpoeta@hotmail.com",
+        "role": "Analista de TI Pleno",
+        "department": "Tecnologia da Informação",
+        "unit": "Matriz - Resende",
+        "expectedStartDate": "2023-07-03",
+        "createdAt": "2026-09-10T12:31:33.955Z",
+        "updatedAt": "2026-09-10T12:31:33.955Z"
+      },
+      "status": "Aguardando documentos",
+      "inviteToken": "tok_0b288d92a31dc1e23f393f8f4a5c288dd1a9ae6d70fb1821",
+      "inviteExpiresAt": "2026-10-10T12:31:33.955Z",
+      "inviteSentViaWhatsApp": false,
+      "consentGiven": false,
+      "dataConfirmed": false,
+      "documents": [
+        {
+          "id": "doc-70881538-246a-470a-b7f7-4d447f36a577",
+          "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+          "documentType": "CPF",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-10T12:31:33.955Z",
+          "updatedAt": "2026-09-10T12:31:33.955Z"
+        },
+        {
+          "id": "doc-111026f2-0f29-4bd4-8c73-1fe309cda7e8",
+          "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+          "documentType": "RG",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-10T12:31:33.955Z",
+          "updatedAt": "2026-09-10T12:31:33.955Z"
+        },
+        {
+          "id": "doc-d811362f-2dd5-4f5f-9976-deaf90a369cb",
+          "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+          "documentType": "Carteira de Trabalho",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-10T12:31:33.955Z",
+          "updatedAt": "2026-09-10T12:31:33.955Z"
+        },
+        {
+          "id": "doc-6ec5d665-e5ba-41ca-821e-fdd78d1d63d6",
+          "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+          "documentType": "Comprovante de residência",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-10T12:31:33.955Z",
+          "updatedAt": "2026-09-10T12:31:33.955Z"
+        },
+        {
+          "id": "doc-9987eeea-f47d-4baa-bccf-f1d5ef9d0003",
+          "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+          "documentType": "Diploma/Certificado",
+          "required": true,
+          "status": "Não enviado",
+          "currentVersion": 0,
+          "versions": [],
+          "createdAt": "2026-09-10T12:31:33.955Z",
+          "updatedAt": "2026-09-10T12:31:33.955Z"
+        }
+      ],
+      "progressPercent": 0,
+      "totalDocuments": 5,
+      "approvedDocuments": 0,
+      "createdAt": "2026-09-10T12:31:33.955Z",
+      "updatedAt": "2026-09-10T12:38:03.520Z",
+      "inviteAccessCount": 2,
+      "inviteLastAccessedAt": "2026-09-10T12:38:03.520Z"
+    }
+  ],
+  "auditLogs": [
+    {
+      "id": "audit-52a85dc1-9baf-418b-92e8-6d2faa1a1d29",
+      "timestamp": "2026-09-10T12:38:03.520Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário acessou o convite",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Acesso nº 2 realizado pelo portal do colaborador."
+    },
+    {
+      "id": "audit-cc9146d6-377e-4090-8fa7-58958e88cd59",
+      "timestamp": "2026-09-10T12:34:55.567Z",
+      "userName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "action": "Funcionário acessou o convite",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Acesso nº 1 realizado pelo portal do colaborador."
+    },
+    {
+      "id": "audit-60cf902f-e274-40cc-be35-be8f6149a7ad",
+      "timestamp": "2026-09-10T12:31:33.978Z",
+      "userName": "Sistema",
+      "action": "Convite gerado",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Token de acesso criptografado gerado com validade até 10/10/2026"
+    },
+    {
+      "id": "audit-e560285e-3fb1-420b-8cd1-8683725229bf",
+      "timestamp": "2026-09-10T12:31:33.955Z",
+      "userName": "Mariana Silveira",
+      "action": "RH criou uma nova admissão",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "employeeName": "WELLINGTON AUGUSTO DOS SANTOS",
+      "details": "Admissão cadastrada para o cargo Analista de TI Pleno (Tecnologia da Informação - Matriz - Resende)"
+    },
+    {
+      "id": "audit-ad4d9173-f851-4a6a-b12e-8ecd555bea6d",
+      "timestamp": "2026-09-10T12:30:22.064Z",
+      "userName": "Mariana Silveira",
+      "action": "Convite reenviado pelo RH",
+      "admissionId": "adm-01",
+      "employeeName": "Lucas Gabriel Albuquerque",
+      "details": "Link de convite reenviado para Lucas Gabriel Albuquerque (11987654321) via WhatsApp/E-mail."
+    },
+    {
+      "id": "audit-01",
+      "timestamp": "2026-09-04T12:27:44.767Z",
+      "userName": "Mariana Silveira (RH)",
+      "action": "RH criou uma nova admissão",
+      "employeeName": "Rodrigo Santoro Maia",
+      "details": "Cadastro de admissão iniciado para o cargo Engenheiro de Dados"
+    },
+    {
+      "id": "audit-02",
+      "timestamp": "2026-09-05T12:27:44.767Z",
+      "userName": "Rodrigo Santoro Maia",
+      "action": "Funcionário acessou o convite",
+      "employeeName": "Rodrigo Santoro Maia",
+      "details": "Acesso realizado pelo navegador móvel via token individual"
+    },
+    {
+      "id": "audit-03",
+      "timestamp": "2026-09-05T12:27:44.767Z",
+      "userName": "Rodrigo Santoro Maia",
+      "action": "Funcionário deu consentimento LGPD",
+      "employeeName": "Rodrigo Santoro Maia",
+      "details": "Ciência e consentimento registrado para tratamento de dados admissionais (Termo v1.0)"
+    },
+    {
+      "id": "audit-04",
+      "timestamp": "2026-09-05T12:27:44.767Z",
+      "userName": "Rodrigo Santoro Maia",
+      "action": "Funcionário confirmou seus dados",
+      "employeeName": "Rodrigo Santoro Maia",
+      "details": "Conferência de dados cadastrais finalizada sem divergências apontadas"
+    },
+    {
+      "id": "audit-05",
+      "timestamp": "2026-09-09T12:27:44.767Z",
+      "userName": "Mariana Silveira (RH)",
+      "action": "RH rejeitou Comprovante de residência",
+      "employeeName": "Rodrigo Santoro Maia",
+      "documentType": "Comprovante de residência",
+      "details": "Motivo: Documento ilegível. Observação: Comprovante emitido há mais de 90 dias e com foto embaçada."
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-2238c1e9-abd3-4267-962b-392d4702dba1",
+      "timestamp": "2026-09-10T12:31:33.979Z",
+      "read": false,
+      "title": "Nova admissão criada",
+      "message": "Admissão de WELLINGTON AUGUSTO DOS SANTOS (Analista de TI Pleno) foi criada com sucesso.",
+      "type": "admission_created",
+      "admissionId": "adm-9582f771-02d8-40f4-900a-54e870e5d254",
+      "link": "/admissoes/adm-9582f771-02d8-40f4-900a-54e870e5d254"
+    },
+    {
+      "id": "notif-01",
+      "timestamp": "2026-09-09T12:27:44.767Z",
+      "title": "Documento aguardando conferência",
+      "message": "Camila Fernandes Rocha enviou 3 novos documentos para análise.",
+      "type": "document_uploaded",
+      "admissionId": "adm-02",
+      "read": false,
+      "link": "/admissoes/adm-02"
+    },
+    {
+      "id": "notif-02",
+      "timestamp": "2026-09-09T12:27:44.767Z",
+      "title": "Pendência gerada",
+      "message": "Comprovante de residência de Rodrigo Santoro Maia foi recusado.",
+      "type": "pending",
+      "admissionId": "adm-03",
+      "read": true,
+      "link": "/admissoes/adm-03"
+    }
+  ],
+  "consentRecords": []
+}

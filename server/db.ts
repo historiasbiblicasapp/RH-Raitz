@@ -734,6 +734,11 @@ export class Database {
 
   // Regra central de status da admissão
   private recalculateAdmissionStatus(admission: Admission) {
+    // Se cancelada, não altera o status automaticamente
+    if (admission.status === 'Cancelada') {
+      return;
+    }
+
     const requiredDocs = admission.documents.filter(d => d.required);
     const approvedDocs = requiredDocs.filter(d => d.status === 'Aprovado');
     const rejectedDocs = requiredDocs.filter(d => d.status === 'Rejeitado');
@@ -742,10 +747,12 @@ export class Database {
 
     admission.approvedDocuments = approvedDocs.length;
     admission.totalDocuments = requiredDocs.length;
-    admission.progressPercent = Math.round((approvedDocs.length / requiredDocs.length) * 100);
+    admission.progressPercent = requiredDocs.length > 0
+      ? Math.round((approvedDocs.length / requiredDocs.length) * 100)
+      : 100;
 
-    // REGRA 25: Uma admissão somente poderá ficar como "CONCLUÍDA" quando TODOS os documentos obrigatórios estiverem "APROVADOS"
-    if (approvedDocs.length === requiredDocs.length) {
+    // REGRA: Uma admissão só pode ser "CONCLUÍDA" se todos os obrigatórios estiverem aprovados
+    if (approvedDocs.length === requiredDocs.length && requiredDocs.length > 0) {
       admission.status = 'Concluída';
       if (!admission.completedAt) {
         admission.completedAt = new Date().toISOString();
@@ -764,19 +771,266 @@ export class Database {
           link: `/admissoes/${admission.id}`
         });
       }
-    } else if (rejectedDocs.length > 0) {
-      // Se possui qualquer documento rejeitado -> Pendência
+    } else if (rejectedDocs.length > 0 || (admission.correctionRequest && !admission.correctionRequest.resolved)) {
+      // Se possui qualquer documento rejeitado ou correção pendente -> Pendência
       admission.status = 'Pendência';
     } else if (inReviewDocs.length > 0) {
       // Se há documentos aguardando análise -> Em conferência
       admission.status = 'Em conferência';
-    } else if (notSentDocs.length === requiredDocs.length) {
-      admission.status = 'Aguardando documentos';
+    } else if (admission.status === 'Rascunho' && !admission.inviteSentViaWhatsApp && notSentDocs.length === requiredDocs.length) {
+      admission.status = 'Rascunho';
     } else {
       admission.status = 'Aguardando documentos';
     }
 
     admission.updatedAt = new Date().toISOString();
+  }
+
+  // Filtragem, busca e paginação de admissões para o RH
+  getAdmissionsFiltered(options: {
+    search?: string;
+    status?: string;
+    role?: string;
+    department?: string;
+    unit?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    let list = [...this.data.admissions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Coleta filtros disponíveis antes de filtrar
+    const roles = Array.from(new Set(this.data.admissions.map(a => a.employee.role).filter(Boolean))).sort();
+    const departments = Array.from(new Set(this.data.admissions.map(a => a.employee.department).filter(Boolean))).sort();
+    const units = Array.from(new Set(this.data.admissions.map(a => a.employee.unit).filter(Boolean))).sort();
+    const statuses = [
+      'Rascunho',
+      'Aguardando documentos',
+      'Em conferência',
+      'Pendência',
+      'Concluída',
+      'Cancelada'
+    ];
+
+    // 1. Busca textual (nome, cpf, email, telefone)
+    if (options.search && options.search.trim()) {
+      const term = options.search.trim().toLowerCase();
+      const cleanDigits = term.replace(/\D/g, '');
+      list = list.filter(a => {
+        const emp = a.employee;
+        const nameMatch = emp.name.toLowerCase().includes(term);
+        const emailMatch = emp.email.toLowerCase().includes(term);
+        const phoneMatch = cleanDigits ? emp.phone.replace(/\D/g, '').includes(cleanDigits) : emp.phone.includes(term);
+        const cpfMatch = cleanDigits ? emp.cpf.replace(/\D/g, '').includes(cleanDigits) : false;
+        const roleMatch = emp.role.toLowerCase().includes(term);
+        return nameMatch || emailMatch || phoneMatch || cpfMatch || roleMatch;
+      });
+    }
+
+    // 2. Filtro de status
+    if (options.status && options.status !== 'TODOS' && options.status !== 'Todos') {
+      list = list.filter(a => a.status === options.status);
+    }
+
+    // 3. Filtro de cargo
+    if (options.role && options.role !== 'TODOS' && options.role !== 'Todos') {
+      list = list.filter(a => a.employee.role === options.role);
+    }
+
+    // 4. Filtro de setor
+    if (options.department && options.department !== 'TODOS' && options.department !== 'Todos') {
+      list = list.filter(a => a.employee.department === options.department);
+    }
+
+    // 5. Filtro de unidade
+    if (options.unit && options.unit !== 'TODOS' && options.unit !== 'Todos') {
+      list = list.filter(a => a.employee.unit === options.unit);
+    }
+
+    // 6. Filtro por período (data início / fim)
+    if (options.startDate) {
+      const start = new Date(options.startDate + 'T00:00:00').getTime();
+      list = list.filter(a => new Date(a.createdAt).getTime() >= start);
+    }
+    if (options.endDate) {
+      const end = new Date(options.endDate + 'T23:59:59').getTime();
+      list = list.filter(a => new Date(a.createdAt).getTime() <= end);
+    }
+
+    const total = list.length;
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.max(1, Number(options.limit) || 10);
+    const totalPages = Math.ceil(total / limit) || 1;
+    const offset = (page - 1) * limit;
+    const paginated = list.slice(offset, offset + limit);
+
+    return {
+      admissions: paginated,
+      total,
+      page,
+      limit,
+      totalPages,
+      filters: {
+        roles,
+        departments,
+        units,
+        statuses
+      }
+    };
+  }
+
+  // Cancelamento formal de admissão pelo RH com motivo obrigatório
+  cancelAdmission(id: string, reason: string, cancelledBy: string): Admission {
+    const admission = this.getAdmissionById(id);
+    if (!admission) throw new Error('Admissão não encontrada.');
+    if (admission.status === 'Concluída') {
+      throw new Error('Não é possível cancelar uma admissão já concluída.');
+    }
+    if (!reason || !reason.trim()) {
+      throw new Error('O motivo do cancelamento é obrigatório.');
+    }
+
+    const now = new Date().toISOString();
+    admission.status = 'Cancelada';
+    admission.cancelledAt = now;
+    admission.cancelledBy = cancelledBy;
+    admission.cancellationReason = reason.trim();
+    admission.updatedAt = now;
+
+    this.addAuditLog({
+      userName: cancelledBy,
+      action: 'RH cancelou a admissão',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Admissão cancelada. Motivo obrigatório registrado: "${reason.trim()}"`
+    });
+
+    this.addNotification({
+      title: 'Admissão cancelada',
+      message: `A admissão de ${admission.employee.name} foi cancelada por ${cancelledBy}. Motivo: ${reason.trim()}`,
+      type: 'pending',
+      admissionId: admission.id,
+      link: `/admissoes/${admission.id}`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Conclusão formal de admissão pelo RH (validação de 100% dos obrigatórios)
+  completeAdmission(id: string, completedBy: string): Admission {
+    const admission = this.getAdmissionById(id);
+    if (!admission) throw new Error('Admissão não encontrada.');
+    if (admission.status === 'Cancelada') {
+      throw new Error('Esta admissão está cancelada e não pode ser concluída.');
+    }
+
+    const requiredDocs = admission.documents.filter(d => d.required);
+    const unapproved = requiredDocs.filter(d => d.status !== 'Aprovado');
+    if (unapproved.length > 0) {
+      const names = unapproved.map(d => `${d.documentType} (${d.status})`).join(', ');
+      throw new Error(`Esta admissão ainda possui pendências e não pode ser concluída. Documentos pendentes: ${names}`);
+    }
+
+    const now = new Date().toISOString();
+    admission.status = 'Concluída';
+    admission.completedAt = now;
+    admission.completedBy = completedBy;
+    admission.updatedAt = now;
+
+    this.addAuditLog({
+      userName: completedBy,
+      action: 'RH concluiu a admissão',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: 'Processo admissional concluído com sucesso. Todos os documentos obrigatórios foram conferidos e aprovados.'
+    });
+
+    this.addNotification({
+      title: 'Admissão concluída com sucesso',
+      message: `A admissão de ${admission.employee.name} foi formalmente concluída por ${completedBy}.`,
+      type: 'completed',
+      admissionId: admission.id,
+      link: `/admissoes/${admission.id}`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Reenvio de convite com registro no histórico
+  resendInvite(id: string, userName: string): Admission {
+    const admission = this.getAdmissionById(id);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    const now = new Date().toISOString();
+    admission.inviteLastSentAt = now;
+    if (admission.status === 'Rascunho') {
+      admission.status = 'Aguardando documentos';
+    }
+    admission.inviteSentViaWhatsApp = true;
+    admission.updatedAt = now;
+
+    this.addAuditLog({
+      userName,
+      action: 'Convite reenviado pelo RH',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Link de convite reenviado para ${admission.employee.name} (${admission.employee.phone}) via WhatsApp/E-mail.`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Registro de acesso ao convite pelo colaborador
+  recordInviteAccess(token: string): Admission | undefined {
+    const admission = this.getAdmissionByToken(token);
+    if (!admission) return undefined;
+
+    const now = new Date().toISOString();
+    admission.inviteAccessCount = (admission.inviteAccessCount || 0) + 1;
+    admission.inviteLastAccessedAt = now;
+    admission.updatedAt = now;
+
+    this.addAuditLog({
+      userName: admission.employee.name,
+      action: 'Funcionário acessou o convite',
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Acesso nº ${admission.inviteAccessCount} realizado pelo portal do colaborador.`
+    });
+
+    this.save();
+    return admission;
+  }
+
+  // Registro de auditoria ao visualizar ou baixar documento
+  recordDocumentAction(documentId: string, action: string, userName: string, details?: string) {
+    let foundAdm: Admission | undefined;
+    let foundDoc: AdmissionDocument | undefined;
+
+    for (const adm of this.data.admissions) {
+      const doc = adm.documents.find(d => d.id === documentId);
+      if (doc) {
+        foundAdm = adm;
+        foundDoc = doc;
+        break;
+      }
+    }
+
+    if (foundAdm && foundDoc) {
+      this.addAuditLog({
+        userName,
+        action,
+        admissionId: foundAdm.id,
+        employeeName: foundAdm.employee.name,
+        documentType: foundDoc.documentType,
+        details: details || `Ação ${action} no documento ${foundDoc.documentType} (V${foundDoc.currentVersion})`
+      });
+      this.save();
+    }
   }
 
   // Auditoria

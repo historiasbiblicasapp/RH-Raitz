@@ -102,6 +102,25 @@ router.get('/auth/me', (req: Request, res: Response) => {
 });
 
 // ------------------------------------------------------------------
+// CONFIGURAÇÕES DO SISTEMA E DETECÇÃO DE URL PÚBLICA
+// ------------------------------------------------------------------
+router.get('/system-config', (req: Request, res: Response) => {
+  const forwardedHost = (req.headers['x-forwarded-host'] as string) || '';
+  const forwardedProto = (req.headers['x-forwarded-proto'] as string) || 'https';
+  const rawHost = forwardedHost || req.headers.host || 'localhost:3000';
+  const detectedUrl = `${forwardedProto}://${rawHost}`;
+  const envUrl = process.env.APP_URL || process.env.PUBLIC_APP_URL || '';
+  const isLocalhost = rawHost.includes('localhost') || rawHost.includes('127.0.0.1');
+
+  return res.json({
+    appUrl: envUrl || detectedUrl,
+    detectedUrl,
+    envUrl,
+    isLocalhost
+  });
+});
+
+// ------------------------------------------------------------------
 // DASHBOARD & ESTATÍSTICAS
 // ------------------------------------------------------------------
 router.get('/dashboard/stats', (_req: Request, res: Response) => {
@@ -113,10 +132,32 @@ router.get('/dashboard/stats', (_req: Request, res: Response) => {
 // GESTÃO DE ADMISSÕES (RH)
 // ------------------------------------------------------------------
 router.get('/admissions', (req: Request, res: Response) => {
-  const admissions = db.getAdmissions();
-  
-  // Por privacidade LGPD na listagem pública, mascarar CPF
-  const sanitized = admissions.map(a => ({
+  const {
+    search,
+    status,
+    role,
+    department,
+    unit,
+    startDate,
+    endDate,
+    page,
+    limit
+  } = req.query;
+
+  const result = db.getAdmissionsFiltered({
+    search: search as string | undefined,
+    status: status as string | undefined,
+    role: role as string | undefined,
+    department: department as string | undefined,
+    unit: unit as string | undefined,
+    startDate: startDate as string | undefined,
+    endDate: endDate as string | undefined,
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined
+  });
+
+  // LGPD: Mascara o CPF para visualização segura
+  const sanitized = result.admissions.map(a => ({
     ...a,
     employee: {
       ...a.employee,
@@ -124,7 +165,15 @@ router.get('/admissions', (req: Request, res: Response) => {
     }
   }));
 
-  return res.json(sanitized);
+  // Retorna com metadados de paginação e filtros
+  return res.json({
+    admissions: sanitized,
+    total: result.total,
+    page: result.page,
+    limit: result.limit,
+    totalPages: result.totalPages,
+    filters: result.filters
+  });
 });
 
 router.get('/admissions/:id', (req: Request, res: Response) => {
@@ -133,6 +182,41 @@ router.get('/admissions/:id', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Admissão não encontrada.' });
   }
   return res.json(admission);
+});
+
+router.post('/admissions/:id/cancel', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  const { reason } = req.body;
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'O motivo do cancelamento é obrigatório.' });
+  }
+
+  try {
+    const admission = db.cancelAdmission(req.params.id, reason, user.name);
+    return res.json({ success: true, admission });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/admissions/:id/complete', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  try {
+    const admission = db.completeAdmission(req.params.id, user.name);
+    return res.json({ success: true, admission });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/admissions/:id/resend-invite', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  try {
+    const admission = db.resendInvite(req.params.id, user.name);
+    return res.json({ success: true, admission });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message });
+  }
 });
 
 router.post('/admissions', (req: Request, res: Response) => {
@@ -192,19 +276,10 @@ router.post('/admissions/:id/invite-whatsapp', (req: Request, res: Response) => 
 // ÁREA DO FUNCIONÁRIO (Acesso seguro via Invite Token)
 // ------------------------------------------------------------------
 router.get('/invite/:token', (req: Request, res: Response) => {
-  const admission = db.getAdmissionByToken(req.params.token);
+  const admission = db.recordInviteAccess(req.params.token) || db.getAdmissionByToken(req.params.token);
   if (!admission) {
     return res.status(404).json({ error: 'Convite inválido ou expirado.' });
   }
-
-  // Registra auditoria do primeiro acesso ou acesso do funcionário
-  db.addAuditLog({
-    userName: admission.employee.name,
-    action: 'Funcionário acessou o convite',
-    admissionId: admission.id,
-    employeeName: admission.employee.name,
-    details: 'Acesso realizado pelo portal do colaborador'
-  });
 
   return res.json(admission);
 });

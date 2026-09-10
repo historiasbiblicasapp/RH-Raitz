@@ -3,41 +3,89 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, 
   MessageCircle, 
-  Share2, 
-  FileText, 
-  AlertTriangle, 
+  Copy, 
+  Check, 
+  MoreVertical, 
+  XCircle, 
   CheckCircle2, 
+  AlertTriangle, 
+  FileText, 
   Clock, 
-  ExternalLink,
+  ExternalLink, 
   Shield, 
   History, 
-  Eye,
-  Check,
-  UserCheck
+  Eye, 
+  User, 
+  Building, 
+  Calendar, 
+  Phone, 
+  Mail, 
+  Send, 
+  Ban, 
+  RefreshCw, 
+  AlertCircle,
+  Briefcase,
+  Layers,
+  FileCheck2,
+  X,
+  UserCheck,
+  ArrowUpRight,
+  Smartphone
 } from 'lucide-react';
-import { Admission, AdmissionDocument } from '../types/index.ts';
+import { Admission, AdmissionDocument, AuditLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { DocumentReviewModal } from '../components/DocumentReviewModal.tsx';
 import { InviteModal } from '../components/InviteModal.tsx';
+import { MobileSimulatorModal } from '../components/MobileSimulatorModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
+
+type ActiveTab = 'resumo' | 'dados' | 'documentos' | 'pendencias' | 'historico' | 'convite';
 
 export const AdmissionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const [admission, setAdmission] = useState<Admission | null>(null);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('resumo');
+
+  // Modais de ação
   const [selectedDocForReview, setSelectedDocForReview] = useState<AdmissionDocument | null>(null);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [isCompleting, setIsCompleting] = useState(false);
+
+  const [showResendModal, setShowResendModal] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+
+  // Menu "Mais ações"
+  const [showMoreActions, setShowMoreActions] = useState(false);
+
+  // Feedback de link copiado
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [showSimulator, setShowSimulator] = useState(false);
 
   const fetchAdmission = async () => {
     if (!id) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/admissions/${id}`);
-      if (res.ok) {
-        const data = await res.json();
+      const [resAdm, resLogs] = await Promise.all([
+        fetch(`/api/admissions/${id}`),
+        fetch(`/api/audit-logs?admissionId=${id}`)
+      ]);
+
+      if (resAdm.ok) {
+        const data = await resAdm.json();
         setAdmission(data);
+      }
+      if (resLogs.ok) {
+        const logsData = await resLogs.json();
+        setAuditLogs(logsData);
       }
     } catch (err) {
       console.error('Erro ao buscar admissão:', err);
@@ -69,13 +117,101 @@ export const AdmissionDetails: React.FC = () => {
 
     const data = await res.json();
     setAdmission(data.admission);
+    // Recarrega trilha de auditoria
+    const resLogs = await fetch(`/api/audit-logs?admissionId=${id}`);
+    if (resLogs.ok) {
+      setAuditLogs(await resLogs.json());
+    }
+  };
+
+  const handleCopyLink = () => {
+    if (!admission) return;
+    const url = `${window.location.origin}/convite/${admission.inviteToken}`;
+    navigator.clipboard.writeText(url);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
+  const handleCancelAdmission = async () => {
+    if (!admission || !cancelReason.trim()) return;
+    try {
+      setIsCancelling(true);
+      const res = await fetch(`/api/admissions/${admission.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: cancelReason.trim() })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || 'Erro ao cancelar admissão.');
+        return;
+      }
+      const data = await res.json();
+      setAdmission(data.admission);
+      setShowCancelModal(false);
+      fetchAdmission();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao cancelar admissão.');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const handleCompleteAdmission = async () => {
+    if (!admission) return;
+    try {
+      setIsCompleting(true);
+      const res = await fetch(`/api/admissions/${admission.id}/complete`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || 'Erro ao concluir admissão.');
+        return;
+      }
+      const data = await res.json();
+      setAdmission(data.admission);
+      setShowCompleteModal(false);
+      fetchAdmission();
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao concluir admissão.');
+    } finally {
+      setIsCompleting(false);
+    }
+  };
+
+  const handleResendInviteConfirm = async () => {
+    if (!admission) return;
+    try {
+      setIsResending(true);
+      const res = await fetch(`/api/admissions/${admission.id}/resend-invite`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || 'Erro ao reenviar convite.');
+        return;
+      }
+      const data = await res.json();
+      setAdmission(data.admission);
+      setShowResendModal(false);
+      fetchAdmission();
+      alert('Convite reenviado com sucesso!');
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao reenviar convite.');
+    } finally {
+      setIsResending(false);
+    }
   };
 
   if (loading) {
     return (
-      <div className="py-20 text-center text-slate-400">
+      <div className="py-24 text-center text-slate-400">
         <Clock className="w-8 h-8 mx-auto mb-2 animate-spin text-blue-600" />
-        <p className="text-sm">Carregando detalhes da admissão...</p>
+        <p className="text-sm font-medium text-slate-600">Carregando detalhes da admissão...</p>
       </div>
     );
   }
@@ -83,40 +219,112 @@ export const AdmissionDetails: React.FC = () => {
   if (!admission) {
     return (
       <div className="py-20 text-center text-slate-500">
-        <p className="text-base font-semibold">Admissão não encontrada.</p>
+        <AlertCircle className="w-10 h-10 mx-auto mb-2 text-rose-500" />
+        <p className="text-base font-bold text-slate-800">Admissão não encontrada</p>
         <button
-          onClick={() => navigate('/dashboard')}
-          className="mt-3 text-xs text-blue-600 hover:underline"
+          onClick={() => navigate('/admissoes')}
+          className="mt-3 text-xs text-blue-600 hover:underline font-semibold"
         >
-          Voltar ao Dashboard
+          Voltar para Lista de Admissões
         </button>
       </div>
     );
   }
 
   const inviteUrl = `${window.location.origin}/convite/${admission.inviteToken}`;
+  const maskedToken = admission.inviteToken ? `${admission.inviteToken.slice(0, 7)}...${admission.inviteToken.slice(-4)}` : '';
+
+  // Cálculos de documentos
+  const requiredDocs = admission.documents.filter(d => d.required);
+  const additionalDocs = admission.documents.filter(d => !d.required);
+  const approvedDocs = requiredDocs.filter(d => d.status === 'Aprovado');
+  const inReviewDocs = requiredDocs.filter(d => d.status === 'Em análise' || d.status === 'Reenviado');
+  const rejectedDocs = requiredDocs.filter(d => d.status === 'Rejeitado');
+  const notSentDocs = requiredDocs.filter(d => d.status === 'Não enviado');
+
+  // Pendências: documentos rejeitados, documentos obrigatórios ainda não enviados, ou solicitação de correção cadastral
+  const pendingItems = [
+    ...rejectedDocs.map(d => ({
+      id: d.id,
+      type: 'doc_rejected' as const,
+      title: `${d.documentType} rejeitado`,
+      reason: d.rejectionReason,
+      notes: d.rejectionNotes,
+      doc: d
+    })),
+    ...notSentDocs.map(d => ({
+      id: d.id,
+      type: 'doc_missing' as const,
+      title: `${d.documentType} não enviado`,
+      reason: 'Aguardando upload pelo colaborador',
+      notes: undefined,
+      doc: d
+    })),
+    ...(admission.correctionRequest && !admission.correctionRequest.resolved ? [{
+      id: 'correction-req',
+      type: 'correction' as const,
+      title: 'Correção cadastral solicitada pelo colaborador',
+      reason: admission.correctionRequest.details,
+      notes: `Registrado em ${new Date(admission.correctionRequest.requestedAt).toLocaleString('pt-BR')}`,
+      doc: undefined
+    }] : [])
+  ];
+
+  const canComplete = requiredDocs.length > 0 && approvedDocs.length === requiredDocs.length && admission.status !== 'Concluída' && admission.status !== 'Cancelada';
+  const isCancelled = admission.status === 'Cancelada';
+  const isCompleted = admission.status === 'Concluída';
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto">
-      {/* Barra superior de navegação */}
+    <div className="space-y-6 max-w-6xl mx-auto">
+      {/* Barra de navegação superior */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <button
-          onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors"
+          onClick={() => navigate('/admissoes')}
+          className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Voltar ao Dashboard</span>
+          <span>Voltar para Admissões</span>
         </button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Ação 1: Enviar convite novamente */}
           <button
-            onClick={() => setIsInviteModalOpen(true)}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors"
+            onClick={() => setShowResendModal(true)}
+            disabled={isCancelled}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <MessageCircle className="w-4 h-4 fill-current" />
-            <span>Convidar / WhatsApp</span>
+            <Send className="w-3.5 h-3.5" />
+            <span>Enviar convite novamente</span>
           </button>
 
+          {/* Ação 2: Copiar link */}
+          <button
+            onClick={handleCopyLink}
+            className="flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors cursor-pointer"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                <span className="text-emerald-700">Link copiado!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                <span>Copiar link</span>
+              </>
+            )}
+          </button>
+
+          {/* Simulador de Celular do Funcionário */}
+          <button
+            onClick={() => setShowSimulator(true)}
+            className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-2 rounded-xl border border-blue-200 shadow-xs transition-colors cursor-pointer"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Simulador Mobile</span>
+          </button>
+
+          {/* Visão do funcionário */}
           <a
             href={inviteUrl}
             target="_blank"
@@ -124,197 +332,851 @@ export const AdmissionDetails: React.FC = () => {
             className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
-            <span>Visão do Funcionário</span>
+            <span className="hidden sm:inline">Visão do Colaborador</span>
           </a>
+
+          {/* Ação 3: Dropdown Mais Ações */}
+          <div className="relative">
+            <button
+              onClick={() => setShowMoreActions(!showMoreActions)}
+              className="p-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-600 transition-colors cursor-pointer"
+              title="Mais ações"
+            >
+              <MoreVertical className="w-4 h-4" />
+            </button>
+
+            {showMoreActions && (
+              <div 
+                className="absolute right-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-xl py-1 z-30 animate-in fade-in duration-100 text-xs"
+                onMouseLeave={() => setShowMoreActions(false)}
+              >
+                {!isCompleted && !isCancelled && (
+                  <button
+                    onClick={() => { setShowMoreActions(false); setShowCompleteModal(true); }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 font-semibold text-emerald-700 flex items-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Concluir Admissão</span>
+                  </button>
+                )}
+
+                {!isCancelled && (
+                  <button
+                    onClick={() => { setShowMoreActions(false); setShowCancelModal(true); }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-rose-50 font-semibold text-rose-700 flex items-center gap-2 border-t border-slate-100"
+                  >
+                    <Ban className="w-4 h-4 text-rose-600" />
+                    <span>Cancelar Admissão</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Alerta de solicitação de correção de dados (se houver) */}
-      {admission.correctionRequest && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3 text-amber-900">
-          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+      {/* Alerta de Admissão Cancelada se aplicável */}
+      {isCancelled && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 sm:p-5 flex items-start gap-3 text-rose-900">
+          <Ban className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
           <div className="flex-1">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-800">
-              Solicitação de Correção Cadastral Apontada pelo Colaborador
+            <h3 className="text-xs font-bold uppercase tracking-wider text-rose-800">
+              Processo de Admissão Cancelado pelo RH
             </h3>
-            <p className="text-xs mt-1 text-amber-950 font-medium">
-              "{admission.correctionRequest.details}"
+            <p className="text-xs mt-1 text-rose-950 font-medium">
+              Motivo registrado: "{admission.cancellationReason || 'Cancelamento solicitado pelo RH'}"
             </p>
-            <span className="text-[11px] text-amber-700 mt-1 block">
-              Registrado em: {new Date(admission.correctionRequest.requestedAt).toLocaleString('pt-BR')}
+            <span className="text-[11px] text-rose-700 mt-1 block">
+              Cancelado por {admission.cancelledBy || 'RH'} em {admission.cancelledAt ? new Date(admission.cancelledAt).toLocaleString('pt-BR') : 'Data não registrada'}
             </span>
           </div>
         </div>
       )}
 
-      {/* Cartão com dados do colaborador e status da admissão */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-slate-100">
-          <div className="flex items-center gap-3.5">
+      {/* Alerta de Conclusão se 100% aprovado */}
+      {canComplete && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-emerald-900">
+          <div className="flex items-start gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                Todos os documentos obrigatórios foram aprovados!
+              </h3>
+              <p className="text-xs text-emerald-700 mt-0.5">
+                Esta admissão está pronta para ser formalizada e concluída no sistema.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowCompleteModal(true)}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
+          >
+            <Check className="w-4 h-4 stroke-[2.5]" />
+            <span>Concluir Admissão</span>
+          </button>
+        </div>
+      )}
+
+      {/* Cabeçalho da Admissão (Item 10) */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5 pb-5 border-b border-slate-100">
+          <div className="flex items-center gap-4">
             <img
               src="/raitz-logo.jpg"
               alt="Logo Raitz"
               referrerPolicy="no-referrer"
-              className="w-12 h-12 rounded-xl object-cover shadow-xs border border-slate-200 shrink-0"
+              className="w-14 h-14 rounded-2xl object-cover shadow-xs border border-slate-200 shrink-0"
             />
             <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-xl font-bold text-slate-900">{admission.employee.name}</h1>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
+                  {admission.employee.name}
+                </h1>
                 <StatusBadge status={admission.status} size="md" />
               </div>
-              <p className="text-xs text-slate-500 mt-1">
-                {admission.employee.role} • {admission.employee.department} • {admission.employee.unit}
-              </p>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1 font-medium">
+                <span className="text-slate-800 font-semibold">{admission.employee.role}</span>
+                <span>•</span>
+                <span>{admission.employee.department}</span>
+                <span>•</span>
+                <span>{admission.employee.unit}</span>
+                <span>•</span>
+                <span>Início previsto: <strong>{new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></span>
+              </div>
             </div>
           </div>
 
-          {/* Barra de Progresso */}
-          <div className="w-full md:w-64 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+          {/* Barra de Progresso do Checklist */}
+          <div className="w-full lg:w-72 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
             <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
-              <span>Conferência de Documentos</span>
-              <span className="text-blue-600">{admission.progressPercent}%</span>
+              <span>Progresso dos Obrigatórios</span>
+              <span className="text-blue-600 font-bold text-sm">{admission.progressPercent}%</span>
             </div>
             <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-300 ${
-                  admission.progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-600'
+                  admission.progressPercent === 100 
+                    ? 'bg-emerald-500' 
+                    : admission.status === 'Pendência'
+                    ? 'bg-rose-500'
+                    : 'bg-blue-600'
                 }`}
                 style={{ width: `${admission.progressPercent}%` }}
               />
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] text-slate-500 mt-1 font-medium">
               {admission.approvedDocuments} de {admission.totalDocuments} obrigatórios aprovados
             </p>
           </div>
         </div>
 
-        {/* Grade com dados cadastrais e LGPD */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-5 text-xs">
-          <div>
-            <span className="text-slate-400 block text-[11px] font-medium">CPF (LGPD)</span>
-            <span className="font-semibold text-slate-800 font-mono">
-              {maskCPF(admission.employee.cpf)}
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-400 block text-[11px] font-medium">Telefone / WhatsApp</span>
-            <span className="font-semibold text-slate-800">{admission.employee.phone}</span>
-          </div>
-          <div>
-            <span className="text-slate-400 block text-[11px] font-medium">E-mail</span>
-            <span className="font-semibold text-slate-800 truncate block">{admission.employee.email}</span>
-          </div>
-          <div>
-            <span className="text-slate-400 block text-[11px] font-medium">Início Previsto</span>
-            <span className="font-semibold text-slate-800">
-              {new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}
-            </span>
-          </div>
-        </div>
+        {/* Linha de navegação em Abas (Item 11) */}
+        <div className="flex items-center gap-1 overflow-x-auto pt-4 border-t border-slate-100/60 scrollbar-none text-xs font-semibold">
+          <button
+            onClick={() => setActiveTab('resumo')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer ${
+              activeTab === 'resumo'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            Resumo
+          </button>
 
-        {/* Indicadores de Consentimento e Validação do Funcionário */}
-        <div className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-4 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-600">
-            <Shield className={`w-4 h-4 ${admission.consentGiven ? 'text-emerald-600' : 'text-slate-400'}`} />
-            <span>
-              Consentimento LGPD: <strong>{admission.consentGiven ? 'Aceito' : 'Pendente'}</strong>
-              {admission.consentDate && ` (${new Date(admission.consentDate).toLocaleDateString('pt-BR')})`}
-            </span>
-          </div>
+          <button
+            onClick={() => setActiveTab('dados')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer ${
+              activeTab === 'dados'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            Dados pessoais
+          </button>
 
-          <div className="flex items-center gap-1.5 text-slate-600">
-            <UserCheck className={`w-4 h-4 ${admission.dataConfirmed ? 'text-emerald-600' : 'text-slate-400'}`} />
-            <span>
-              Conferência dos dados: <strong>{admission.dataConfirmed ? 'Confirmados pelo funcionário' : 'Aguardando validação'}</strong>
+          <button
+            onClick={() => setActiveTab('documentos')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'documentos'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <span>Documentos</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+              activeTab === 'documentos' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+            }`}>
+              {admission.documents.length}
             </span>
-          </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('pendencias')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'pendencias'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <span>Pendências</span>
+            {pendingItems.length > 0 ? (
+              <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">
+                {pendingItems.length}
+              </span>
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('historico')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'historico'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Histórico</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('convite')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'convite'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            <span>Convite</span>
+          </button>
         </div>
       </div>
 
-      {/* Checklist de Documentos Obrigatórios */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-slate-900">Checklist de Documentos</h2>
+      {/* CONTEÚDO DAS ABAS */}
+
+      {/* ABA 1: RESUMO (Item 12) */}
+      {activeTab === 'resumo' && (
+        <div className="space-y-6">
+          {/* Cards de métricas com navegação nas abas */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div 
+              onClick={() => setActiveTab('resumo')}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group relative flex flex-col justify-between"
+              title="Acessar aba Resumo"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Progresso</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-600 transition-colors" />
+              </div>
+              <div className="text-xl font-bold text-blue-600 mt-1">{admission.progressPercent}%</div>
+              <span className="text-[11px] text-slate-500">dos obrigatórios</span>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('documentos')}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs cursor-pointer hover:border-blue-300 hover:shadow-md transition-all group relative flex flex-col justify-between"
+              title="Acessar aba Documentos Obrigatórios"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Obrigatórios</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-600 transition-colors" />
+              </div>
+              <div className="text-xl font-bold text-slate-900 mt-1">{admission.approvedDocuments}/{admission.totalDocuments}</div>
+              <span className="text-[11px] text-slate-500">aprovados</span>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('documentos')}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs cursor-pointer hover:border-amber-300 hover:shadow-md transition-all group relative flex flex-col justify-between"
+              title="Acessar aba Documentos em Análise"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Em Análise</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-amber-600 transition-colors" />
+              </div>
+              <div className="text-xl font-bold text-amber-600 mt-1">{inReviewDocs.length}</div>
+              <span className="text-[11px] text-slate-500">aguardando RH</span>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('pendencias')}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs cursor-pointer hover:border-rose-300 hover:shadow-md transition-all group relative flex flex-col justify-between"
+              title="Acessar aba Pendências (Documentos Rejeitados)"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Rejeitados</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-rose-600 transition-colors" />
+              </div>
+              <div className="text-xl font-bold text-rose-600 mt-1">{rejectedDocs.length}</div>
+              <span className="text-[11px] text-slate-500">com pendência</span>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('pendencias')}
+              className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs cursor-pointer hover:border-rose-300 hover:shadow-md transition-all group relative flex flex-col justify-between"
+              title="Acessar aba Pendências Gerais"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">Pendências</span>
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-rose-600 transition-colors" />
+              </div>
+              <div className={`text-xl font-bold mt-1 ${pendingItems.length > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                {pendingItems.length}
+              </div>
+              <span className="text-[11px] text-slate-500">{pendingItems.length > 0 ? 'ações necessárias' : 'tudo regular'}</span>
+            </div>
+          </div>
+
+          {/* Linha do tempo simplificada do processo admissional */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+            <h2 className="text-sm font-bold text-slate-900 mb-4">Etapas do Processo Admissional</h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-6 gap-4 relative">
+              {/* Etapa 1: Cadastro criado */}
+              <div className="flex flex-col items-center text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs mb-2">
+                  <Check className="w-4 h-4" />
+                </div>
+                <span className="text-xs font-bold text-slate-900">1. Cadastro Criado</span>
+                <span className="text-[11px] text-slate-500 mt-0.5">
+                  {new Date(admission.createdAt).toLocaleDateString('pt-BR')}
+                </span>
+              </div>
+
+              {/* Etapa 2: Convite enviado */}
+              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
+                admission.inviteSentViaWhatsApp ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
+              }`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
+                  admission.inviteSentViaWhatsApp ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {admission.inviteSentViaWhatsApp ? <Check className="w-4 h-4" /> : '2'}
+                </div>
+                <span className="text-xs font-bold text-slate-900">2. Convite Enviado</span>
+                <span className="text-[11px] text-slate-500 mt-0.5">
+                  {admission.inviteSentAt ? new Date(admission.inviteSentAt).toLocaleDateString('pt-BR') : 'Pendente'}
+                </span>
+              </div>
+
+              {/* Etapa 3: Funcionário acessou */}
+              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
+                (admission.inviteAccessCount || 0) > 0 ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
+              }`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
+                  (admission.inviteAccessCount || 0) > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {(admission.inviteAccessCount || 0) > 0 ? <Check className="w-4 h-4" /> : '3'}
+                </div>
+                <span className="text-xs font-bold text-slate-900">3. Acesso Colaborador</span>
+                <span className="text-[11px] text-slate-500 mt-0.5">
+                  {admission.inviteLastAccessedAt ? new Date(admission.inviteLastAccessedAt).toLocaleDateString('pt-BR') : 'Aguardando'}
+                </span>
+              </div>
+
+              {/* Etapa 4: Consentimento & Dados */}
+              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
+                admission.dataConfirmed ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
+              }`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
+                  admission.dataConfirmed ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {admission.dataConfirmed ? <Check className="w-4 h-4" /> : '4'}
+                </div>
+                <span className="text-xs font-bold text-slate-900">4. Dados Validados</span>
+                <span className="text-[11px] text-slate-500 mt-0.5">
+                  {admission.dataConfirmedAt ? new Date(admission.dataConfirmedAt).toLocaleDateString('pt-BR') : 'Aguardando'}
+                </span>
+              </div>
+
+              {/* Etapa 5: Documentos enviados e em conferência */}
+              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
+                admission.approvedDocuments > 0 || inReviewDocs.length > 0 ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
+              }`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
+                  admission.approvedDocuments === admission.totalDocuments && admission.totalDocuments > 0
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : inReviewDocs.length > 0
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {admission.approvedDocuments === admission.totalDocuments ? <Check className="w-4 h-4" /> : '5'}
+                </div>
+                <span className="text-xs font-bold text-slate-900">5. Conferência RH</span>
+                <span className="text-[11px] text-slate-500 mt-0.5">
+                  {admission.approvedDocuments}/{admission.totalDocuments} aprovados
+                </span>
+              </div>
+
+              {/* Etapa 6: Conclusão */}
+              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
+                isCompleted ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50/50 border-dashed border-slate-200'
+              }`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
+                  isCompleted ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  {isCompleted ? <Check className="w-4 h-4" /> : '6'}
+                </div>
+                <span className="text-xs font-bold text-slate-900">6. Concluída</span>
+                <span className="text-[11px] text-slate-500 mt-0.5">
+                  {admission.completedAt ? new Date(admission.completedAt).toLocaleDateString('pt-BR') : 'Em andamento'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ABA 2: DADOS PESSOAIS (Item 13) */}
+      {activeTab === 'dados' && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Dados Cadastrais do Colaborador</h2>
+              <p className="text-xs text-slate-500">
+                Informações fornecidas pelo RH e conferidas pelo funcionário através do portal.
+              </p>
+            </div>
+
+            {admission.dataConfirmed ? (
+              <span className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl font-semibold">
+                <Check className="w-3.5 h-3.5" />
+                <span>Dados confirmados em {new Date(admission.dataConfirmedAt || admission.updatedAt).toLocaleString('pt-BR')}</span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl font-semibold">
+                <Clock className="w-3.5 h-3.5" />
+                <span>Aguardando confirmação do colaborador</span>
+              </span>
+            )}
+          </div>
+
+          {/* Alerta caso haja solicitação de alteração cadastral */}
+          {admission.correctionRequest && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-950 space-y-1">
+              <div className="flex items-center gap-2 font-bold text-amber-800">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span>Solicitação de correção cadastral apontada pelo colaborador</span>
+              </div>
+              <p className="pl-6 font-medium">"{admission.correctionRequest.details}"</p>
+              <p className="pl-6 text-[11px] text-amber-700">
+                Registrado em {new Date(admission.correctionRequest.requestedAt).toLocaleString('pt-BR')}
+              </p>
+            </div>
+          )}
+
+          {/* Grade de Dados */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 text-xs">
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Nome Completo</span>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.name}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">CPF (Protegido LGPD)</span>
+              <p className="font-bold text-slate-900 font-mono text-sm">{maskCPF(admission.employee.cpf)}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Data de Nascimento</span>
+              <p className="font-bold text-slate-900 text-sm">
+                {new Date(admission.employee.birthDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Telefone / WhatsApp</span>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.phone}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">E-mail</span>
+              <p className="font-bold text-slate-900 text-sm truncate">{admission.employee.email}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Cargo Contratado</span>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.role}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Setor / Departamento</span>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.department}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Unidade / Filial</span>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.unit}</p>
+            </div>
+
+            <div className="space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Data Prevista de Início</span>
+              <p className="font-bold text-slate-900 text-sm">
+                {new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
+            <Shield className="w-4 h-4 text-emerald-600" />
+            <span>
+              Consentimento LGPD para tratamento dos dados: <strong>{admission.consentGiven ? 'Concedido' : 'Pendente'}</strong>
+              {admission.consentDate && ` em ${new Date(admission.consentDate).toLocaleDateString('pt-BR')}`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ABA 3: DOCUMENTOS (Itens 14, 15, 16) */}
+      {activeTab === 'documentos' && (
+        <div className="space-y-6">
+          {/* Seção 1: Documentos Obrigatórios */}
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">Documentos Obrigatórios</h2>
+                <p className="text-xs text-slate-500">
+                  Lista dos documentos que precisam estar 100% aprovados para concluir a admissão.
+                </p>
+              </div>
+              <span className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                {approvedDocs.length} de {requiredDocs.length} aprovados
+              </span>
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              {requiredDocs.map((doc) => (
+                <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                  <div className="flex items-start gap-3.5">
+                    <div className={`p-2.5 rounded-xl border mt-0.5 ${
+                      doc.status === 'Aprovado' 
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                        : doc.status === 'Rejeitado'
+                        ? 'bg-rose-50 text-rose-700 border-rose-200'
+                        : doc.status === 'Não enviado'
+                        ? 'bg-slate-50 text-slate-400 border-slate-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      <FileText className="w-5 h-5" />
+                    </div>
+
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-sm font-bold text-slate-900">{doc.documentType}</h3>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded">
+                          Obrigatório
+                        </span>
+                        <StatusBadge status={doc.status} size="sm" />
+                      </div>
+
+                      <div className="text-xs text-slate-500 mt-1 space-y-0.5">
+                        {doc.fileName ? (
+                          <p>
+                            Arquivo: <span className="font-mono text-slate-700 font-medium">{doc.fileName}</span>
+                            {doc.currentVersion > 0 && ` (Versão ${doc.currentVersion})`}
+                          </p>
+                        ) : (
+                          <p className="text-slate-400 italic">Nenhum arquivo enviado ainda pelo colaborador.</p>
+                        )}
+
+                        {doc.uploadedAt && (
+                          <p className="text-[11px] text-slate-400">
+                            Enviado em: {new Date(doc.uploadedAt).toLocaleString('pt-BR')}
+                          </p>
+                        )}
+
+                        {doc.status === 'Rejeitado' && doc.rejectionReason && (
+                          <p className="text-rose-600 font-medium text-[11px] pt-0.5">
+                            Motivo da recusa: {doc.rejectionReason}
+                            {doc.rejectionNotes && ` - "${doc.rejectionNotes}"`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end sm:self-center">
+                    {doc.currentVersion > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDocForReview(doc)}
+                        className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Conferir Documento</span>
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-400 italic px-2 py-1">
+                        Aguardando envio
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Seção 2: Documentos Adicionais (Item 15) */}
+          {additionalDocs.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/50">
+                <h2 className="text-sm font-bold text-slate-900">Documentos Adicionais</h2>
+                <p className="text-xs text-slate-500">
+                  Documentos complementares que não impedem a conclusão do processo.
+                </p>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {additionalDocs.map((doc) => (
+                  <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                    <div className="flex items-start gap-3.5">
+                      <div className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 mt-0.5">
+                        <FileText className="w-5 h-5" />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-bold text-slate-900">{doc.documentType}</h3>
+                          <span className="text-[10px] bg-slate-100 text-slate-500 font-medium px-1.5 py-0.5 rounded">
+                            Opcional
+                          </span>
+                          <StatusBadge status={doc.status} size="sm" />
+                        </div>
+
+                        <div className="text-xs text-slate-500 mt-1">
+                          {doc.fileName ? (
+                            <p>Arquivo: <span className="font-mono text-slate-700 font-medium">{doc.fileName}</span></p>
+                          ) : (
+                            <p className="text-slate-400 italic">Não enviado.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      {doc.currentVersion > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocForReview(doc)}
+                          className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Conferir</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ABA 4: PENDÊNCIAS (Itens 24 e 25) */}
+      {activeTab === 'pendencias' && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Pendências da Admissão</h2>
+              <p className="text-xs text-slate-500">
+                Lista focada exclusivamente nos itens que necessitam de ação para viabilizar a conclusão.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs font-semibold">
+              {pendingItems.length > 0 ? (
+                <span className="flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-xl">
+                  <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
+                  <span>{pendingItems.length} pendência(s) pendente(s)</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Nenhuma pendência</span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {pendingItems.length === 0 ? (
+            <div className="py-12 text-center">
+              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
+              <p className="text-sm font-bold text-slate-800">Tudo pronto e sem pendências!</p>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                Todos os documentos obrigatórios foram aprovados pela equipe de RH e os dados cadastrais estão conferidos.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingItems.map((item) => (
+                <div 
+                  key={item.id}
+                  className="p-4 rounded-xl border border-rose-200 bg-rose-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-rose-100 text-rose-700 shrink-0 mt-0.5">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-rose-950">{item.title}</h4>
+                      <p className="text-xs text-rose-800 mt-0.5">{item.reason}</p>
+                      {item.notes && (
+                        <p className="text-[11px] text-rose-700 mt-0.5 italic">
+                          Orientação enviada: "{item.notes}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {item.doc && item.doc.currentVersion > 0 && (
+                    <button
+                      onClick={() => setSelectedDocForReview(item.doc!)}
+                      className="self-end sm:self-center text-xs font-semibold bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Ver documento
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ABA 5: HISTÓRICO COMPLETO (Item 26) */}
+      {activeTab === 'historico' && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+          <div className="pb-4 border-b border-slate-100">
+            <h2 className="text-sm font-bold text-slate-900">Histórico e Trilha de Auditoria</h2>
             <p className="text-xs text-slate-500">
-              Analise cada documento enviado. Uma admissão só pode ser concluída com 100% dos obrigatórios aprovados.
+              Linha do tempo imutável de todos os eventos registrados no processo admissional.
+            </p>
+          </div>
+
+          {auditLogs.length === 0 ? (
+            <p className="text-xs text-slate-400 py-8 text-center">Nenhum evento registrado ainda.</p>
+          ) : (
+            <div className="relative pl-6 border-l border-slate-200 space-y-6 my-2">
+              {auditLogs.map((log) => (
+                <div key={log.id} className="relative">
+                  <div className="w-2.5 h-2.5 rounded-full bg-blue-600 absolute -left-[30px] top-1 border-2 border-white ring-2 ring-blue-100" />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <span className="text-xs font-bold text-slate-900">{log.action}</span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {new Date(log.timestamp).toLocaleString('pt-BR')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1">{log.details}</p>
+                  <span className="text-[11px] text-slate-400 mt-0.5 block">
+                    Por: <strong>{log.userName}</strong>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ABA 6: CONVITE (Itens 27 e 28) */}
+      {activeTab === 'convite' && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
+          <div className="pb-4 border-b border-slate-100">
+            <h2 className="text-sm font-bold text-slate-900">Informações do Convite Individual</h2>
+            <p className="text-xs text-slate-500">
+              Controle de envio, monitoramento de acessos e segurança do link do colaborador.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px]">Status do Convite</span>
+              <span className="font-bold text-slate-900">
+                {(admission.inviteAccessCount || 0) > 0 
+                  ? 'Acessado pelo colaborador' 
+                  : admission.inviteSentViaWhatsApp 
+                  ? 'Enviado (Aguardando acesso)' 
+                  : 'Criado (Não enviado)'}
+              </span>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px]">Data de Criação</span>
+              <span className="font-bold text-slate-900">
+                {new Date(admission.createdAt).toLocaleString('pt-BR')}
+              </span>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px]">Último Envio</span>
+              <span className="font-bold text-slate-900">
+                {admission.inviteLastSentAt || admission.inviteSentAt
+                  ? new Date(admission.inviteLastSentAt || admission.inviteSentAt!).toLocaleString('pt-BR')
+                  : 'Nenhum envio registrado'}
+              </span>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block text-[11px]">Acessos Registrados</span>
+              <span className="font-bold text-blue-600 text-sm">
+                {admission.inviteAccessCount || 0} acesso(s)
+              </span>
+              {admission.inviteLastAccessedAt && (
+                <span className="text-[10px] text-slate-400 block">
+                  Último: {new Date(admission.inviteLastAccessedAt).toLocaleString('pt-BR')}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Segurança do Token mascarado */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">
+                  Token Secreto Mascarado (LGPD)
+                </span>
+                <span className="font-mono text-xs font-bold text-slate-800">
+                  {maskedToken}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopyLink}
+                  className="flex items-center gap-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedLink ? 'Copiado!' : 'Copiar Link'}</span>
+                </button>
+
+                <button
+                  onClick={() => setShowSimulator(true)}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer shadow-xs"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Testar no Simulador</span>
+                </button>
+
+                <button
+                  onClick={() => setIsInviteModalOpen(true)}
+                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Enviar por WhatsApp</span>
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              O link contém um token de segurança de alta entropia exclusivo para {admission.employee.name}.
             </p>
           </div>
         </div>
+      )}
 
-        <div className="divide-y divide-slate-100">
-          {admission.documents.map((doc) => (
-            <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
-              <div className="flex items-start gap-3">
-                <div className={`p-2.5 rounded-xl border mt-0.5 ${
-                  doc.status === 'Aprovado' 
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                    : doc.status === 'Rejeitado'
-                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                    : doc.status === 'Não enviado'
-                    ? 'bg-slate-50 text-slate-400 border-slate-200'
-                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                }`}>
-                  <FileText className="w-5 h-5" />
-                </div>
-
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-slate-900">{doc.documentType}</h3>
-                    {doc.required && (
-                      <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded">
-                        Obrigatório
-                      </span>
-                    )}
-                    <StatusBadge status={doc.status} size="sm" />
-                  </div>
-
-                  <div className="text-xs text-slate-500 mt-1 space-y-0.5">
-                    {doc.fileName ? (
-                      <p>
-                        Arquivo: <span className="font-medium text-slate-700">{doc.fileName}</span>
-                        {doc.currentVersion > 0 && ` (Versão ${doc.currentVersion})`}
-                      </p>
-                    ) : (
-                      <p className="text-slate-400 italic">Nenhum arquivo enviado ainda.</p>
-                    )}
-
-                    {doc.uploadedAt && (
-                      <p className="text-[11px] text-slate-400">
-                        Enviado em: {new Date(doc.uploadedAt).toLocaleString('pt-BR')}
-                      </p>
-                    )}
-
-                    {/* Exibe motivo caso tenha sido recusado */}
-                    {doc.status === 'Rejeitado' && doc.rejectionReason && (
-                      <p className="text-rose-600 font-medium text-[11px] pt-0.5">
-                        Motivo da recusa: {doc.rejectionReason}
-                        {doc.rejectionNotes && ` - "${doc.rejectionNotes}"`}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Botão de Análise / Ação */}
-              <div className="flex items-center gap-2 self-end sm:self-center">
-                {doc.currentVersion > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDocForReview(doc)}
-                    className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Conferir Documento</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Modais */}
+      {/* Modal de Conferência de Documento */}
       <DocumentReviewModal
         document={selectedDocForReview}
         admission={admission}
@@ -323,11 +1185,169 @@ export const AdmissionDetails: React.FC = () => {
         onReviewSubmit={handleReviewSubmit}
       />
 
+      {/* Modal de Convite WhatsApp */}
       <InviteModal
         admission={admission}
         isOpen={isInviteModalOpen}
         onClose={() => setIsInviteModalOpen(false)}
       />
+
+      {/* Simulador Mobile */}
+      <MobileSimulatorModal
+        admission={admission}
+        isOpen={showSimulator}
+        onClose={() => setShowSimulator(false)}
+      />
+
+      {/* Modal de Confirmação de Reenvio de Convite */}
+      {showResendModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900">Reenviar Convite ao Colaborador</h3>
+              <button onClick={() => setShowResendModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Deseja reenviar o convite de acesso para <strong>{admission.employee.name}</strong>?
+            </p>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1.5 font-medium">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Telefone:</span>
+                <span className="font-semibold text-slate-800">{admission.employee.phone}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">E-mail:</span>
+                <span className="font-semibold text-slate-800">{admission.employee.email}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowResendModal(false)}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isResending}
+                onClick={handleResendInviteConfirm}
+                className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                {isResending ? 'Reenviando...' : 'Confirmar Reenvio'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Conclusão da Admissão (Itens 30 e 31) */}
+      {showCompleteModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <span>Concluir Processo Admissional</span>
+              </div>
+              <button onClick={() => setShowCompleteModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!canComplete ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 space-y-1">
+                <p className="font-bold">Esta admissão ainda possui pendências e não pode ser concluída.</p>
+                <p className="text-[11px] text-amber-800">
+                  Certifique-se de que todos os {requiredDocs.length} documentos obrigatórios estejam marcados como APROVADOS antes de concluir.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Confirma a conclusão formal da admissão de <strong>{admission.employee.name}</strong>?
+                Todos os documentos obrigatórios foram conferidos e aprovados. A conclusão ficará gravada no histórico de auditoria.
+              </p>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCompleteModal(false)}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Voltar
+              </button>
+              {canComplete && (
+                <button
+                  type="button"
+                  disabled={isCompleting}
+                  onClick={handleCompleteAdmission}
+                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  {isCompleting ? 'Concluindo...' : 'Confirmar Conclusão'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Cancelamento da Admissão (Item 29) */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex items-center justify-between text-rose-700">
+              <div className="flex items-center gap-2 font-bold text-sm">
+                <Ban className="w-5 h-5" />
+                <span>Cancelar Admissão</span>
+              </div>
+              <button onClick={() => setShowCancelModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Tem certeza que deseja cancelar esta admissão? O link do colaborador será desativado e o status será alterado para <strong>CANCELADA</strong>.
+            </p>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                Motivo do cancelamento (obrigatório):
+              </label>
+              <textarea
+                rows={3}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Ex: Desistência da vaga pelo candidato / Vaga congelada pela diretoria..."
+                className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(false)}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                disabled={isCancelling || !cancelReason.trim()}
+                onClick={handleCancelAdmission}
+                className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {isCancelling ? 'Cancelando...' : 'Confirmar Cancelamento'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

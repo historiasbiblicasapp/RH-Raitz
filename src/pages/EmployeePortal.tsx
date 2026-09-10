@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { 
   ShieldCheck, 
   CheckCircle2, 
@@ -20,7 +20,8 @@ import {
   Calendar,
   Building2,
   Briefcase,
-  X
+  X,
+  ArrowLeft
 } from 'lucide-react';
 import { Admission, AdmissionDocument } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -270,6 +271,21 @@ export const EmployeePortal: React.FC = () => {
         onChange={handleFileChange}
         className="hidden"
       />
+
+      {/* Faixa de apoio para testes do RH */}
+      <div className="bg-slate-900 text-slate-300 text-xs py-2 px-4 flex items-center justify-between border-b border-slate-800 shadow-xs">
+        <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Visão do Candidato (Modo Convite)</span>
+        </span>
+        <Link 
+          to="/admissoes" 
+          className="text-blue-400 hover:text-blue-300 font-semibold flex items-center gap-1 transition-colors text-[11px] hover:underline"
+        >
+          <ArrowLeft className="w-3 h-3" />
+          <span>Voltar ao Painel do RH</span>
+        </Link>
+      </div>
 
       {/* Topo fixo da marca */}
       <header className="bg-white border-b border-slate-200/80 sticky top-0 z-30 px-4 py-3 shadow-xs">

@@ -13,7 +13,6 @@ async function startServer() {
 
   // Headers de segurança básicos
   app.use((_req, res, next) => {
-    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   });

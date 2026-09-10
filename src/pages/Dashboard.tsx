@@ -49,7 +49,7 @@ export const Dashboard: React.FC = () => {
       }
       if (admissionsRes.ok) {
         const admissionsData = await admissionsRes.json();
-        setAdmissions(admissionsData);
+        setAdmissions(Array.isArray(admissionsData) ? admissionsData : (admissionsData.admissions || []));
       }
     } catch (err) {
       console.error('Erro ao carregar dados do dashboard:', err);
@@ -79,7 +79,9 @@ export const Dashboard: React.FC = () => {
       description: 'Cadastradas nos últimos 7 dias',
       icon: UserPlus,
       color: 'bg-blue-50 text-blue-700 border-blue-200 ring-blue-500/10',
-      actionFilter: 'TODOS'
+      actionFilter: 'TODOS',
+      targetPath: '/admissoes',
+      actionLabel: 'Ver todas as admissões'
     },
     {
       title: 'Aguardando documentos',
@@ -87,7 +89,9 @@ export const Dashboard: React.FC = () => {
       description: 'Colaborador precisa enviar docs',
       icon: Clock,
       color: 'bg-sky-50 text-sky-700 border-sky-200 ring-sky-500/10',
-      actionFilter: 'Aguardando documentos'
+      actionFilter: 'Aguardando documentos',
+      targetPath: '/admissoes?status=Aguardando documentos',
+      actionLabel: 'Ver aguardando envio'
     },
     {
       title: 'Aguardando conferência',
@@ -95,7 +99,9 @@ export const Dashboard: React.FC = () => {
       description: 'Documentos prontos para análise',
       icon: FileCheck,
       color: 'bg-amber-50 text-amber-800 border-amber-200 ring-amber-500/10',
-      actionFilter: 'Em conferência'
+      actionFilter: 'Em conferência',
+      targetPath: '/documentos',
+      actionLabel: 'Abrir tela de conferência'
     },
     {
       title: 'Pendências',
@@ -103,7 +109,9 @@ export const Dashboard: React.FC = () => {
       description: 'Possuem documentos rejeitados',
       icon: AlertTriangle,
       color: 'bg-rose-50 text-rose-700 border-rose-200 ring-rose-500/10',
-      actionFilter: 'Pendência'
+      actionFilter: 'Pendência',
+      targetPath: '/admissoes?status=Pendência',
+      actionLabel: 'Ver admissões com pendências'
     },
     {
       title: 'Concluídas',
@@ -111,39 +119,48 @@ export const Dashboard: React.FC = () => {
       description: '100% dos documentos aprovados',
       icon: CheckCircle2,
       color: 'bg-emerald-50 text-emerald-700 border-emerald-200 ring-emerald-500/10',
-      actionFilter: 'Concluída'
+      actionFilter: 'Concluída',
+      targetPath: '/admissoes?status=Concluída',
+      actionLabel: 'Ver processos concluídos'
     },
   ];
 
   return (
     <div className="space-y-6">
-      {/* 5 Cards de Métricas */}
+      {/* 5 Cards de Métricas com Navegação */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {cards.map((card, idx) => (
           <div
             key={idx}
-            onClick={() => setStatusFilter(card.actionFilter)}
-            className={`cursor-pointer rounded-2xl p-4.5 border transition-all duration-150 hover:shadow-md bg-white ${
-              statusFilter === card.actionFilter ? 'ring-2 ring-blue-600 shadow-xs' : 'border-slate-200/80'
-            }`}
+            onClick={() => navigate(card.targetPath)}
+            className="group cursor-pointer rounded-2xl p-4.5 border border-slate-200/80 bg-white transition-all duration-200 hover:shadow-md hover:border-blue-300 hover:-translate-y-0.5 relative flex flex-col justify-between"
+            title={`Clique para ir para: ${card.actionLabel}`}
           >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold text-slate-500 line-clamp-1">
-                {card.title}
-              </span>
-              <div className={`p-2 rounded-xl border ${card.color}`}>
-                <card.icon className="w-4 h-4" />
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold text-slate-500 line-clamp-1 group-hover:text-slate-700 transition-colors">
+                  {card.title}
+                </span>
+                <div className={`p-2 rounded-xl border ${card.color}`}>
+                  <card.icon className="w-4 h-4" />
+                </div>
               </div>
+
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-2xl sm:text-3xl font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
+                  {loading ? '...' : card.value}
+                </span>
+                <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-blue-600 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
+                {card.description}
+              </p>
             </div>
 
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl sm:text-3xl font-bold text-slate-900">
-                {loading ? '...' : card.value}
-              </span>
+            <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 group-hover:text-blue-600 font-medium transition-colors">
+              <span className="truncate">{card.actionLabel}</span>
+              <ChevronRight className="w-3.5 h-3.5 shrink-0 ml-1 opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
             </div>
-            <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">
-              {card.description}
-            </p>
           </div>
         ))}
       </div>

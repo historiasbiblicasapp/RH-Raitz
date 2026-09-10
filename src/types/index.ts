@@ -14,6 +14,8 @@ export type DocumentType =
   | 'Carteira de Trabalho'
   | 'Comprovante de residência'
   | 'Diploma/Certificado'
+  | 'Certidão de Nascimento/Casamento'
+  | 'Título de Eleitor'
   | 'Outro';
 
 export type DocumentStatus = 
