@@ -15,6 +15,7 @@ import { NotificationsPage } from './pages/NotificationsPage.tsx';
 import { ReportsPage } from './pages/ReportsPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { InvitesPage } from './pages/InvitesPage.tsx';
+import { UsersManagementPage } from './pages/UsersManagementPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -43,6 +44,8 @@ export function App() {
             <Route path="/historico" element={<AuditLogPage />} />
             <Route path="/notificacoes" element={<NotificationsPage />} />
             <Route path="/relatorios" element={<ReportsPage />} />
+            <Route path="/usuarios-rh" element={<UsersManagementPage />} />
+            <Route path="/usuarios" element={<UsersManagementPage />} />
             <Route path="/configuracoes" element={<SettingsPage />} />
           </Route>
 

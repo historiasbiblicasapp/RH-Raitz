@@ -9,6 +9,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<void>;
   demoLogin: () => Promise<void>;
+  switchUser: (targetUser: User) => void;
   logout: () => void;
 }
 
@@ -91,6 +92,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return login('rh@galvanizacaoraitz.com.br', 'senha123');
   };
 
+  const switchUser = (targetUser: User) => {
+    setUser(targetUser);
+    const mockToken = 'jwt_switch_token_' + Date.now();
+    setToken(mockToken);
+    localStorage.setItem('admissao_user', JSON.stringify(targetUser));
+    localStorage.setItem('admissao_token', mockToken);
+  };
+
   const logout = () => {
     setUser(null);
     setToken(null);
@@ -99,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isLoading, login, demoLogin, logout }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated: !!user, isLoading, login, demoLogin, switchUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

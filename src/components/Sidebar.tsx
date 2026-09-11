@@ -11,6 +11,7 @@ import {
   Settings, 
   LogOut, 
   ShieldCheck,
+  UserCog,
   X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -38,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
     },
     { to: '/relatorios', label: 'Relatórios', icon: BarChart3 },
     { to: '/historico', label: 'Histórico', icon: History },
+    { to: '/usuarios-rh', label: 'Equipe & Acessos RH', icon: UserCog },
     { to: '/configuracoes', label: 'Configurações', icon: Settings },
   ];
 
