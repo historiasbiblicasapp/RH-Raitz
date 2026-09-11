@@ -99,12 +99,13 @@ async function startServer() {
   });
 
   // Health check
-  app.get('/api/health', (_req, res) => {
+  app.get(['/health', '/api/health'], (_req, res) => {
     res.json({ status: 'ok', system: 'Admissão Digital', timestamp: new Date().toISOString() });
   });
 
   // Rotas de API
   app.use('/api', apiRouter);
+  app.use('/auth', apiRouter);
 
   // Vite middleware no desenvolvimento ou arquivos estáticos na produção
   if (process.env.NODE_ENV !== 'production') {

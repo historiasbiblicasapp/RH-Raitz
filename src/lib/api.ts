@@ -1,10 +1,10 @@
 // Utilitário central de requisições à API com proteção contra respostas HTML,
-// erros de cold-start do servidor e tratamento seguro de JSON.
+// erros de cold-start do servidor, problemas de cookies no iframe e tratamento seguro de JSON.
 
 export async function safeFetchJson<T = any>(
   input: string,
   init?: RequestInit,
-  retries = 2
+  retries = 3
 ): Promise<T> {
   // Garante que URLs relativas da API sempre comecem com '/'
   let url = input;
@@ -12,19 +12,32 @@ export async function safeFetchJson<T = any>(
     url = `/${url}`;
   }
 
+  const mergedInit: RequestInit = {
+    credentials: 'include', // Envia cookies de autenticação mesmo dentro do iframe do AI Studio
+    ...init,
+    headers: {
+      'Accept': 'application/json',
+      ...(init?.headers || {})
+    }
+  };
+
   let attempt = 0;
   while (attempt <= retries) {
     try {
-      const res = await fetch(url, init);
+      const res = await fetch(url, mergedInit);
 
-      // Tratamento para contêiner acordando ou reiniciando (502, 503, 504)
-      if ([502, 503, 504].includes(res.status) && attempt < retries) {
+      // Tratamento para contêiner acordando, reiniciando ou proxy roteando (404 temporário, 502, 503, 504)
+      const isTransientStatus = [404, 502, 503, 504].includes(res.status);
+      const contentType = res.headers.get('content-type') || '';
+      const isHtml = contentType.includes('text/html');
+
+      // Se for resposta HTML da infraestrutura (Cloud Run / Google Frontend) ou status transitório
+      if ((isTransientStatus || isHtml) && attempt < retries) {
         attempt++;
-        await new Promise((r) => setTimeout(r, 600 * attempt));
+        await new Promise((r) => setTimeout(r, 700 * attempt));
         continue;
       }
 
-      const contentType = res.headers.get('content-type') || '';
       let data: any = null;
 
       if (contentType.includes('application/json')) {
@@ -38,13 +51,19 @@ export async function safeFetchJson<T = any>(
         try {
           data = JSON.parse(text);
         } catch {
-          // Se a resposta for uma página HTML (ex: erro 404/500 da infraestrutura ou Cloud Run)
-          if (!res.ok) {
+          // Se for HTML (ex: erro da infraestrutura ou página de cookie check)
+          if (!res.ok || isHtml) {
+            if (attempt < retries) {
+              attempt++;
+              await new Promise((r) => setTimeout(r, 700 * attempt));
+              continue;
+            }
+
             const cleanSnippet = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
             let userMsg = `O servidor respondeu com status ${res.status}.`;
-            if (cleanSnippet.length > 5 && !cleanSnippet.toLowerCase().includes('the page')) {
+            if (cleanSnippet.length > 5 && !cleanSnippet.toLowerCase().includes('the page') && !cleanSnippet.toLowerCase().includes('action required')) {
               userMsg = cleanSnippet.slice(0, 120);
-            } else if (res.status === 404) {
+            } else {
               userMsg = 'Serviço temporariamente indisponível. Por favor, aguarde alguns instantes e tente novamente.';
             }
             throw new Error(userMsg);
@@ -60,21 +79,21 @@ export async function safeFetchJson<T = any>(
 
       return data as T;
     } catch (err: any) {
-      // Se for erro de rede ("Failed to fetch") e ainda houver tentativas
       if (
         attempt < retries &&
         (err.name === 'TypeError' ||
           err.message?.includes('fetch') ||
           err.message?.includes('NetworkError') ||
-          err.message?.includes('Failed to fetch'))
+          err.message?.includes('Failed to fetch') ||
+          err.message?.includes('temporariamente indisponível'))
       ) {
         attempt++;
-        await new Promise((r) => setTimeout(r, 600 * attempt));
+        await new Promise((r) => setTimeout(r, 700 * attempt));
         continue;
       }
       throw err;
     }
   }
 
-  throw new Error('Não foi possível conectar ao servidor. Por favor, recarregue a página.');
+  throw new Error('Não foi possível conectar ao servidor no momento. Por favor, tente novamente.');
 }
