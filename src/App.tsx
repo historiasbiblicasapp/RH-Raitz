@@ -16,6 +16,7 @@ import { ReportsPage } from './pages/ReportsPage.tsx';
 import { SettingsPage } from './pages/SettingsPage.tsx';
 import { InvitesPage } from './pages/InvitesPage.tsx';
 import { UsersManagementPage } from './pages/UsersManagementPage.tsx';
+import { JobPositionsPage } from './pages/JobPositionsPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -46,6 +47,8 @@ export function App() {
             <Route path="/relatorios" element={<ReportsPage />} />
             <Route path="/usuarios-rh" element={<UsersManagementPage />} />
             <Route path="/usuarios" element={<UsersManagementPage />} />
+            <Route path="/cadastros/cargos" element={<JobPositionsPage />} />
+            <Route path="/cargos" element={<JobPositionsPage />} />
             <Route path="/configuracoes" element={<SettingsPage />} />
           </Route>
 

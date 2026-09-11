@@ -12,11 +12,23 @@ export async function safeFetchJson<T = any>(
     url = `/${url}`;
   }
 
+  let storedUserEmail = '';
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('admissao_user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.email) storedUserEmail = parsed.email;
+      }
+    } catch {}
+  }
+
   const mergedInit: RequestInit = {
     credentials: 'include', // Envia cookies de autenticação mesmo dentro do iframe do AI Studio
     ...init,
     headers: {
       'Accept': 'application/json',
+      ...(storedUserEmail ? { 'x-user-email': storedUserEmail } : {}),
       ...(init?.headers || {})
     }
   };

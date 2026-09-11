@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
   Users, 
@@ -12,6 +12,10 @@ import {
   LogOut, 
   ShieldCheck,
   UserCog,
+  Briefcase,
+  Layers,
+  ChevronDown,
+  ChevronRight,
   X
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -25,12 +29,19 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotificationsCount = 0 }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const menuItems = [
+  const isCadastrosActive = location.pathname.startsWith('/cadastros') || location.pathname === '/cargos';
+  const [cadastrosOpen, setCadastrosOpen] = useState(true);
+
+  const mainMenuItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/admissoes', label: 'Admissões', icon: Users },
     { to: '/convites', label: 'Convites & Acessos', icon: KeyRound },
     { to: '/documentos', label: 'Documentos', icon: FileCheck2 },
+  ];
+
+  const secondaryMenuItems = [
     { 
       to: '/notificacoes', 
       label: 'Notificações', 
@@ -90,7 +101,73 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
 
         {/* Itens de Navegação */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {menuItems.map((item) => (
+          {mainMenuItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => onClose()}
+              className={({ isActive }) =>
+                `flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`
+              }
+            >
+              <div className="flex items-center gap-3">
+                <item.icon className="w-4 h-4 text-slate-500 group-hover:text-blue-600" />
+                <span>{item.label}</span>
+              </div>
+            </NavLink>
+          ))}
+
+          {/* Grupo Cadastros (Bloco 3.1) */}
+          <div className="pt-1">
+            <button
+              type="button"
+              id="btn-sidebar-cadastros-toggle"
+              onClick={() => setCadastrosOpen(!cadastrosOpen)}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                isCadastrosActive
+                  ? 'bg-blue-50/70 text-blue-700'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Layers className={`w-4 h-4 ${isCadastrosActive ? 'text-blue-600' : 'text-slate-500'}`} />
+                <span className="font-semibold">Cadastros</span>
+              </div>
+              {cadastrosOpen ? (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {cadastrosOpen && (
+              <div className="mt-1 ml-4 pl-3.5 border-l-2 border-slate-200/80 space-y-1 py-0.5">
+                <NavLink
+                  to="/cadastros/cargos"
+                  id="nav-link-cargos"
+                  onClick={() => onClose()}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  <Briefcase className="w-3.5 h-3.5" />
+                  <span>Cargos</span>
+                </NavLink>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-2 border-t border-slate-100 my-2" />
+
+          {secondaryMenuItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

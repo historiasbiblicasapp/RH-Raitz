@@ -12,7 +12,8 @@ import {
   DocumentType,
   DocumentStatus,
   AdmissionStatus,
-  User
+  User,
+  JobPosition
 } from '../src/types/index.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -26,6 +27,7 @@ export interface DatabaseSchema {
   auditLogs: AuditLog[];
   notifications: NotificationItem[];
   consentRecords: ConsentRecord[];
+  jobPositions: JobPosition[];
 }
 
 function ensureDirectories() {
@@ -43,6 +45,17 @@ const INITIAL_DOC_TYPES: { type: DocumentType; required: boolean }[] = [
   { type: 'Carteira de Trabalho', required: true },
   { type: 'Comprovante de residência', required: true },
   { type: 'Diploma/Certificado', required: true },
+];
+
+export const INITIAL_JOB_POSITIONS = [
+  { name: 'Auxiliar Administrativo', code: 'ADM-001', description: 'Rotinas de suporte administrativo e atendimento', active: true },
+  { name: 'Analista de TI', code: 'TI-001', description: 'Responsável por suporte, infraestrutura e sistemas de TI', active: true },
+  { name: 'Técnico de Segurança do Trabalho', code: 'SEG-001', description: 'Inspeções, laudos e conformidade com normas regulamentadoras', active: true },
+  { name: 'Eletricista', code: 'MAN-001', description: 'Manutenção e instalação de redes elétricas industriais', active: true },
+  { name: 'Mecânico', code: 'MAN-002', description: 'Manutenção preventiva e corretiva de máquinas e equipamentos', active: true },
+  { name: 'Operador de Produção', code: 'PROD-001', description: 'Operação de maquinário e linhas de produção industrial', active: true },
+  { name: 'Motorista', code: 'LOG-001', description: 'Transporte e entregas operacionais', active: true },
+  { name: 'Assistente Administrativo', code: 'ADM-002', description: 'Lançamentos, controle de documentos e suporte ao setor', active: true }
 ];
 
 function generateInitialData(): DatabaseSchema {
@@ -335,13 +348,26 @@ function generateInitialData(): DatabaseSchema {
     }
   ];
 
+  const initialJobPositions: JobPosition[] = INITIAL_JOB_POSITIONS.map((jp, idx) => ({
+    id: 'job-' + (idx + 1).toString().padStart(2, '0'),
+    name: jp.name,
+    code: jp.code,
+    description: jp.description,
+    active: jp.active,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    createdBy: 'Sistema',
+    updatedBy: 'Sistema'
+  }));
+
   return {
     users: [userRaitzRH, adminUser, userAdminRaitz],
     employees: [emp1, emp2, emp3],
     admissions: [adm1, adm2, adm3],
     auditLogs,
     notifications,
-    consentRecords: []
+    consentRecords: [],
+    jobPositions: initialJobPositions
   };
 }
 
@@ -355,6 +381,22 @@ export class Database {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
         if (!this.data.users) this.data.users = [];
+
+        // Garante a existência e integridade dos cargos (Job Positions)
+        if (!this.data.jobPositions || this.data.jobPositions.length === 0) {
+          this.data.jobPositions = INITIAL_JOB_POSITIONS.map((jp, idx) => ({
+            id: 'job-' + (idx + 1).toString().padStart(2, '0'),
+            name: jp.name,
+            code: jp.code,
+            description: jp.description,
+            active: jp.active,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            createdBy: 'Sistema',
+            updatedBy: 'Sistema'
+          }));
+          this.save();
+        }
 
         // Garante a remoção de usuários obsoletos
         this.data.users = this.data.users.filter(u => u.email.toLowerCase() !== 'microwasmel@gmail.com');
@@ -523,6 +565,207 @@ export class Database {
     this.save();
     return true;
   }
+
+  // ==========================================
+  // CARGOS (JOB POSITIONS - BLOCO 3.1)
+  // ==========================================
+
+  getJobPositions(statusFilter: 'all' | 'active' | 'inactive' = 'all', search?: string): JobPosition[] {
+    if (!this.data.jobPositions) {
+      this.data.jobPositions = [];
+    }
+
+    let positions = [...this.data.jobPositions];
+
+    if (statusFilter === 'active') {
+      positions = positions.filter(p => p.active);
+    } else if (statusFilter === 'inactive') {
+      positions = positions.filter(p => !p.active);
+    }
+
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      positions = positions.filter(p => 
+        p.name.toLowerCase().includes(q) || 
+        (p.code && p.code.toLowerCase().includes(q)) ||
+        (p.description && p.description.toLowerCase().includes(q))
+      );
+    }
+
+    // Ordenar alfabeticamente por nome
+    positions.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+    return positions;
+  }
+
+  getJobPositionById(id: string): JobPosition | undefined {
+    if (!this.data.jobPositions) this.data.jobPositions = [];
+    return this.data.jobPositions.find(p => p.id === id);
+  }
+
+  addJobPosition(
+    data: { name: string; code?: string; description?: string; active?: boolean }, 
+    userName: string
+  ): JobPosition {
+    if (!this.data.jobPositions) this.data.jobPositions = [];
+
+    // Validação do nome
+    const normalizedName = (data.name || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedName) {
+      throw new Error('O nome do cargo é obrigatório.');
+    }
+
+    // Validação de duplicidade de nome (entre cargos ativos)
+    const existingName = this.data.jobPositions.find(
+      p => p.active && p.name.trim().toLowerCase() === normalizedName.toLowerCase()
+    );
+    if (existingName) {
+      throw new Error(`Já existe um cargo ativo cadastrado com o nome "${normalizedName}".`);
+    }
+
+    // Validação do código
+    const normalizedCode = data.code ? data.code.trim().replace(/\s+/g, ' ') : undefined;
+    if (normalizedCode) {
+      const existingCode = this.data.jobPositions.find(
+        p => p.active && p.code && p.code.trim().toLowerCase() === normalizedCode.toLowerCase()
+      );
+      if (existingCode) {
+        throw new Error(`Já existe um cargo ativo cadastrado com o código "${normalizedCode}".`);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const newPosition: JobPosition = {
+      id: 'job-' + crypto.randomUUID(),
+      name: normalizedName,
+      code: normalizedCode || undefined,
+      description: data.description ? data.description.trim() : undefined,
+      active: data.active !== undefined ? Boolean(data.active) : true,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: userName || 'Sistema',
+      updatedBy: userName || 'Sistema'
+    };
+
+    this.data.jobPositions.push(newPosition);
+
+    // Auditoria: job_position_created
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action: 'job_position_created',
+      details: `Cargo "${newPosition.name}" (${newPosition.code || 'Sem código'}) cadastrado com sucesso por ${userName}.`
+    });
+
+    this.save();
+    return newPosition;
+  }
+
+  updateJobPosition(
+    id: string, 
+    updates: { name?: string; code?: string; description?: string; active?: boolean }, 
+    userName: string
+  ): JobPosition {
+    if (!this.data.jobPositions) this.data.jobPositions = [];
+    const position = this.getJobPositionById(id);
+    if (!position) {
+      throw new Error('Cargo não encontrado.');
+    }
+
+    const changes: string[] = [];
+
+    // Validação e atualização de nome
+    if (updates.name !== undefined) {
+      const normalizedName = updates.name.trim().replace(/\s+/g, ' ');
+      if (!normalizedName) {
+        throw new Error('O nome do cargo não pode ficar vazio.');
+      }
+      if (normalizedName.toLowerCase() !== position.name.toLowerCase()) {
+        const existingName = this.data.jobPositions.find(
+          p => p.id !== id && p.active && p.name.trim().toLowerCase() === normalizedName.toLowerCase()
+        );
+        if (existingName) {
+          throw new Error(`Já existe outro cargo ativo com o nome "${normalizedName}".`);
+        }
+        changes.push(`nome de "${position.name}" para "${normalizedName}"`);
+        position.name = normalizedName;
+      }
+    }
+
+    // Validação e atualização de código
+    if (updates.code !== undefined) {
+      const normalizedCode = updates.code ? updates.code.trim().replace(/\s+/g, ' ') : undefined;
+      if (normalizedCode && normalizedCode.toLowerCase() !== (position.code || '').toLowerCase()) {
+        const existingCode = this.data.jobPositions.find(
+          p => p.id !== id && p.active && p.code && p.code.trim().toLowerCase() === normalizedCode.toLowerCase()
+        );
+        if (existingCode) {
+          throw new Error(`Já existe outro cargo ativo com o código "${normalizedCode}".`);
+        }
+      }
+      if (normalizedCode !== position.code) {
+        changes.push(`código de "${position.code || 'N/A'}" para "${normalizedCode || 'N/A'}"`);
+        position.code = normalizedCode || undefined;
+      }
+    }
+
+    // Atualização de descrição
+    if (updates.description !== undefined) {
+      const trimmedDesc = updates.description ? updates.description.trim() : undefined;
+      if (trimmedDesc !== position.description) {
+        changes.push('descrição atualizada');
+        position.description = trimmedDesc;
+      }
+    }
+
+    // Status (active)
+    let isStatusChange = false;
+    let becameActive = false;
+    if (updates.active !== undefined && updates.active !== position.active) {
+      if (updates.active) {
+        // Ao reativar, validar duplicidade com outros ativos
+        const existingName = this.data.jobPositions.find(
+          p => p.id !== id && p.active && p.name.trim().toLowerCase() === position.name.trim().toLowerCase()
+        );
+        if (existingName) {
+          throw new Error(`Não é possível ativar este cargo. Já existe outro cargo ativo com o nome "${position.name}".`);
+        }
+        if (position.code) {
+          const existingCode = this.data.jobPositions.find(
+            p => p.id !== id && p.active && p.code && p.code.trim().toLowerCase() === position.code.trim().toLowerCase()
+          );
+          if (existingCode) {
+            throw new Error(`Não é possível ativar este cargo. Já existe outro cargo ativo com o código "${position.code}".`);
+          }
+        }
+      }
+
+      position.active = updates.active;
+      changes.push(`status alterado para ${updates.active ? 'Ativo' : 'Inativo'}`);
+      isStatusChange = true;
+      becameActive = updates.active;
+    }
+
+    position.updatedAt = new Date().toISOString();
+    position.updatedBy = userName || 'Sistema';
+
+    let action = 'job_position_updated';
+    if (isStatusChange) {
+      action = becameActive ? 'job_position_activated' : 'job_position_deactivated';
+    }
+
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action,
+      details: `Cargo "${position.name}": ${changes.length > 0 ? changes.join(', ') : 'dados atualizados'} por ${userName}.`
+    });
+
+    this.save();
+    return position;
+  }
+
+  toggleJobPositionStatus(id: string, active: boolean, userName: string): JobPosition {
+    return this.updateJobPosition(id, { active }, userName);
+  }
+
 
   // Admissões
   getAdmissions(): Admission[] {

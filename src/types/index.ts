@@ -26,14 +26,28 @@ export type DocumentStatus =
   | 'Rejeitado'
   | 'Reenviado';
 
+export type UserRole = 'RH' | 'ADMIN' | 'FUNCIONARIO' | 'RH_CONFERENCIA' | 'GESTOR';
+
 export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'RH' | 'ADMIN' | 'FUNCIONARIO';
+  role: UserRole;
   department?: string;
   avatarUrl?: string;
   createdAt: string;
+}
+
+export interface JobPosition {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface Employee {

@@ -54,6 +54,37 @@ INSERT INTO public.document_types (code, name, description, required) VALUES
 ('DIPLOMA', 'Diploma/Certificado', 'Comprovante de escolaridade ou graduação exigida', true)
 ON CONFLICT (code) DO NOTHING;
 
+-- 3.1 TABELA DE CARGOS (Job Positions - Bloco 3.1)
+CREATE TABLE IF NOT EXISTS public.job_positions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    code VARCHAR(50),
+    description TEXT,
+    active BOOLEAN DEFAULT TRUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    created_by VARCHAR(255),
+    updated_by VARCHAR(255)
+);
+
+-- Índices para pesquisa e verificação de duplicidade
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_positions_name_lower_active 
+    ON public.job_positions (LOWER(TRIM(name))) WHERE active = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_job_positions_code_lower_active 
+    ON public.job_positions (LOWER(TRIM(code))) WHERE active = TRUE AND code IS NOT NULL AND code <> '';
+
+-- Inserção dos cargos iniciais do sistema
+INSERT INTO public.job_positions (name, code, description, active) VALUES
+('Auxiliar Administrativo', 'ADM-001', 'Rotinas de suporte administrativo e atendimento', true),
+('Analista de TI', 'TI-001', 'Responsável por suporte, infraestrutura e sistemas de TI', true),
+('Técnico de Segurança do Trabalho', 'SEG-001', 'Inspeções, laudos e conformidade com normas regulamentadoras', true),
+('Eletricista', 'MAN-001', 'Manutenção e instalação de redes elétricas industriais', true),
+('Mecânico', 'MAN-002', 'Manutenção preventiva e corretiva de máquinas e equipamentos', true),
+('Operador de Produção', 'PROD-001', 'Operação de maquinário e linhas de produção industrial', true),
+('Motorista', 'LOG-001', 'Transporte e entregas operacionais', true),
+('Assistente Administrativo', 'ADM-002', 'Lançamentos, controle de documentos e suporte ao setor', true)
+ON CONFLICT DO NOTHING;
+
 -- 4. TABELA DE ADMISSÕES
 CREATE TABLE IF NOT EXISTS public.admissions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -167,6 +198,42 @@ ALTER TABLE public.document_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.consent_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.job_positions ENABLE ROW LEVEL SECURITY;
+
+-- Políticas para usuários autenticados (Equipe de RH)
+CREATE POLICY "RH e Administradores podem visualizar cargos"
+    ON public.job_positions FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE POLICY "Apenas usuários autorizados de RH/ADMIN podem cadastrar cargos"
+    ON public.job_positions FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.users 
+            WHERE users.id = auth.uid() 
+            AND users.role IN ('ADMIN', 'RH', 'GESTOR')
+        )
+    );
+
+CREATE POLICY "Apenas usuários autorizados de RH/ADMIN podem alterar ou desativar cargos"
+    ON public.job_positions FOR UPDATE
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.users 
+            WHERE users.id = auth.uid() 
+            AND users.role IN ('ADMIN', 'RH', 'GESTOR')
+        )
+    )
+    WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.users 
+            WHERE users.id = auth.uid() 
+            AND users.role IN ('ADMIN', 'RH', 'GESTOR')
+        )
+    );
 
 -- Políticas para usuários autenticados (Equipe de RH)
 CREATE POLICY "RH pode visualizar todos os usuários do sistema"

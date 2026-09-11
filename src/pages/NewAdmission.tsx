@@ -15,8 +15,9 @@ import {
   Building2
 } from 'lucide-react';
 import { formatCPF, formatPhone, validateCPF } from '../lib/cpf.ts';
-import { Admission } from '../types/index.ts';
+import { Admission, JobPosition } from '../types/index.ts';
 import { InviteModal } from '../components/InviteModal.tsx';
+import { safeFetchJson } from '../lib/api.ts';
 
 // Schema Zod rigoroso com mensagens em português e validação matemática de CPF
 const newAdmissionSchema = z.object({
@@ -39,8 +40,19 @@ export const NewAdmission: React.FC = () => {
   const [createdAdmission, setCreatedAdmission] = useState<Admission | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [availableJobPositions, setAvailableJobPositions] = useState<JobPosition[]>([]);
   
   const navigate = useNavigate();
+
+  React.useEffect(() => {
+    safeFetchJson<{ jobPositions: JobPosition[] }>('/api/job-positions?status=active')
+      .then((data) => {
+        if (data && data.jobPositions) {
+          setAvailableJobPositions(data.jobPositions);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const {
     register,
@@ -252,15 +264,36 @@ export const NewAdmission: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Cargo */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                  Cargo a Ocupar *
-                </label>
-                <input
-                  type="text"
-                  {...register('role')}
-                  placeholder="Ex: Desenvolvedor Frontend Pleno"
-                  className="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all"
-                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Cargo a Ocupar *
+                  </label>
+                  {availableJobPositions.length > 0 && (
+                    <span className="text-[11px] text-blue-600 font-medium">
+                      {availableJobPositions.length} ativos
+                    </span>
+                  )}
+                </div>
+                {availableJobPositions.length > 0 ? (
+                  <select
+                    {...register('role')}
+                    className="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all text-slate-900"
+                  >
+                    <option value="">Selecione um cargo cadastrado...</option>
+                    {availableJobPositions.map((pos) => (
+                      <option key={pos.id} value={pos.name}>
+                        {pos.name} {pos.code ? `(${pos.code})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    {...register('role')}
+                    placeholder="Ex: Desenvolvedor Frontend Pleno"
+                    className="w-full text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 transition-all"
+                  />
+                )}
                 {errors.role && (
                   <p className="text-[11px] text-rose-600 mt-1">{errors.role.message}</p>
                 )}

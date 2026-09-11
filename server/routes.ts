@@ -164,6 +164,126 @@ router.delete('/users/:id', (req: Request, res: Response) => {
 });
 
 // ------------------------------------------------------------------
+// ROTAS DE CARGOS (JOB POSITIONS - BLOCO 3.1)
+// ------------------------------------------------------------------
+
+function checkJobPositionAuth(req: Request, res: Response): { user: any } | null {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    res.status(403).json({ 
+      error: 'Acesso não autorizado. Apenas usuários do RH e Administradores têm permissão para gerenciar cargos.' 
+    });
+    return null;
+  }
+  return { user };
+}
+
+// Listagem de cargos com filtros de status e busca textual
+router.get(['/job-positions', '/cargos'], (req: Request, res: Response) => {
+  const auth = checkJobPositionAuth(req, res);
+  if (!auth) return;
+
+  const status = (req.query.status as 'all' | 'active' | 'inactive') || 'all';
+  const search = req.query.search as string;
+
+  try {
+    const jobPositions = db.getJobPositions(status, search);
+    return res.json({ jobPositions });
+  } catch (err: any) {
+    console.error('Erro ao listar cargos:', err);
+    return res.status(500).json({ error: 'Erro ao consultar cargos. Tente novamente mais tarde.' });
+  }
+});
+
+// Obter detalhes de um cargo por ID
+router.get(['/job-positions/:id', '/cargos/:id'], (req: Request, res: Response) => {
+  const auth = checkJobPositionAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const jobPosition = db.getJobPositionById(req.params.id);
+    if (!jobPosition) {
+      return res.status(404).json({ error: 'Cargo não encontrado.' });
+    }
+    return res.json({ jobPosition });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Erro ao carregar dados do cargo.' });
+  }
+});
+
+// Cadastrar novo cargo
+router.post(['/job-positions', '/cargos'], (req: Request, res: Response) => {
+  const auth = checkJobPositionAuth(req, res);
+  if (!auth) return;
+
+  const { name, code, description, active } = req.body;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'O nome do cargo é obrigatório.' });
+  }
+
+  try {
+    const newPosition = db.addJobPosition(
+      { name, code, description, active }, 
+      auth.user.name || auth.user.email
+    );
+    return res.status(201).json({ 
+      jobPosition: newPosition, 
+      message: 'Cargo cadastrado com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível cadastrar o cargo.' });
+  }
+});
+
+// Atualizar cargo existente
+router.put(['/job-positions/:id', '/cargos/:id'], (req: Request, res: Response) => {
+  const auth = checkJobPositionAuth(req, res);
+  if (!auth) return;
+
+  const { name, code, description, active } = req.body;
+
+  try {
+    const updated = db.updateJobPosition(
+      req.params.id, 
+      { name, code, description, active }, 
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      jobPosition: updated, 
+      message: 'Cargo atualizado com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível atualizar o cargo.' });
+  }
+});
+
+// Ativar ou desativar cargo (Toggle status)
+router.patch(['/job-positions/:id/status', '/cargos/:id/status'], (req: Request, res: Response) => {
+  const auth = checkJobPositionAuth(req, res);
+  if (!auth) return;
+
+  const { active } = req.body;
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({ error: 'Status (active) inválido. Deve ser booleano.' });
+  }
+
+  try {
+    const updated = db.toggleJobPositionStatus(
+      req.params.id, 
+      active, 
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      jobPosition: updated, 
+      message: active ? 'Cargo ativado com sucesso.' : 'Cargo desativado com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível alterar o status do cargo.' });
+  }
+});
+
+// ------------------------------------------------------------------
 // CONFIGURAÇÕES DO SISTEMA E DETECÇÃO DE URL PÚBLICA
 // ------------------------------------------------------------------
 router.get('/system-config', (req: Request, res: Response) => {
