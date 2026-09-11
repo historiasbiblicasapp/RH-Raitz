@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BarChart3, TrendingUp, CheckCircle2, Clock, AlertTriangle, FileText } from 'lucide-react';
 import { Admission, DashboardStats } from '../types/index.ts';
+import { safeFetchJson } from '../lib/api.ts';
 
 export const ReportsPage: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -8,11 +9,11 @@ export const ReportsPage: React.FC = () => {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/dashboard/stats').then(r => r.json()),
-      fetch('/api/admissions').then(r => r.json())
+      safeFetchJson<DashboardStats>('/api/dashboard/stats'),
+      safeFetchJson<Admission[]>('/api/admissions')
     ]).then(([s, a]) => {
       setStats(s);
-      setAdmissions(a);
+      setAdmissions(a || []);
     }).catch(console.error);
   }, []);
 

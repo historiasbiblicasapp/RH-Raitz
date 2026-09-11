@@ -3,6 +3,7 @@ import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar.tsx';
 import { Header } from './Header.tsx';
 import { useAuth } from '../context/AuthContext.tsx';
+import { safeFetchJson } from '../lib/api.ts';
 
 export const Layout: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -12,8 +13,7 @@ export const Layout: React.FC = () => {
 
   useEffect(() => {
     // Carrega contador de notificações não lidas
-    fetch('/api/notifications')
-      .then(res => res.json())
+    safeFetchJson<any[]>('/api/notifications')
       .then(data => {
         if (Array.isArray(data)) {
           const unread = data.filter((n: any) => !n.read).length;

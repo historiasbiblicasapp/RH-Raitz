@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types/index.ts';
+import { safeFetchJson } from '../lib/api.ts';
 
 interface AuthContextType {
   user: User | null;
@@ -36,18 +37,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
 
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Falha ao autenticar.');
+    if (!cleanEmail || !cleanPassword) {
+      throw new Error('E-mail e senha são obrigatórios.');
     }
 
-    const data = await res.json();
+    const data = await safeFetchJson<{ user: User; token: string }>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, password: cleanPassword })
+    });
+
     setUser(data.user);
     setToken(data.token);
     localStorage.setItem('admissao_user', JSON.stringify(data.user));

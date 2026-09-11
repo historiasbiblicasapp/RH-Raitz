@@ -214,8 +214,8 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
             <div>
               <span className="text-slate-400 block">Acessos registrados:</span>
               <span className="font-semibold text-slate-800">
-                {admission.accessCount || 0} vez(es)
-                {admission.lastAccessedAt && ` (último em ${new Date(admission.lastAccessedAt).toLocaleDateString('pt-BR')})`}
+                {admission.inviteAccessCount || 0} vez(es)
+                {admission.inviteLastAccessedAt && ` (último em ${new Date(admission.inviteLastAccessedAt).toLocaleDateString('pt-BR')})`}
               </span>
             </div>
           </div>

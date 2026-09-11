@@ -16,6 +16,7 @@ import {
   Check
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
+import { safeFetchJson } from '../lib/api.ts';
 
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('rh@galvanizacaoraitz.com.br');
@@ -69,7 +70,7 @@ export const Login: React.FC = () => {
     setError(null);
 
     try {
-      const res = await fetch('/api/users', {
+      await safeFetchJson('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -79,11 +80,6 @@ export const Login: React.FC = () => {
           role: 'RH'
         })
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Erro ao cadastrar usuário.');
-      }
 
       setCreateSuccessMessage(`Usuário ${newName} cadastrado com sucesso! Fazendo login...`);
       

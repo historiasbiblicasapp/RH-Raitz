@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Check, CheckCheck, Clock, FileText, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { SystemNotification } from '../types/index.ts';
+import { safeFetchJson } from '../lib/api.ts';
 
 export const NotificationsPage: React.FC = () => {
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
@@ -11,9 +12,8 @@ export const NotificationsPage: React.FC = () => {
   const loadNotifications = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/notifications');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<SystemNotification[]>('/api/notifications');
+      if (Array.isArray(data)) {
         setNotifications(data);
       }
     } catch (err) {
@@ -29,7 +29,7 @@ export const NotificationsPage: React.FC = () => {
 
   const handleMarkAsRead = async (id: string) => {
     try {
-      await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
+      await safeFetchJson(`/api/notifications/${id}/read`, { method: 'POST' });
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
     } catch (err) {
       console.error(err);

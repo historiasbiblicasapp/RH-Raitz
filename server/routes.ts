@@ -693,15 +693,15 @@ router.get('/audit-logs', (req: Request, res: Response) => {
 // NOTIFICAÇÕES
 // ------------------------------------------------------------------
 router.get('/notifications', (_req: Request, res: Response) => {
-  return res.json(db.getNotifications());
+  return res.json(db.getNotifications() || []);
 });
 
-router.post('/notifications/:id/read', (req: Request, res: Response) => {
+router.all('/notifications/:id/read', (req: Request, res: Response) => {
   db.markNotificationRead(req.params.id);
   return res.json({ success: true });
 });
 
-router.post('/notifications/read-all', (_req: Request, res: Response) => {
+router.all('/notifications/read-all', (_req: Request, res: Response) => {
   db.markAllNotificationsRead();
   return res.json({ success: true });
 });

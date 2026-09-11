@@ -13,27 +13,33 @@ import {
 import { Admission } from '../types/index.ts';
 
 interface MobileSimulatorModalProps {
-  admission: Admission | null;
+  admission?: Admission | null;
   isOpen: boolean;
   onClose: () => void;
   publicUrl?: string;
+  initialUrl?: string;
 }
 
 export const MobileSimulatorModal: React.FC<MobileSimulatorModalProps> = ({
   admission,
   isOpen,
   onClose,
-  publicUrl
+  publicUrl,
+  initialUrl
 }) => {
   const [iframeKey, setIframeKey] = useState(0);
   const [copied, setCopied] = useState(false);
   const [deviceModel, setDeviceModel] = useState<'iphone' | 'compact'>('iphone');
 
-  if (!isOpen || !admission) return null;
+  if (!isOpen || (!admission && !initialUrl)) return null;
 
-  const localInvitePath = `/convite/${admission.inviteToken}`;
+  const localInvitePath = admission 
+    ? `/convite/${admission.inviteToken}` 
+    : (initialUrl ? (initialUrl.startsWith('http') ? new URL(initialUrl).pathname : initialUrl) : '');
   const effectiveBaseUrl = publicUrl || window.location.origin;
-  const fullInviteUrl = `${effectiveBaseUrl}${localInvitePath}`;
+  const fullInviteUrl = initialUrl || `${effectiveBaseUrl}${localInvitePath}`;
+
+  const candidateName = admission?.employee?.name || 'Novo Colaborador';
 
   const handleCopy = async () => {
     try {
@@ -68,7 +74,7 @@ export const MobileSimulatorModal: React.FC<MobileSimulatorModalProps> = ({
                 </span>
               </div>
               <h2 className="text-sm sm:text-base font-bold text-white">
-                Visão do Candidato: {admission.employee.name}
+                Visão do Candidato: {candidateName}
               </h2>
             </div>
           </div>
