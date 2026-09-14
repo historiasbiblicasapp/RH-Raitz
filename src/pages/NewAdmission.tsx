@@ -88,24 +88,37 @@ export const NewAdmission: React.FC = () => {
 
   const onSubmit = async (data: NewAdmissionFormData) => {
     setServerError(null);
+
+    // Verificação proativa de conexão antes de disparar o envio
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setServerError('Seu navegador está sem conexão com a internet (ERR_INTERNET_DISCONNECTED). Verifique sua rede e tente novamente.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      const res = await fetch('/api/admissions', {
+      const result = await safeFetchJson<Admission>('/api/admissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
       });
 
-      const result = await res.json();
-
-      if (!res.ok) {
-        throw new Error(result.error || 'Erro ao registrar admissão.');
-      }
-
       setCreatedAdmission(result);
     } catch (err: any) {
-      setServerError(err.message || 'Falha ao salvar admissão.');
+      console.error('Erro ao cadastrar admissão:', err);
+      const isNetworkErr = 
+        !navigator.onLine || 
+        err.message?.includes('fetch') || 
+        err.message?.includes('NetworkError') ||
+        err.message?.includes('Failed to fetch') ||
+        err.message?.includes('DISCONNECTED');
+
+      if (isNetworkErr) {
+        setServerError('Falha de conexão com o servidor (ERR_INTERNET_DISCONNECTED). Verifique se você está conectado à internet e tente novamente.');
+      } else {
+        setServerError(err.message || 'Falha ao salvar admissão.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -148,14 +161,24 @@ export const NewAdmission: React.FC = () => {
           </div>
         </div>
 
-        {/* Mensagem de erro do servidor (ex: CPF duplicado) */}
+        {/* Mensagem de erro do servidor (ex: CPF duplicado ou queda de internet) */}
         {serverError && (
-          <div className="m-6 mb-0 p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3 text-rose-800 text-xs">
-            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold">Não foi possível criar a admissão:</p>
-              <p>{serverError}</p>
+          <div className="m-6 mb-0 p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start justify-between gap-3 text-rose-800 text-xs">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Não foi possível criar a admissão:</p>
+                <p className="mt-0.5 text-rose-700">{serverError}</p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => setServerError(null)}
+              className="text-rose-500 hover:text-rose-700 font-bold px-1.5 py-0.5 cursor-pointer"
+              title="Fechar aviso"
+            >
+              ✕
+            </button>
           </div>
         )}
 

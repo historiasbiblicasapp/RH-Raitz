@@ -16,6 +16,7 @@ import {
 import { Admission } from '../types/index.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { MobileSimulatorModal } from './MobileSimulatorModal.tsx';
+import { safeFetchJson } from '../lib/api.ts';
 
 interface InviteModalProps {
   admission: Admission | null;
@@ -46,8 +47,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      fetch('/api/system-config')
-        .then(res => res.ok ? res.json() : null)
+      safeFetchJson<{ appUrl: string; detectedUrl: string; envUrl: string; isLocalhost: boolean }>('/api/system-config')
         .then(data => {
           if (data) {
             setSystemConfig(data);
@@ -56,7 +56,9 @@ export const InviteModal: React.FC<InviteModalProps> = ({
             }
           }
         })
-        .catch(err => console.error('Erro ao carregar system-config:', err));
+        .catch(() => {
+          // Ignora silenciosamente em caso de erro transitório de rede
+        });
     }
   }, [isOpen]);
 
