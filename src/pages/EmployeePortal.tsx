@@ -572,12 +572,37 @@ export const EmployeePortal: React.FC = () => {
                         </div>
                         <div>
                           <h3 className="text-xs font-bold text-slate-900">{doc.documentType}</h3>
-                          <span className="text-[10px] text-slate-400">Obrigatório</span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                              doc.required ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {doc.required ? 'Obrigatório' : 'Opcional'}
+                            </span>
+                            {doc.category && (
+                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                {doc.category}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       <StatusBadge status={doc.status} size="sm" />
                     </div>
+
+                    {/* Instruções específicas para o candidato cadastradas no checklist */}
+                    {doc.instructions && (
+                      <div className="my-2 p-2.5 bg-blue-50/70 border border-blue-100/60 rounded-xl text-[11px] text-blue-900">
+                        <span className="font-semibold text-blue-950">Orientações:</span> {doc.instructions}
+                      </div>
+                    )}
+
+                    {/* Formatos e tamanhos aceitos */}
+                    {(doc.allowed_file_types || doc.max_file_size_mb) && (
+                      <p className="text-[10px] text-slate-400 mb-2">
+                        Formatos aceitos: {(doc.allowed_file_types || ['PDF', 'JPG', 'PNG']).join(', ')} • Tamanho máximo: {doc.max_file_size_mb || 10}MB
+                      </p>
+                    )}
 
                     {/* Feedback específico se foi recusado pelo RH */}
                     {isRejected && (

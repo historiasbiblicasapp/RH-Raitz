@@ -38,9 +38,21 @@ export const EditAdmissionModal: React.FC<EditAdmissionModalProps> = ({
   const [unit, setUnit] = useState(admission.employee.unit);
   const [expectedStartDate, setExpectedStartDate] = useState(admission.employee.expectedStartDate || '');
   const [status, setStatus] = useState<AdmissionStatus>(admission.status);
+  const [availableJobPositions, setAvailableJobPositions] = useState<{ id: string; name: string; code?: string }[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    fetch('/api/job-positions?status=active')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.jobPositions) {
+          setAvailableJobPositions(data.jobPositions);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   if (!isOpen) return null;
 
@@ -211,15 +223,46 @@ export const EditAdmissionModal: React.FC<EditAdmissionModalProps> = ({
                 <label className="block font-semibold text-slate-700 mb-1">Cargo *</label>
                 <div className="relative">
                   <Briefcase className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    required
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-blue-600"
-                  />
+                  {availableJobPositions.length > 0 ? (
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-blue-600 text-slate-900 text-xs"
+                    >
+                      <option value={role}>{role} (Atual)</option>
+                      {availableJobPositions
+                        .filter(p => p.name !== role)
+                        .map(p => (
+                          <option key={p.id} value={p.name}>
+                            {p.name} {p.code ? `(${p.code})` : ''}
+                          </option>
+                        ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-blue-600"
+                    />
+                  )}
                 </div>
               </div>
+
+              {role.trim().toLowerCase() !== (admission.employee.role || '').trim().toLowerCase() && (
+                <div className="sm:col-span-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-amber-950">
+                      Alterar o cargo pode alterar os documentos necessários para esta admissão. O checklist atual já foi registrado para esta admissão.
+                    </p>
+                    <p className="text-[11px] text-amber-800 mt-1">
+                      Por segurança, o checklist original desta admissão será preservado como histórico imutável. Documentos e versões já enviados não serão apagados.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Setor / Departamento *</label>

@@ -17,6 +17,8 @@ import { SettingsPage } from './pages/SettingsPage.tsx';
 import { InvitesPage } from './pages/InvitesPage.tsx';
 import { UsersManagementPage } from './pages/UsersManagementPage.tsx';
 import { JobPositionsPage } from './pages/JobPositionsPage.tsx';
+import { DocumentTypesPage } from './pages/DocumentTypesPage.tsx';
+import { JobPositionChecklistPage } from './pages/JobPositionChecklistPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -49,6 +51,10 @@ export function App() {
             <Route path="/usuarios" element={<UsersManagementPage />} />
             <Route path="/cadastros/cargos" element={<JobPositionsPage />} />
             <Route path="/cargos" element={<JobPositionsPage />} />
+            <Route path="/cadastros/documentos" element={<DocumentTypesPage />} />
+            <Route path="/tipos-documentos" element={<DocumentTypesPage />} />
+            <Route path="/cadastros/checklists" element={<JobPositionChecklistPage />} />
+            <Route path="/checklists" element={<JobPositionChecklistPage />} />
             <Route path="/configuracoes" element={<SettingsPage />} />
           </Route>
 

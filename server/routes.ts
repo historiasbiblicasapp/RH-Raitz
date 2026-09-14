@@ -284,6 +284,382 @@ router.patch(['/job-positions/:id/status', '/cargos/:id/status'], (req: Request,
 });
 
 // ------------------------------------------------------------------
+// ROTAS DE TIPOS DE DOCUMENTOS (BLOCO 3.2)
+// ------------------------------------------------------------------
+
+function checkDocumentTypeAuth(req: Request, res: Response, writeOperation = false): { user: any } | null {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    res.status(403).json({ 
+      error: 'Acesso não autorizado. Apenas usuários do RH e Administradores têm permissão para acessar o catálogo de tipos de documentos.' 
+    });
+    return null;
+  }
+
+  if (writeOperation && !['ADMIN', 'RH', 'GESTOR'].includes(user.role)) {
+    res.status(403).json({
+      error: 'Acesso não autorizado. Seu perfil de usuário não possui permissão para criar, editar ou alterar o status de tipos de documentos.'
+    });
+    return null;
+  }
+
+  return { user };
+}
+
+// Listagem de tipos de documentos com filtros (status, categoria) e busca textual
+router.get(['/document-types', '/tipos-documentos'], (req: Request, res: Response) => {
+  const auth = checkDocumentTypeAuth(req, res, false);
+  if (!auth) return;
+
+  const status = (req.query.status as 'all' | 'active' | 'inactive') || 'all';
+  const category = req.query.category as string;
+  const search = req.query.search as string;
+
+  try {
+    const documentTypes = db.getDocumentTypes(status, category, search);
+    return res.json({ documentTypes });
+  } catch (err: any) {
+    console.error('Erro ao listar tipos de documentos:', err);
+    return res.status(500).json({ error: 'Erro ao consultar tipos de documentos. Tente novamente mais tarde.' });
+  }
+});
+
+// Obter detalhes de um tipo de documento por ID
+router.get(['/document-types/:id', '/tipos-documentos/:id'], (req: Request, res: Response) => {
+  const auth = checkDocumentTypeAuth(req, res, false);
+  if (!auth) return;
+
+  try {
+    const documentType = db.getDocumentTypeById(req.params.id);
+    if (!documentType) {
+      return res.status(404).json({ error: 'Tipo de documento não encontrado.' });
+    }
+    return res.json({ documentType });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Erro ao carregar dados do tipo de documento.' });
+  }
+});
+
+// Cadastrar novo tipo de documento
+router.post(['/document-types', '/tipos-documentos'], (req: Request, res: Response) => {
+  const auth = checkDocumentTypeAuth(req, res, true);
+  if (!auth) return;
+
+  const {
+    name,
+    description,
+    category,
+    required_by_default,
+    active,
+    allowed_file_types,
+    max_file_size_mb,
+    requires_expiration_date,
+    sort_order
+  } = req.body;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'O nome do tipo de documento é obrigatório.' });
+  }
+
+  if (!category || typeof category !== 'string' || !category.trim()) {
+    return res.status(400).json({ error: 'A categoria do tipo de documento é obrigatória.' });
+  }
+
+  try {
+    const newDocType = db.addDocumentType(
+      {
+        name,
+        description,
+        category,
+        required_by_default,
+        active,
+        allowed_file_types,
+        max_file_size_mb,
+        requires_expiration_date,
+        sort_order
+      },
+      auth.user.name || auth.user.email
+    );
+    return res.status(201).json({ 
+      documentType: newDocType, 
+      message: 'Tipo de documento cadastrado com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível cadastrar o tipo de documento.' });
+  }
+});
+
+// Atualizar tipo de documento existente
+router.put(['/document-types/:id', '/tipos-documentos/:id'], (req: Request, res: Response) => {
+  const auth = checkDocumentTypeAuth(req, res, true);
+  if (!auth) return;
+
+  const {
+    name,
+    description,
+    category,
+    required_by_default,
+    active,
+    allowed_file_types,
+    max_file_size_mb,
+    requires_expiration_date,
+    sort_order
+  } = req.body;
+
+  try {
+    const updated = db.updateDocumentType(
+      req.params.id,
+      {
+        name,
+        description,
+        category,
+        required_by_default,
+        active,
+        allowed_file_types,
+        max_file_size_mb,
+        requires_expiration_date,
+        sort_order
+      },
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      documentType: updated, 
+      message: 'Tipo de documento atualizado com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível atualizar o tipo de documento.' });
+  }
+});
+
+// Ativar ou desativar tipo de documento (Toggle status)
+router.patch(['/document-types/:id/status', '/tipos-documentos/:id/status'], (req: Request, res: Response) => {
+  const auth = checkDocumentTypeAuth(req, res, true);
+  if (!auth) return;
+
+  const { active } = req.body;
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({ error: 'Status (active) inválido. Deve ser booleano.' });
+  }
+
+  try {
+    const updated = db.toggleDocumentTypeStatus(
+      req.params.id,
+      active,
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      documentType: updated, 
+      message: active ? 'Tipo de documento ativado com sucesso.' : 'Tipo de documento desativado com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível alterar o status do tipo de documento.' });
+  }
+});
+
+// Rota auxiliar para semear os documentos padrões do sistema caso o catálogo esteja vazio
+router.post(['/document-types/seed', '/tipos-documentos/seed'], (req: Request, res: Response) => {
+  const auth = checkDocumentTypeAuth(req, res, true);
+  if (!auth) return;
+
+  try {
+    const list = db.seedInitialDocumentTypes(auth.user.name || auth.user.email);
+    return res.json({ 
+      documentTypes: list, 
+      message: 'Tipos de documentos padrão configurados com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao inicializar documentos padrão.' });
+  }
+});
+
+// ------------------------------------------------------------------
+// ROTAS DE CHECKLIST DE DOCUMENTOS POR CARGO (BLOCO 3.3)
+// ------------------------------------------------------------------
+
+function checkChecklistAuth(req: Request, res: Response): { user: any } | null {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Usuário não autenticado.' });
+    return null;
+  }
+  if (user.role === 'FUNCIONARIO') {
+    res.status(403).json({ 
+      error: 'Acesso não autorizado. Apenas usuários do RH e Administradores têm permissão para configurar checklists por cargo.' 
+    });
+    return null;
+  }
+  return { user };
+}
+
+// 1. Listar documentos configurados para um cargo
+router.get(['/job-positions/:jobPositionId/documents', '/cargos/:jobPositionId/documentos', '/job-position-documents'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  const jobPositionId = req.params.jobPositionId || (req.query.jobPositionId as string);
+  if (!jobPositionId) {
+    return res.status(400).json({ error: 'Identificador do cargo (jobPositionId) é obrigatório.' });
+  }
+
+  const status = (req.query.status as 'all' | 'active' | 'inactive') || 'all';
+
+  try {
+    const documents = db.getJobPositionDocuments(jobPositionId, status);
+    const jobPosition = db.getJobPositionById(jobPositionId);
+    return res.json({ jobPosition, documents });
+  } catch (err: any) {
+    console.error('Erro ao listar documentos do cargo:', err);
+    return res.status(500).json({ error: 'Erro ao consultar documentos do cargo. Tente novamente mais tarde.' });
+  }
+});
+
+// 2. Adicionar documento ao checklist do cargo
+router.post(['/job-positions/:jobPositionId/documents', '/cargos/:jobPositionId/documentos', '/job-position-documents'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  const jobPositionId = req.params.jobPositionId || req.body.job_position_id;
+  if (!jobPositionId) {
+    return res.status(400).json({ error: 'Identificador do cargo (jobPositionId) é obrigatório.' });
+  }
+
+  const { document_type_id, required, sort_order, instructions } = req.body;
+
+  if (!document_type_id) {
+    return res.status(400).json({ error: 'O tipo de documento (document_type_id) é obrigatório.' });
+  }
+
+  try {
+    const newDoc = db.addJobPositionDocument(
+      jobPositionId,
+      { document_type_id, required, sort_order, instructions },
+      auth.user.name || auth.user.email
+    );
+    return res.status(201).json({ 
+      document: newDoc, 
+      message: 'Documento adicionado ao checklist do cargo com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível adicionar o documento ao cargo.' });
+  }
+});
+
+// 3. Atualizar configuração de um documento no checklist
+router.put(['/job-position-documents/:id', '/cargos-documentos/:id'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  const { required, sort_order, instructions, active } = req.body;
+
+  try {
+    const updated = db.updateJobPositionDocument(
+      req.params.id,
+      { required, sort_order, instructions, active },
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      document: updated, 
+      message: 'Configuração do documento atualizada com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível atualizar a configuração do documento.' });
+  }
+});
+
+// 4. Alterar status (ativo/inativo) de um documento no checklist
+router.patch(['/job-position-documents/:id/status', '/cargos-documentos/:id/status'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  const { active } = req.body;
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({ error: 'Status (active) inválido. Deve ser booleano.' });
+  }
+
+  try {
+    const updated = db.toggleJobPositionDocumentStatus(
+      req.params.id,
+      active,
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      document: updated, 
+      message: active 
+        ? 'Documento ativado no checklist do cargo.' 
+        : 'Documento desativado do checklist do cargo.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível alterar o status do documento.' });
+  }
+});
+
+// 5. Reordenar checklist do cargo
+router.post(['/job-positions/:jobPositionId/documents/reorder', '/cargos/:jobPositionId/documentos/reordenar', '/job-position-documents/reorder'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  const jobPositionId = req.params.jobPositionId || req.body.jobPositionId;
+  const { orderedIds } = req.body;
+
+  if (!jobPositionId) {
+    return res.status(400).json({ error: 'Identificador do cargo é obrigatório.' });
+  }
+
+  if (!Array.isArray(orderedIds)) {
+    return res.status(400).json({ error: 'A lista ordenada de IDs (orderedIds) deve ser um array.' });
+  }
+
+  try {
+    const documents = db.reorderJobPositionDocuments(
+      jobPositionId,
+      orderedIds,
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      documents, 
+      message: 'Ordem dos documentos atualizada com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível reordenar os documentos.' });
+  }
+});
+
+// 6. Remover / Desativar documento do checklist
+router.delete(['/job-position-documents/:id', '/cargos-documentos/:id'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const removed = db.removeJobPositionDocument(
+      req.params.id,
+      auth.user.name || auth.user.email
+    );
+    return res.json({ 
+      document: removed, 
+      message: 'Documento removido do checklist com sucesso. As admissões existentes não foram alteradas.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível remover o documento.' });
+  }
+});
+
+// 7. Rota auxiliar para semear os cenários padrão do teste (Eletricista e Auxiliar Administrativo)
+router.post(['/job-position-documents/seed', '/cargos-documentos/seed'], (req: Request, res: Response) => {
+  const auth = checkChecklistAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const list = db.seedInitialJobPositionDocuments(auth.user.name || auth.user.email);
+    return res.json({ 
+      documents: list, 
+      message: 'Checklists padrão de cargos configurados com sucesso.' 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao gerar checklists padrão.' });
+  }
+});
+
+// ------------------------------------------------------------------
 // CONFIGURAÇÕES DO SISTEMA E DETECÇÃO DE URL PÚBLICA
 // ------------------------------------------------------------------
 router.get('/system-config', (req: Request, res: Response) => {
@@ -522,6 +898,7 @@ router.post('/admissions', (req: Request, res: Response) => {
       phone, 
       email, 
       role, 
+      jobPositionId,
       department, 
       unit, 
       expectedStartDate 
@@ -543,6 +920,7 @@ router.post('/admissions', (req: Request, res: Response) => {
       phone,
       email,
       role,
+      jobPositionId,
       department,
       unit,
       expectedStartDate
@@ -684,11 +1062,103 @@ router.post('/invite/:token/upload/:documentId', upload.single('file'), (req: Re
 });
 
 // ------------------------------------------------------------------
-// CONFERÊNCIA DE DOCUMENTOS (RH)
+// CONFERÊNCIA DE DOCUMENTOS (RH) - BLOCO 3.5
 // ------------------------------------------------------------------
+
+// Chave para assinatura de URLs seguras temporárias
+const SIGNED_URL_SECRET = 'admissao-digital-secure-token-salt-2025';
+
+function generateDocumentSignature(docId: string, version: number | string, expires: number): string {
+  return crypto.createHmac('sha256', SIGNED_URL_SECRET)
+    .update(`${docId}:${version}:${expires}`)
+    .digest('hex');
+}
+
+// Endpoint para obter URL assinada temporária (15 minutos)
+router.get('/documents/:id/signed-url', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  const docId = req.params.id;
+  const versionParam = req.query.version ? Number(req.query.version) : 0;
+
+  // Localiza o documento e sua admissão
+  let foundDoc;
+  let foundAdm;
+  for (const adm of db.getAdmissions()) {
+    const d = adm.documents.find(doc => doc.id === docId);
+    if (d) {
+      foundDoc = d;
+      foundAdm = adm;
+      break;
+    }
+  }
+
+  if (!foundDoc || !foundAdm) {
+    return res.status(404).json({ error: 'Documento não encontrado.' });
+  }
+
+  // Se o usuário for funcionário, só pode se for da sua própria admissão
+  if (user.role === 'FUNCIONARIO') {
+    const inviteToken = (req.query.token as string) || (req.headers['x-invite-token'] as string);
+    if (!inviteToken || foundAdm.inviteToken !== inviteToken) {
+      return res.status(403).json({ error: 'Acesso negado. Você não tem permissão para visualizar este documento.' });
+    }
+  }
+
+  const version = versionParam || foundDoc.currentVersion || 1;
+  const expires = Date.now() + 15 * 60 * 1000; // 15 minutos
+  const signature = generateDocumentSignature(docId, version, expires);
+
+  const signedUrl = `/api/documents/${docId}/file?version=${version}&expires=${expires}&signature=${signature}`;
+  return res.json({
+    success: true,
+    signedUrl,
+    expiresAt: new Date(expires).toISOString()
+  });
+});
+
+// Registro de auditoria quando o RH visualiza um documento
+router.post('/documents/:id/view-audit', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  const docId = req.params.id;
+  const { version } = req.body;
+
+  let foundDoc;
+  let foundAdm;
+  for (const adm of db.getAdmissions()) {
+    const d = adm.documents.find(doc => doc.id === docId);
+    if (d) {
+      foundDoc = d;
+      foundAdm = adm;
+      break;
+    }
+  }
+
+  if (!foundDoc || !foundAdm) {
+    return res.status(404).json({ error: 'Documento não encontrado.' });
+  }
+
+  db.recordDocumentAction(
+    docId,
+    `RH visualizou documento`,
+    user.name,
+    `Visualização de conferência realizada para o documento ${foundDoc.documentType} (Versão ${version || foundDoc.currentVersion}) do colaborador ${foundAdm.employee.name}.`
+  );
+
+  return res.json({ success: true });
+});
+
+// Análise e Conferência (Aprovar / Rejeitar) com Concorrência e Permissões
 router.post('/documents/:id/review', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
-  const { decision, rejectionReason, rejectionNotes } = req.body;
+
+  // Apenas RH e Administradores podem conferir documentos
+  if (user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ 
+      error: 'Acesso negado. Apenas profissionais de RH autorizados podem conferir e validar documentos.' 
+    });
+  }
+
+  const { decision, rejectionReason, rejectionNotes, expectedVersion } = req.body;
 
   if (decision !== 'Aprovado' && decision !== 'Rejeitado') {
     return res.status(400).json({ error: 'Decisão deve ser "Aprovado" ou "Rejeitado".' });
@@ -700,7 +1170,8 @@ router.post('/documents/:id/review', (req: Request, res: Response) => {
       decision,
       user.name,
       rejectionReason,
-      rejectionNotes
+      rejectionNotes,
+      expectedVersion !== undefined ? Number(expectedVersion) : undefined
     );
     return res.json({
       success: true,
@@ -712,27 +1183,67 @@ router.post('/documents/:id/review', (req: Request, res: Response) => {
   }
 });
 
-// Visualização Segura de Documentos (Storage Privado LGPD)
+// Visualização Segura de Documentos (Storage Privado LGPD com proteção contra IDOR)
 router.get('/documents/:id/file', (req: Request, res: Response) => {
   const docId = req.params.id;
   const versionParam = req.query.version;
+  const expiresParam = req.query.expires ? Number(req.query.expires) : undefined;
+  const signatureParam = req.query.signature as string | undefined;
+  const tokenParam = req.query.token as string | undefined;
+  const isDownload = req.query.download === 'true';
 
   let foundDoc;
+  let foundAdm;
   for (const adm of db.getAdmissions()) {
     const d = adm.documents.find(doc => doc.id === docId);
     if (d) {
       foundDoc = d;
+      foundAdm = adm;
       break;
     }
   }
 
-  if (!foundDoc) {
+  if (!foundDoc || !foundAdm) {
     return res.status(404).send('Documento não encontrado.');
+  }
+
+  // Validação de Acesso / Anti-IDOR
+  const user = getAuthenticatedUser(req);
+  let isAuthorized = false;
+
+  // 1. Se tem assinatura válida
+  if (signatureParam && expiresParam) {
+    if (Date.now() > expiresParam) {
+      return res.status(403).send('Link seguro expirado. Solicite nova visualização.');
+    }
+    const versionToCheck = versionParam ? Number(versionParam) : (foundDoc.currentVersion || 1);
+    const expectedSig = generateDocumentSignature(docId, versionToCheck, expiresParam);
+    if (crypto.timingSafeEqual(Buffer.from(signatureParam), Buffer.from(expectedSig))) {
+      isAuthorized = true;
+    }
+  }
+
+  // 2. Se for acesso do RH/Admin autenticado
+  if (!isAuthorized && (user.role === 'RH' || user.role === 'ADMIN')) {
+    isAuthorized = true;
+  }
+
+  // 3. Se for acesso via token do candidato
+  if (!isAuthorized && tokenParam) {
+    if (foundAdm.inviteToken === tokenParam && !foundAdm.inviteRevoked) {
+      isAuthorized = true;
+    } else {
+      return res.status(403).send('Acesso não autorizado a este documento.');
+    }
+  }
+
+  if (!isAuthorized) {
+    return res.status(403).send('Acesso não autorizado ao arquivo protegido.');
   }
 
   let filePath: string | undefined;
   let mimeType = foundDoc.mimeType || 'application/pdf';
-  let originalName = foundDoc.fileName || 'documento.pdf';
+  let originalName = foundDoc.fileName || `${foundDoc.documentType}.pdf`;
 
   if (versionParam) {
     const targetVersion = foundDoc.versions.find(v => v.version === Number(versionParam));
@@ -745,17 +1256,29 @@ router.get('/documents/:id/file', (req: Request, res: Response) => {
     filePath = path.join(STORAGE_DIR, foundDoc.storagePath);
   }
 
+  // Registro de auditoria se for download
+  if (isDownload) {
+    db.recordDocumentAction(
+      docId,
+      'RH realizou download de documento',
+      user.name,
+      `Download efetuado do arquivo ${originalName} (Versão ${versionParam || foundDoc.currentVersion}) da admissão de ${foundAdm.employee.name}.`
+    );
+  }
+
   // Se for um arquivo de amostra seed ou arquivo ainda inexistente no disco local, gera um PDF/SVG seguro representativo
   if (!filePath || !fs.existsSync(filePath)) {
     // Retorna imagem placeholder de alta qualidade com os dados do documento para visualização
     res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Content-Disposition', `inline; filename="${foundDoc.documentType.toLowerCase()}.svg"`);
+    res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${foundDoc.documentType.toLowerCase()}.svg"`);
+    res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     const svg = `
       <svg width="600" height="800" xmlns="http://www.w3.org/2000/svg">
         <rect width="100%" height="100%" fill="#f8fafc"/>
         <rect x="20" y="20" width="560" height="760" rx="8" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
         <text x="300" y="80" font-family="sans-serif" font-size="22" font-weight="bold" fill="#0f172a" text-anchor="middle">
-          ADMISSÃO DIGITAL — DOCUMENTO
+          ADMISSÃO DIGITAL — GALVANIZAÇÃO RAITZ
         </text>
         <line x1="60" y1="110" x2="540" y2="110" stroke="#e2e8f0" stroke-width="2"/>
         <text x="60" y="160" font-family="sans-serif" font-size="16" font-weight="bold" fill="#334155">
@@ -765,26 +1288,32 @@ router.get('/documents/:id/file', (req: Request, res: Response) => {
           ${foundDoc.documentType}
         </text>
         <text x="60" y="200" font-family="sans-serif" font-size="14" font-weight="bold" fill="#334155">
-          Versão do Arquivo:
+          Colaborador:
         </text>
         <text x="240" y="200" font-family="sans-serif" font-size="14" fill="#475569">
-          Versão ${foundDoc.currentVersion}
+          ${foundAdm.employee.name}
         </text>
         <text x="60" y="240" font-family="sans-serif" font-size="14" font-weight="bold" fill="#334155">
+          Versão do Arquivo:
+        </text>
+        <text x="240" y="240" font-family="sans-serif" font-size="14" fill="#475569">
+          Versão ${versionParam || foundDoc.currentVersion}
+        </text>
+        <text x="60" y="280" font-family="sans-serif" font-size="14" font-weight="bold" fill="#334155">
           Status da Conferência:
         </text>
-        <text x="240" y="240" font-family="sans-serif" font-size="14" fill="#059669">
+        <text x="240" y="280" font-family="sans-serif" font-size="14" fill="#059669">
           ${foundDoc.status}
         </text>
-        <rect x="60" y="300" width="480" height="340" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="4 4"/>
-        <text x="300" y="460" font-family="sans-serif" font-size="16" fill="#64748b" text-anchor="middle">
+        <rect x="60" y="320" width="480" height="320" rx="6" fill="#f1f5f9" stroke="#94a3b8" stroke-dasharray="4 4"/>
+        <text x="300" y="470" font-family="sans-serif" font-size="16" fill="#64748b" text-anchor="middle">
           [ Documento Digitalizado e Criptografado no Storage LGPD ]
         </text>
-        <text x="300" y="490" font-family="sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">
+        <text x="300" y="500" font-family="sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">
           ${foundDoc.fileName || 'Arquivo protegido com acesso controlado'}
         </text>
         <text x="300" y="720" font-family="sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">
-          Conformidade LGPD: Acesso auditado e restrito ao RH e Colaborador
+          Conformidade LGPD: Acesso auditado e restrito ao RH da Galvanização Raitz
         </text>
       </svg>
     `;
@@ -793,7 +1322,7 @@ router.get('/documents/:id/file', (req: Request, res: Response) => {
 
   // Cabeçalhos de proteção de privacidade LGPD
   res.setHeader('Content-Type', mimeType);
-  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(originalName)}"`);
+  res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(originalName)}"`);
   res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
   res.setHeader('X-Content-Type-Options', 'nosniff');
 

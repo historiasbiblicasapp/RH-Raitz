@@ -50,6 +50,64 @@ export interface JobPosition {
   updatedBy?: string;
 }
 
+export type DocumentCategory = 
+  | 'Pessoal'
+  | 'Trabalhista'
+  | 'Residencial'
+  | 'Escolar'
+  | 'Profissional'
+  | 'Certificação'
+  | 'Saúde'
+  | 'Outros';
+
+export const DOCUMENT_CATEGORIES: readonly DocumentCategory[] = [
+  'Pessoal',
+  'Trabalhista',
+  'Residencial',
+  'Escolar',
+  'Profissional',
+  'Certificação',
+  'Saúde',
+  'Outros'
+] as const;
+
+export const ALLOWED_FILE_FORMATS = ['PDF', 'JPG', 'JPEG', 'PNG'] as const;
+export type AllowedFileFormat = typeof ALLOWED_FILE_FORMATS[number];
+
+export interface DocumentTypeItem {
+  id: string;
+  name: string;
+  description?: string;
+  category: DocumentCategory | string;
+  required_by_default: boolean;
+  active: boolean;
+  allowed_file_types: string[];
+  max_file_size_mb: number;
+  requires_expiration_date: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  updated_by?: string;
+}
+
+export interface JobPositionDocument {
+  id: string;
+  job_position_id: string;
+  document_type_id: string;
+  required: boolean;
+  sort_order: number;
+  instructions?: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+  updated_by?: string;
+  // Campos populados opcionais para visualização
+  document_type?: DocumentTypeItem;
+  job_position?: JobPosition;
+}
+
 export interface Employee {
   id: string;
   name: string;
@@ -58,6 +116,7 @@ export interface Employee {
   phone: string;
   email: string;
   role: string;
+  jobPositionId?: string;
   department: string;
   unit: string;
   expectedStartDate: string;
@@ -82,8 +141,18 @@ export interface DocumentVersion {
 export interface AdmissionDocument {
   id: string;
   admissionId: string;
-  documentType: DocumentType;
+  documentType: DocumentType | string;
+  document_type_id?: string;
+  document_type_name?: string;
+  category?: DocumentCategory | string;
   required: boolean;
+  sort_order?: number;
+  instructions?: string;
+  requires_expiration_date?: boolean;
+  allowed_file_types?: string[];
+  max_file_size_mb?: number;
+  source_job_position_document_id?: string;
+  source_config_version?: string;
   status: DocumentStatus;
   currentVersion: number;
   fileName?: string;
@@ -98,6 +167,8 @@ export interface AdmissionDocument {
   versions: DocumentVersion[];
   createdAt: string;
   updatedAt: string;
+  created_by?: string;
+  updated_by?: string;
 }
 
 export interface DataCorrectionRequest {

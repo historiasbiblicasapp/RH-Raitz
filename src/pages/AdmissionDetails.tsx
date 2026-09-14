@@ -932,7 +932,14 @@ export const AdmissionDetails: React.FC = () => {
             </div>
 
             <div className="divide-y divide-slate-100">
-              {requiredDocs.map((doc) => (
+              {requiredDocs.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500">
+                  <AlertCircle className="w-5 h-5 mx-auto text-amber-500 mb-1.5" />
+                  <p className="font-semibold text-slate-800">Esta admissão não possui documentos obrigatórios configurados.</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">O cargo desta admissão não continha documentos obrigatórios no momento da sua criação.</p>
+                </div>
+              ) : (
+                requiredDocs.map((doc) => (
                 <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
                   <div className="flex items-start gap-3.5">
                     <div className={`p-2.5 rounded-xl border mt-0.5 ${
@@ -953,10 +960,21 @@ export const AdmissionDetails: React.FC = () => {
                         <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded">
                           Obrigatório
                         </span>
+                        {doc.category && (
+                          <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded">
+                            {doc.category}
+                          </span>
+                        )}
                         <StatusBadge status={doc.status} size="sm" />
                       </div>
 
                       <div className="text-xs text-slate-500 mt-1 space-y-0.5">
+                        {doc.instructions && (
+                          <p className="text-[11px] text-blue-800 bg-blue-50/80 border border-blue-100/60 px-2 py-0.5 rounded font-medium inline-block mb-1">
+                            Instruções: {doc.instructions}
+                          </p>
+                        )}
+
                         {doc.fileName ? (
                           <p>
                             Arquivo: <span className="font-mono text-slate-700 font-medium">{doc.fileName}</span>
@@ -964,6 +982,12 @@ export const AdmissionDetails: React.FC = () => {
                           </p>
                         ) : (
                           <p className="text-slate-400 italic">Nenhum arquivo enviado ainda pelo colaborador.</p>
+                        )}
+
+                        {(doc.allowed_file_types || doc.max_file_size_mb) && (
+                          <p className="text-[10px] text-slate-400">
+                            Formatos aceitos: {(doc.allowed_file_types || ['PDF', 'JPG', 'PNG']).join(', ')} • Limite: {doc.max_file_size_mb || 10}MB
+                          </p>
                         )}
 
                         {doc.uploadedAt && (
@@ -999,7 +1023,7 @@ export const AdmissionDetails: React.FC = () => {
                     )}
                   </div>
                 </div>
-              ))}
+              )))}
             </div>
           </div>
 
@@ -1027,14 +1051,31 @@ export const AdmissionDetails: React.FC = () => {
                           <span className="text-[10px] bg-slate-100 text-slate-500 font-medium px-1.5 py-0.5 rounded">
                             Opcional
                           </span>
+                          {doc.category && (
+                            <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded">
+                              {doc.category}
+                            </span>
+                          )}
                           <StatusBadge status={doc.status} size="sm" />
                         </div>
 
-                        <div className="text-xs text-slate-500 mt-1">
+                        <div className="text-xs text-slate-500 mt-1 space-y-0.5">
+                          {doc.instructions && (
+                            <p className="text-[11px] text-blue-800 bg-blue-50/80 border border-blue-100/60 px-2 py-0.5 rounded font-medium inline-block mb-1">
+                              Instruções: {doc.instructions}
+                            </p>
+                          )}
+
                           {doc.fileName ? (
                             <p>Arquivo: <span className="font-mono text-slate-700 font-medium">{doc.fileName}</span></p>
                           ) : (
                             <p className="text-slate-400 italic">Não enviado.</p>
+                          )}
+
+                          {(doc.allowed_file_types || doc.max_file_size_mb) && (
+                            <p className="text-[10px] text-slate-400">
+                              Formatos aceitos: {(doc.allowed_file_types || ['PDF', 'JPG', 'PNG']).join(', ')} • Limite: {doc.max_file_size_mb || 10}MB
+                            </p>
                           )}
                         </div>
                       </div>

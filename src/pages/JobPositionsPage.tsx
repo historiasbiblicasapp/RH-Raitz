@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   Briefcase, 
   Plus, 
@@ -14,7 +15,8 @@ import {
   Clock, 
   RefreshCw,
   FileSpreadsheet,
-  ShieldAlert
+  ShieldAlert,
+  ListChecks
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { JobPosition } from '../types/index.ts';
@@ -26,6 +28,7 @@ type StatusFilter = 'all' | 'active' | 'inactive';
 
 export const JobPositionsPage: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   
   // Lista de cargos e estados de dados
   const [positions, setPositions] = useState<JobPosition[]>([]);
@@ -531,6 +534,18 @@ export const JobPositionsPage: React.FC = () => {
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       {isAuthorized ? (
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* Botão Checklist de Documentos do Cargo */}
+                          <button
+                            type="button"
+                            id={`btn-checklist-cargo-${pos.id}`}
+                            onClick={() => navigate(`/cadastros/checklists?cargo=${pos.id}`)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="Configurar checklist de documentos"
+                            aria-label={`Configurar checklist de documentos para ${pos.name}`}
+                          >
+                            <ListChecks className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* Botão Editar */}
                           <button
                             type="button"

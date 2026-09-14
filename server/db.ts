@@ -13,7 +13,10 @@ import {
   DocumentStatus,
   AdmissionStatus,
   User,
-  JobPosition
+  JobPosition,
+  DocumentTypeItem,
+  DocumentCategory,
+  JobPositionDocument
 } from '../src/types/index.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -28,6 +31,8 @@ export interface DatabaseSchema {
   notifications: NotificationItem[];
   consentRecords: ConsentRecord[];
   jobPositions: JobPosition[];
+  documentTypes: DocumentTypeItem[];
+  jobPositionDocuments: JobPositionDocument[];
 }
 
 function ensureDirectories() {
@@ -56,6 +61,97 @@ export const INITIAL_JOB_POSITIONS = [
   { name: 'Operador de Produção', code: 'PROD-001', description: 'Operação de maquinário e linhas de produção industrial', active: true },
   { name: 'Motorista', code: 'LOG-001', description: 'Transporte e entregas operacionais', active: true },
   { name: 'Assistente Administrativo', code: 'ADM-002', description: 'Lançamentos, controle de documentos e suporte ao setor', active: true }
+];
+
+export const INITIAL_DOCUMENT_TYPES: Omit<DocumentTypeItem, 'id' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'>[] = [
+  {
+    name: 'CPF',
+    description: 'Cadastro de Pessoa Física - Documento oficial de identificação fiscal perante a Receita Federal.',
+    category: 'Pessoal',
+    required_by_default: true,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: false,
+    sort_order: 1
+  },
+  {
+    name: 'RG',
+    description: 'Registro Geral - Carteira de Identidade oficial expedida por órgão de segurança pública.',
+    category: 'Pessoal',
+    required_by_default: true,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: false,
+    sort_order: 2
+  },
+  {
+    name: 'Carteira de Trabalho',
+    description: 'CTPS Digital ou física contendo qualificação civil e número de registro profissional.',
+    category: 'Trabalhista',
+    required_by_default: true,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: false,
+    sort_order: 3
+  },
+  {
+    name: 'Comprovante de Residência',
+    description: 'Comprovante recente (água, luz, gás, telefone) emitido nos últimos 90 dias.',
+    category: 'Residencial',
+    required_by_default: true,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: false,
+    sort_order: 4
+  },
+  {
+    name: 'Diploma/Certificado',
+    description: 'Comprovante de conclusão de escolaridade fundamental, média, técnica ou superior.',
+    category: 'Escolar',
+    required_by_default: false,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: false,
+    sort_order: 5
+  },
+  {
+    name: 'NR10 - Segurança em Instalações Elétricas',
+    description: 'Certificado de capacitação e reciclagem em segurança em instalações e serviços com eletricidade.',
+    category: 'Certificação',
+    required_by_default: false,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: true,
+    sort_order: 6
+  },
+  {
+    name: 'NR35 - Trabalho em Altura',
+    description: 'Certificado de treinamento para trabalho em altura conforme norma regulamentadora.',
+    category: 'Certificação',
+    required_by_default: false,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: true,
+    sort_order: 7
+  },
+  {
+    name: 'Atestado de Saúde Ocupacional (ASO)',
+    description: 'Atestado médico de aptidão física e mental para admissão emitido por médico do trabalho.',
+    category: 'Saúde',
+    required_by_default: true,
+    active: true,
+    allowed_file_types: ['PDF', 'JPG', 'JPEG', 'PNG'],
+    max_file_size_mb: 10,
+    requires_expiration_date: true,
+    sort_order: 8
+  }
 ];
 
 function generateInitialData(): DatabaseSchema {
@@ -360,6 +456,25 @@ function generateInitialData(): DatabaseSchema {
     updatedBy: 'Sistema'
   }));
 
+  const initialDocTypes: DocumentTypeItem[] = INITIAL_DOCUMENT_TYPES.map((dt, idx) => ({
+    id: 'doc-type-' + (idx + 1).toString().padStart(2, '0'),
+    name: dt.name,
+    description: dt.description,
+    category: dt.category,
+    required_by_default: dt.required_by_default,
+    active: dt.active,
+    allowed_file_types: [...dt.allowed_file_types],
+    max_file_size_mb: dt.max_file_size_mb,
+    requires_expiration_date: dt.requires_expiration_date,
+    sort_order: dt.sort_order,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    created_by: 'Sistema',
+    updated_by: 'Sistema'
+  }));
+
+  const initialJobPositionDocs = buildDefaultJobPositionDocuments(initialJobPositions, initialDocTypes);
+
   return {
     users: [userRaitzRH, adminUser, userAdminRaitz],
     employees: [emp1, emp2, emp3],
@@ -367,8 +482,227 @@ function generateInitialData(): DatabaseSchema {
     auditLogs,
     notifications,
     consentRecords: [],
-    jobPositions: initialJobPositions
+    jobPositions: initialJobPositions,
+    documentTypes: initialDocTypes,
+    jobPositionDocuments: initialJobPositionDocs
   };
+}
+
+export function buildDefaultJobPositionDocuments(
+  jobPositions: JobPosition[],
+  docTypes: DocumentTypeItem[]
+): JobPositionDocument[] {
+  const list: JobPositionDocument[] = [];
+  const now = new Date().toISOString();
+
+  const eletricista = jobPositions.find(p => p.name.toLowerCase().includes('eletricista') || p.code === 'MAN-001');
+  const auxiliarAdm = jobPositions.find(p => p.name.toLowerCase().includes('auxiliar administrativo') || p.code === 'ADM-001');
+
+  const getDoc = (prefix: string) => docTypes.find(d => d.name.toLowerCase().startsWith(prefix.toLowerCase()));
+
+  const cpf = getDoc('CPF');
+  const rg = getDoc('RG');
+  const ctps = getDoc('Carteira de Trabalho');
+  const compRes = getDoc('Comprovante de Residência');
+  const nr10 = getDoc('NR10');
+  const nr35 = getDoc('NR35');
+  const diploma = getDoc('Diploma');
+
+  // Cenário 1: Eletricista
+  // 1. CPF — obrigatório
+  // 2. RG — obrigatório
+  // 3. Carteira de Trabalho — obrigatório
+  // 4. Comprovante de Residência — obrigatório
+  // 5. NR10 — obrigatório
+  // 6. NR35 — obrigatório
+  // 7. Diploma — opcional
+  if (eletricista) {
+    if (cpf) {
+      list.push({
+        id: 'jpd-elet-01',
+        job_position_id: eletricista.id,
+        document_type_id: cpf.id,
+        required: true,
+        sort_order: 1,
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (rg) {
+      list.push({
+        id: 'jpd-elet-02',
+        job_position_id: eletricista.id,
+        document_type_id: rg.id,
+        required: true,
+        sort_order: 2,
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (ctps) {
+      list.push({
+        id: 'jpd-elet-03',
+        job_position_id: eletricista.id,
+        document_type_id: ctps.id,
+        required: true,
+        sort_order: 3,
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (compRes) {
+      list.push({
+        id: 'jpd-elet-04',
+        job_position_id: eletricista.id,
+        document_type_id: compRes.id,
+        required: true,
+        sort_order: 4,
+        instructions: 'Comprovante recente emitido nos últimos 90 dias (luz, água ou gás).',
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (nr10) {
+      list.push({
+        id: 'jpd-elet-05',
+        job_position_id: eletricista.id,
+        document_type_id: nr10.id,
+        required: true,
+        sort_order: 5,
+        instructions: 'Certificado de NR10 válido e legível (básico ou reciclagem de 40h).',
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (nr35) {
+      list.push({
+        id: 'jpd-elet-06',
+        job_position_id: eletricista.id,
+        document_type_id: nr35.id,
+        required: true,
+        sort_order: 6,
+        instructions: 'Certificado de capacitação NR35 dentro da validade bienal.',
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (diploma) {
+      list.push({
+        id: 'jpd-elet-07',
+        job_position_id: eletricista.id,
+        document_type_id: diploma.id,
+        required: false,
+        sort_order: 7,
+        instructions: 'Curso técnico em eletrotécnica ou qualificação correlata.',
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+  }
+
+  // Cenário 2: Auxiliar Administrativo
+  // 1. CPF — obrigatório
+  // 2. RG — obrigatório
+  // 3. Carteira de Trabalho — obrigatório
+  // 4. Comprovante de Residência — obrigatório
+  // 5. Diploma — opcional
+  if (auxiliarAdm) {
+    if (cpf) {
+      list.push({
+        id: 'jpd-adm-01',
+        job_position_id: auxiliarAdm.id,
+        document_type_id: cpf.id,
+        required: true,
+        sort_order: 1,
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (rg) {
+      list.push({
+        id: 'jpd-adm-02',
+        job_position_id: auxiliarAdm.id,
+        document_type_id: rg.id,
+        required: true,
+        sort_order: 2,
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (ctps) {
+      list.push({
+        id: 'jpd-adm-03',
+        job_position_id: auxiliarAdm.id,
+        document_type_id: ctps.id,
+        required: true,
+        sort_order: 3,
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (compRes) {
+      list.push({
+        id: 'jpd-adm-04',
+        job_position_id: auxiliarAdm.id,
+        document_type_id: compRes.id,
+        required: true,
+        sort_order: 4,
+        instructions: 'Comprovante de residência atualizado em nome do colaborador ou familiares.',
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+    if (diploma) {
+      list.push({
+        id: 'jpd-adm-05',
+        job_position_id: auxiliarAdm.id,
+        document_type_id: diploma.id,
+        required: true,
+        sort_order: 5,
+        instructions: 'Comprovante de escolaridade (Ensino Médio ou Superior).',
+        active: true,
+        created_at: now,
+        updated_at: now,
+        created_by: 'Sistema',
+        updated_by: 'Sistema'
+      });
+    }
+  }
+
+  return list;
 }
 
 export class Database {
@@ -395,6 +729,36 @@ export class Database {
             createdBy: 'Sistema',
             updatedBy: 'Sistema'
           }));
+          this.save();
+        }
+
+        // Garante a existência e integridade dos Tipos de Documentos (Bloco 3.2)
+        if (!this.data.documentTypes || this.data.documentTypes.length === 0) {
+          this.data.documentTypes = INITIAL_DOCUMENT_TYPES.map((dt, idx) => ({
+            id: 'doc-type-' + (idx + 1).toString().padStart(2, '0'),
+            name: dt.name,
+            description: dt.description,
+            category: dt.category,
+            required_by_default: dt.required_by_default,
+            active: dt.active,
+            allowed_file_types: [...dt.allowed_file_types],
+            max_file_size_mb: dt.max_file_size_mb,
+            requires_expiration_date: dt.requires_expiration_date,
+            sort_order: dt.sort_order,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            created_by: 'Sistema',
+            updated_by: 'Sistema'
+          }));
+          this.save();
+        }
+
+        // Garante a existência e integridade do Checklist de Documentos por Cargo (Bloco 3.3)
+        if (!this.data.jobPositionDocuments || this.data.jobPositionDocuments.length === 0) {
+          this.data.jobPositionDocuments = buildDefaultJobPositionDocuments(
+            this.data.jobPositions || [],
+            this.data.documentTypes || []
+          );
           this.save();
         }
 
@@ -766,6 +1130,652 @@ export class Database {
     return this.updateJobPosition(id, { active }, userName);
   }
 
+  // ------------------------------------------------------------------
+  // TIPOS DE DOCUMENTOS (BLOCO 3.2)
+  // ------------------------------------------------------------------
+
+  getDocumentTypes(
+    statusFilter: 'all' | 'active' | 'inactive' = 'all',
+    categoryFilter?: string,
+    search?: string
+  ): DocumentTypeItem[] {
+    if (!this.data.documentTypes) {
+      this.data.documentTypes = [];
+    }
+
+    let list = [...this.data.documentTypes];
+
+    // Filtro de status
+    if (statusFilter === 'active') {
+      list = list.filter(d => d.active);
+    } else if (statusFilter === 'inactive') {
+      list = list.filter(d => !d.active);
+    }
+
+    // Filtro por categoria
+    if (categoryFilter && categoryFilter !== 'all' && categoryFilter !== 'Todas') {
+      const catLower = categoryFilter.trim().toLowerCase();
+      list = list.filter(d => d.category && d.category.toLowerCase() === catLower);
+    }
+
+    // Busca textual por nome ou descrição
+    if (search && search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(d => 
+        (d.name && d.name.toLowerCase().includes(q)) ||
+        (d.description && d.description.toLowerCase().includes(q)) ||
+        (d.category && d.category.toLowerCase().includes(q))
+      );
+    }
+
+    // Ordenação padrão: por sort_order ASC, depois por nome ASC
+    return list.sort((a, b) => {
+      const orderA = a.sort_order ?? 999;
+      const orderB = b.sort_order ?? 999;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }
+
+  getDocumentTypeById(id: string): DocumentTypeItem | undefined {
+    if (!this.data.documentTypes) return undefined;
+    return this.data.documentTypes.find(d => d.id === id);
+  }
+
+  addDocumentType(data: Partial<DocumentTypeItem>, userName: string): DocumentTypeItem {
+    if (!this.data.documentTypes) {
+      this.data.documentTypes = [];
+    }
+
+    const cleanName = data.name?.trim().replace(/\s+/g, ' ');
+    if (!cleanName) {
+      throw new Error('O nome do tipo de documento é obrigatório.');
+    }
+
+    // Validação de unicidade para tipos ativos
+    const existingActive = this.data.documentTypes.find(
+      d => d.active && d.name.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+    if (existingActive) {
+      throw new Error(`Já existe um tipo de documento ativo com o nome "${cleanName}".`);
+    }
+
+    const cleanCategory = data.category?.trim() || 'Outros';
+    const cleanDesc = data.description ? data.description.trim() : undefined;
+    
+    // Tratamento de tipos de arquivo permitidos
+    let allowedTypes = Array.isArray(data.allowed_file_types) && data.allowed_file_types.length > 0
+      ? data.allowed_file_types.map(t => t.toUpperCase().trim()).filter(Boolean)
+      : ['PDF', 'JPG', 'JPEG', 'PNG'];
+
+    if (allowedTypes.length === 0) {
+      throw new Error('Selecione pelo menos um formato de arquivo permitido.');
+    }
+
+    // Tamanho máximo em MB
+    const maxSize = Number(data.max_file_size_mb) || 10;
+    if (maxSize <= 0 || maxSize > 100) {
+      throw new Error('O tamanho máximo do arquivo deve ser entre 1 MB e 100 MB.');
+    }
+
+    // Ordem de exibição
+    let sortOrder = Number(data.sort_order);
+    if (isNaN(sortOrder) || sortOrder < 0) {
+      const currentMax = this.data.documentTypes.reduce((max, d) => Math.max(max, d.sort_order || 0), 0);
+      sortOrder = currentMax + 1;
+    }
+
+    const now = new Date().toISOString();
+    const newDocType: DocumentTypeItem = {
+      id: 'doc-type-' + crypto.randomUUID(),
+      name: cleanName,
+      description: cleanDesc,
+      category: cleanCategory,
+      required_by_default: Boolean(data.required_by_default),
+      active: data.active !== undefined ? Boolean(data.active) : true,
+      allowed_file_types: allowedTypes,
+      max_file_size_mb: maxSize,
+      requires_expiration_date: Boolean(data.requires_expiration_date),
+      sort_order: sortOrder,
+      created_at: now,
+      updated_at: now,
+      created_by: userName || 'Sistema',
+      updated_by: userName || 'Sistema'
+    };
+
+    this.data.documentTypes.push(newDocType);
+
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action: 'document_type_created',
+      details: `Tipo de documento "${cleanName}" (Categoria: ${cleanCategory}, Obrigatório Padrão: ${newDocType.required_by_default ? 'Sim' : 'Não'}, Validade: ${newDocType.requires_expiration_date ? 'Sim' : 'Não'}) cadastrado por ${userName}.`
+    });
+
+    this.save();
+    return newDocType;
+  }
+
+  updateDocumentType(id: string, updates: Partial<DocumentTypeItem>, userName: string): DocumentTypeItem {
+    if (!this.data.documentTypes) {
+      this.data.documentTypes = [];
+    }
+
+    const docType = this.data.documentTypes.find(d => d.id === id);
+    if (!docType) {
+      throw new Error(`Tipo de documento com ID "${id}" não encontrado.`);
+    }
+
+    const changes: string[] = [];
+    let isStatusChange = false;
+    let becameActive = false;
+
+    // Atualização de nome
+    if (updates.name !== undefined) {
+      const cleanName = updates.name.trim().replace(/\s+/g, ' ');
+      if (!cleanName) {
+        throw new Error('O nome do tipo de documento não pode ser vazio.');
+      }
+
+      if (cleanName.toLowerCase() !== docType.name.toLowerCase()) {
+        const existing = this.data.documentTypes.find(
+          d => d.id !== id && d.active && d.name.trim().toLowerCase() === cleanName.toLowerCase()
+        );
+        if (existing) {
+          throw new Error(`Já existe outro tipo de documento ativo com o nome "${cleanName}".`);
+        }
+        changes.push(`nome alterado de "${docType.name}" para "${cleanName}"`);
+        docType.name = cleanName;
+      }
+    }
+
+    // Descrição
+    if (updates.description !== undefined) {
+      const cleanDesc = updates.description ? updates.description.trim() : undefined;
+      if (cleanDesc !== docType.description) {
+        changes.push('descrição atualizada');
+        docType.description = cleanDesc;
+      }
+    }
+
+    // Categoria
+    if (updates.category !== undefined) {
+      const cleanCategory = updates.category.trim();
+      if (!cleanCategory) {
+        throw new Error('A categoria do documento é obrigatória.');
+      }
+      if (cleanCategory !== docType.category) {
+        changes.push(`categoria alterada de "${docType.category}" para "${cleanCategory}"`);
+        docType.category = cleanCategory;
+      }
+    }
+
+    // Obrigatório por padrão
+    if (updates.required_by_default !== undefined && updates.required_by_default !== docType.required_by_default) {
+      changes.push(`obrigatório por padrão alterado para ${updates.required_by_default ? 'Sim' : 'Não'}`);
+      docType.required_by_default = Boolean(updates.required_by_default);
+    }
+
+    // Exige data de validade
+    if (updates.requires_expiration_date !== undefined && updates.requires_expiration_date !== docType.requires_expiration_date) {
+      changes.push(`exigência de data de validade alterada para ${updates.requires_expiration_date ? 'Sim' : 'Não'}`);
+      docType.requires_expiration_date = Boolean(updates.requires_expiration_date);
+    }
+
+    // Formatos permitidos
+    if (updates.allowed_file_types !== undefined) {
+      const cleanTypes = updates.allowed_file_types.map(t => t.toUpperCase().trim()).filter(Boolean);
+      if (cleanTypes.length === 0) {
+        throw new Error('Selecione pelo menos um formato de arquivo permitido.');
+      }
+      changes.push(`formatos permitidos atualizados: [${cleanTypes.join(', ')}]`);
+      docType.allowed_file_types = cleanTypes;
+    }
+
+    // Tamanho máximo
+    if (updates.max_file_size_mb !== undefined) {
+      const size = Number(updates.max_file_size_mb);
+      if (isNaN(size) || size <= 0 || size > 100) {
+        throw new Error('O tamanho máximo do arquivo deve ser entre 1 MB e 100 MB.');
+      }
+      if (size !== docType.max_file_size_mb) {
+        changes.push(`tamanho máximo alterado para ${size} MB`);
+        docType.max_file_size_mb = size;
+      }
+    }
+
+    // Ordem de exibição
+    if (updates.sort_order !== undefined) {
+      const order = Number(updates.sort_order);
+      if (!isNaN(order) && order !== docType.sort_order) {
+        changes.push(`ordem alterada para ${order}`);
+        docType.sort_order = order;
+      }
+    }
+
+    // Status ativo / inativo
+    if (updates.active !== undefined && updates.active !== docType.active) {
+      if (updates.active) {
+        // Ao reativar, verifica conflito de nome com outro ativo
+        const existing = this.data.documentTypes.find(
+          d => d.id !== id && d.active && d.name.trim().toLowerCase() === docType.name.trim().toLowerCase()
+        );
+        if (existing) {
+          throw new Error(`Não é possível ativar este documento. Já existe outro tipo de documento ativo com o nome "${docType.name}".`);
+        }
+      }
+
+      docType.active = updates.active;
+      changes.push(`status alterado para ${updates.active ? 'Ativo' : 'Inativo'}`);
+      isStatusChange = true;
+      becameActive = updates.active;
+    }
+
+    docType.updated_at = new Date().toISOString();
+    docType.updated_by = userName || 'Sistema';
+
+    let action = 'document_type_updated';
+    if (isStatusChange) {
+      action = becameActive ? 'document_type_activated' : 'document_type_deactivated';
+    }
+
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action,
+      details: `Tipo de documento "${docType.name}": ${changes.length > 0 ? changes.join(', ') : 'dados atualizados'} por ${userName}.`
+    });
+
+    this.save();
+    return docType;
+  }
+
+  toggleDocumentTypeStatus(id: string, active: boolean, userName: string): DocumentTypeItem {
+    return this.updateDocumentType(id, { active }, userName);
+  }
+
+  seedInitialDocumentTypes(userName: string): DocumentTypeItem[] {
+    if (!this.data.documentTypes) {
+      this.data.documentTypes = [];
+    }
+
+    let addedCount = 0;
+    for (const dt of INITIAL_DOCUMENT_TYPES) {
+      const exists = this.data.documentTypes.some(
+        d => d.name.trim().toLowerCase() === dt.name.trim().toLowerCase()
+      );
+      if (!exists) {
+        const now = new Date().toISOString();
+        this.data.documentTypes.push({
+          id: 'doc-type-' + crypto.randomUUID(),
+          name: dt.name,
+          description: dt.description,
+          category: dt.category,
+          required_by_default: dt.required_by_default,
+          active: dt.active,
+          allowed_file_types: [...dt.allowed_file_types],
+          max_file_size_mb: dt.max_file_size_mb,
+          requires_expiration_date: dt.requires_expiration_date,
+          sort_order: dt.sort_order,
+          created_at: now,
+          updated_at: now,
+          created_by: userName || 'Sistema',
+          updated_by: userName || 'Sistema'
+        });
+        addedCount++;
+      }
+    }
+
+    if (addedCount > 0) {
+      this.addAuditLog({
+        userName: userName || 'Usuário RH',
+        action: 'document_type_created',
+        details: `${addedCount} tipos de documentos padrão do sistema foram criados por ${userName}.`
+      });
+      this.save();
+    }
+
+    return this.getDocumentTypes('all');
+  }
+
+  // ------------------------------------------------------------------
+  // CHECKLIST DE DOCUMENTOS POR CARGO (BLOCO 3.3)
+  // ------------------------------------------------------------------
+
+  getJobPositionDocuments(
+    jobPositionId: string, 
+    statusFilter: 'all' | 'active' | 'inactive' = 'all'
+  ): JobPositionDocument[] {
+    if (!this.data.jobPositionDocuments) {
+      this.data.jobPositionDocuments = [];
+    }
+
+    let items = this.data.jobPositionDocuments.filter(jpd => jpd.job_position_id === jobPositionId);
+
+    if (statusFilter === 'active') {
+      items = items.filter(jpd => jpd.active);
+    } else if (statusFilter === 'inactive') {
+      items = items.filter(jpd => !jpd.active);
+    }
+
+    const jobPos = this.data.jobPositions?.find(p => p.id === jobPositionId);
+
+    const populated = items.map(item => {
+      const docType = this.data.documentTypes?.find(dt => dt.id === item.document_type_id);
+      return {
+        ...item,
+        document_type: docType,
+        job_position: jobPos
+      };
+    });
+
+    return populated.sort((a, b) => {
+      const orderA = a.sort_order ?? 999;
+      const orderB = b.sort_order ?? 999;
+      if (orderA !== orderB) return orderA - orderB;
+      return (a.document_type?.name || '').localeCompare(b.document_type?.name || '', 'pt-BR');
+    });
+  }
+
+  getJobPositionDocumentById(id: string): JobPositionDocument | undefined {
+    if (!this.data.jobPositionDocuments) return undefined;
+    const item = this.data.jobPositionDocuments.find(jpd => jpd.id === id);
+    if (!item) return undefined;
+
+    const docType = this.data.documentTypes?.find(dt => dt.id === item.document_type_id);
+    const jobPos = this.data.jobPositions?.find(jp => jp.id === item.job_position_id);
+
+    return {
+      ...item,
+      document_type: docType,
+      job_position: jobPos
+    };
+  }
+
+  getNextJobPositionDocumentSortOrder(jobPositionId: string): number {
+    if (!this.data.jobPositionDocuments) return 1;
+    const currentItems = this.data.jobPositionDocuments.filter(
+      jpd => jpd.job_position_id === jobPositionId && jpd.active
+    );
+    if (currentItems.length === 0) return 1;
+    const max = Math.max(...currentItems.map(i => i.sort_order || 0));
+    return max + 1;
+  }
+
+  addJobPositionDocument(
+    jobPositionId: string,
+    data: {
+      document_type_id: string;
+      required?: boolean;
+      sort_order?: number;
+      instructions?: string;
+      active?: boolean;
+    },
+    userName: string
+  ): JobPositionDocument {
+    if (!this.data.jobPositionDocuments) {
+      this.data.jobPositionDocuments = [];
+    }
+
+    // 1. Validação do cargo
+    const jobPos = this.data.jobPositions?.find(p => p.id === jobPositionId);
+    if (!jobPos) {
+      throw new Error('Cargo informado não foi encontrado.');
+    }
+    if (!jobPos.active) {
+      throw new Error(`Não é possível configurar checklist para o cargo "${jobPos.name}" pois ele está inativo.`);
+    }
+
+    // 2. Validação do tipo de documento
+    if (!data.document_type_id) {
+      throw new Error('O tipo de documento é obrigatório.');
+    }
+    const docType = this.data.documentTypes?.find(dt => dt.id === data.document_type_id);
+    if (!docType) {
+      throw new Error('Tipo de documento informado não foi encontrado.');
+    }
+    if (!docType.active) {
+      throw new Error(`O tipo de documento "${docType.name}" está inativo no catálogo geral e não pode ser vinculado a novos cargos.`);
+    }
+
+    // 3. Validação de duplicidade ativa
+    const existing = this.data.jobPositionDocuments.find(
+      jpd => jpd.job_position_id === jobPositionId && jpd.document_type_id === data.document_type_id
+    );
+
+    const now = new Date().toISOString();
+
+    if (existing) {
+      if (existing.active) {
+        throw new Error(`O documento "${docType.name}" já está configurado no checklist do cargo "${jobPos.name}".`);
+      } else {
+        // Reativar e atualizar os campos
+        existing.active = true;
+        existing.required = data.required !== undefined ? Boolean(data.required) : docType.required_by_default;
+        existing.instructions = data.instructions ? data.instructions.trim() : undefined;
+        existing.sort_order = typeof data.sort_order === 'number' && data.sort_order > 0
+          ? data.sort_order
+          : this.getNextJobPositionDocumentSortOrder(jobPositionId);
+        existing.updated_at = now;
+        existing.updated_by = userName || 'Sistema';
+
+        this.addAuditLog({
+          userName: userName || 'Usuário RH',
+          action: 'job_position_document_added',
+          details: `Documento "${docType.name}" reativado no checklist do cargo "${jobPos.name}" (${existing.required ? 'Obrigatório' : 'Opcional'}, Ordem: ${existing.sort_order}) por ${userName}.`
+        });
+
+        this.save();
+        return {
+          ...existing,
+          document_type: docType,
+          job_position: jobPos
+        };
+      }
+    }
+
+    // Nova associação
+    const sortOrder = typeof data.sort_order === 'number' && data.sort_order > 0
+      ? data.sort_order
+      : this.getNextJobPositionDocumentSortOrder(jobPositionId);
+
+    const isRequired = data.required !== undefined ? Boolean(data.required) : docType.required_by_default;
+    const cleanInstructions = data.instructions ? data.instructions.trim() : undefined;
+
+    const newJpd: JobPositionDocument = {
+      id: 'jpd-' + crypto.randomUUID(),
+      job_position_id: jobPositionId,
+      document_type_id: docType.id,
+      required: isRequired,
+      sort_order: sortOrder,
+      instructions: cleanInstructions,
+      active: true,
+      created_at: now,
+      updated_at: now,
+      created_by: userName || 'Sistema',
+      updated_by: userName || 'Sistema'
+    };
+
+    this.data.jobPositionDocuments.push(newJpd);
+
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action: 'job_position_document_added',
+      details: `Documento "${docType.name}" adicionado ao checklist do cargo "${jobPos.name}" (${newJpd.required ? 'Obrigatório' : 'Opcional'}, Ordem: ${newJpd.sort_order}) por ${userName}.`
+    });
+
+    this.save();
+
+    return {
+      ...newJpd,
+      document_type: docType,
+      job_position: jobPos
+    };
+  }
+
+  updateJobPositionDocument(
+    id: string,
+    updates: Partial<JobPositionDocument>,
+    userName: string
+  ): JobPositionDocument {
+    if (!this.data.jobPositionDocuments) {
+      this.data.jobPositionDocuments = [];
+    }
+
+    const jpd = this.data.jobPositionDocuments.find(item => item.id === id);
+    if (!jpd) {
+      throw new Error(`Configuração de documento do cargo com ID "${id}" não encontrada.`);
+    }
+
+    const jobPos = this.data.jobPositions?.find(p => p.id === jpd.job_position_id);
+    const docType = this.data.documentTypes?.find(dt => dt.id === jpd.document_type_id);
+
+    const changes: string[] = [];
+
+    // Não permitir alteração de cargo ou tipo de documento vinculado
+    if (updates.job_position_id && updates.job_position_id !== jpd.job_position_id) {
+      throw new Error('Não é permitido transferir a configuração para outro cargo diretamente.');
+    }
+    if (updates.document_type_id && updates.document_type_id !== jpd.document_type_id) {
+      throw new Error('Não é permitido alterar o tipo de documento de uma associação existente.');
+    }
+
+    // Alteração de obrigatoriedade
+    if (updates.required !== undefined && updates.required !== jpd.required) {
+      changes.push(`obrigatoriedade alterada para ${updates.required ? 'Obrigatório' : 'Opcional'}`);
+      jpd.required = Boolean(updates.required);
+    }
+
+    // Alteração de instruções
+    if (updates.instructions !== undefined) {
+      const cleanInst = updates.instructions ? updates.instructions.trim() : undefined;
+      if (cleanInst !== jpd.instructions) {
+        changes.push('instruções atualizadas');
+        jpd.instructions = cleanInst;
+      }
+    }
+
+    // Alteração de ordem
+    if (updates.sort_order !== undefined && typeof updates.sort_order === 'number' && updates.sort_order > 0) {
+      if (updates.sort_order !== jpd.sort_order) {
+        changes.push(`ordem alterada para ${updates.sort_order}`);
+        jpd.sort_order = updates.sort_order;
+      }
+    }
+
+    // Alteração de status
+    let isStatusChange = false;
+    let becameActive = false;
+    if (updates.active !== undefined && updates.active !== jpd.active) {
+      if (updates.active) {
+        // Ao reativar, verifica se o documento global continua ativo
+        if (docType && !docType.active) {
+          throw new Error(`Não é possível ativar esta associação. O tipo de documento "${docType.name}" está inativo no catálogo geral.`);
+        }
+      }
+      jpd.active = updates.active;
+      changes.push(`status alterado para ${updates.active ? 'Ativo' : 'Inativo'}`);
+      isStatusChange = true;
+      becameActive = updates.active;
+    }
+
+    const now = new Date().toISOString();
+    jpd.updated_at = now;
+    jpd.updated_by = userName || 'Sistema';
+
+    let action = 'job_position_document_updated';
+    if (isStatusChange) {
+      action = becameActive ? 'job_position_document_activated' : 'job_position_document_removed';
+    }
+
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action,
+      details: `Checklist do cargo "${jobPos?.name || 'Cargo'}" - Documento "${docType?.name || 'Documento'}": ${changes.length > 0 ? changes.join(', ') : 'configurações atualizadas'} por ${userName}.`
+    });
+
+    this.save();
+
+    return {
+      ...jpd,
+      document_type: docType,
+      job_position: jobPos
+    };
+  }
+
+  toggleJobPositionDocumentStatus(id: string, active: boolean, userName: string): JobPositionDocument {
+    return this.updateJobPositionDocument(id, { active }, userName);
+  }
+
+  reorderJobPositionDocuments(
+    jobPositionId: string,
+    orderedIds: string[],
+    userName: string
+  ): JobPositionDocument[] {
+    if (!this.data.jobPositionDocuments) {
+      this.data.jobPositionDocuments = [];
+    }
+
+    const jobPos = this.data.jobPositions?.find(p => p.id === jobPositionId);
+    if (!jobPos) {
+      throw new Error('Cargo não encontrado.');
+    }
+
+    // Atualiza sort_order de cada item na ordem do array
+    orderedIds.forEach((id, index) => {
+      const item = this.data.jobPositionDocuments.find(jpd => jpd.id === id && jpd.job_position_id === jobPositionId);
+      if (item) {
+        item.sort_order = index + 1;
+        item.updated_at = new Date().toISOString();
+        item.updated_by = userName || 'Sistema';
+      }
+    });
+
+    this.addAuditLog({
+      userName: userName || 'Usuário RH',
+      action: 'job_position_document_reordered',
+      details: `Checklist de documentos do cargo "${jobPos.name}" reordenado por ${userName}.`
+    });
+
+    this.save();
+
+    return this.getJobPositionDocuments(jobPositionId, 'all');
+  }
+
+  removeJobPositionDocument(id: string, userName: string): JobPositionDocument {
+    return this.updateJobPositionDocument(id, { active: false }, userName);
+  }
+
+  seedInitialJobPositionDocuments(userName: string): JobPositionDocument[] {
+    if (!this.data.jobPositionDocuments) {
+      this.data.jobPositionDocuments = [];
+    }
+
+    const defaultDocs = buildDefaultJobPositionDocuments(
+      this.data.jobPositions || [],
+      this.data.documentTypes || []
+    );
+
+    let addedCount = 0;
+    for (const d of defaultDocs) {
+      const exists = this.data.jobPositionDocuments.some(
+        jpd => jpd.job_position_id === d.job_position_id && jpd.document_type_id === d.document_type_id
+      );
+      if (!exists) {
+        this.data.jobPositionDocuments.push(d);
+        addedCount++;
+      }
+    }
+
+    if (addedCount > 0) {
+      this.addAuditLog({
+        userName: userName || 'Usuário RH',
+        action: 'job_position_document_added',
+        details: `${addedCount} associações padrão de checklist por cargo foram geradas no sistema por ${userName}.`
+      });
+      this.save();
+    }
+
+    return this.data.jobPositionDocuments;
+  }
 
   // Admissões
   getAdmissions(): Admission[] {
@@ -780,7 +1790,10 @@ export class Database {
     return this.data.admissions.find(a => a.inviteToken === token);
   }
 
-  createAdmission(employeeData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'>, createdByUserName: string): Admission {
+  createAdmission(
+    employeeData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'> & { jobPositionId?: string }, 
+    createdByUserName: string
+  ): Admission {
     // Validação de CPF duplicado em admissões ativas
     const cleanCPF = employeeData.cpf.replace(/\D/g, '');
     const duplicate = this.data.admissions.find(a => 
@@ -808,18 +1821,90 @@ export class Database {
     const inviteToken = 'tok_' + crypto.randomBytes(24).toString('hex');
     const inviteExpiresAt = new Date(Date.now() + 30 * 86400000).toISOString(); // 30 dias
 
-    // Checklist inicial dos 5 documentos obrigatórios
-    const documents: AdmissionDocument[] = INITIAL_DOC_TYPES.map(item => ({
-      id: 'doc-' + crypto.randomUUID(),
-      admissionId,
-      documentType: item.type,
-      required: item.required,
-      status: 'Não enviado',
-      currentVersion: 0,
-      versions: [],
-      createdAt: now,
-      updatedAt: now
-    }));
+    // Identifica o cargo selecionado para aplicar o checklist snapshot (Bloco 3.4)
+    let jobPosition: JobPosition | undefined;
+    if (employeeData.jobPositionId) {
+      jobPosition = this.data.jobPositions?.find(
+        jp => jp.id === employeeData.jobPositionId && jp.active
+      );
+    }
+    if (!jobPosition && employeeData.role) {
+      const searchRole = employeeData.role.trim().toLowerCase();
+      jobPosition = this.data.jobPositions?.find(
+        jp => jp.active && (jp.name.trim().toLowerCase() === searchRole || (jp.code && jp.code.trim().toLowerCase() === searchRole))
+      );
+    }
+
+    // Geração do Snapshot do checklist de documentos (Bloco 3.4)
+    const documents: AdmissionDocument[] = [];
+    const seenDocTypeIds = new Set<string>();
+
+    if (jobPosition && this.data.jobPositionDocuments) {
+      // 1. Filtrar somente associações ativas deste cargo
+      const activeJpDocs = this.data.jobPositionDocuments.filter(
+        jpd => jpd.job_position_id === jobPosition!.id && jpd.active
+      );
+
+      // 2. Ordenar pelo sort_order configurado
+      const sortedJpDocs = [...activeJpDocs].sort((a, b) => {
+        const orderA = a.sort_order ?? 999;
+        const orderB = b.sort_order ?? 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return 0;
+      });
+
+      // 3. Gerar o snapshot de cada documento ativo
+      for (let i = 0; i < sortedJpDocs.length; i++) {
+        const jpd = sortedJpDocs[i];
+
+        // Evitar duplicação do mesmo tipo de documento na mesma admissão
+        if (seenDocTypeIds.has(jpd.document_type_id)) {
+          continue;
+        }
+
+        // Buscar tipo de documento no catálogo geral
+        const docType = this.data.documentTypes?.find(dt => dt.id === jpd.document_type_id);
+
+        // Bloco 3.4: usar apenas tipos de documentos ativos
+        if (!docType || !docType.active) {
+          continue;
+        }
+
+        seenDocTypeIds.add(jpd.document_type_id);
+
+        const docSnapshot: AdmissionDocument = {
+          id: 'doc-' + crypto.randomUUID(),
+          admissionId,
+          documentType: docType.name,
+          document_type_id: docType.id,
+          document_type_name: docType.name,
+          category: docType.category,
+          required: Boolean(jpd.required),
+          sort_order: jpd.sort_order ?? (i + 1),
+          instructions: jpd.instructions ? jpd.instructions.trim() : undefined,
+          requires_expiration_date: Boolean(docType.requires_expiration_date),
+          allowed_file_types: docType.allowed_file_types && docType.allowed_file_types.length > 0
+            ? [...docType.allowed_file_types]
+            : ['PDF', 'JPG', 'JPEG', 'PNG'],
+          max_file_size_mb: docType.max_file_size_mb || 10,
+          source_job_position_document_id: jpd.id,
+          source_config_version: '1.0',
+          status: 'Não enviado',
+          currentVersion: 0,
+          versions: [],
+          createdAt: now,
+          updatedAt: now,
+          created_by: createdByUserName || 'Sistema',
+          updated_by: createdByUserName || 'Sistema'
+        };
+
+        documents.push(docSnapshot);
+      }
+    }
+
+    const requiredDocsCount = documents.filter(d => d.required).length;
+    const optionalDocsCount = documents.filter(d => !d.required).length;
+    const totalDocsCount = documents.length;
 
     const newAdmission: Admission = {
       id: admissionId,
@@ -833,22 +1918,32 @@ export class Database {
       dataConfirmed: false,
       documents,
       progressPercent: 0,
-      totalDocuments: documents.length,
+      totalDocuments: requiredDocsCount,
       approvedDocuments: 0,
       createdAt: now,
       updatedAt: now
     };
 
+    // Operação atômica em memória antes da persistência
     this.data.employees.push(employee);
     this.data.admissions.push(newAdmission);
 
-    // Auditoria
+    // Auditoria Geral de Criação
     this.addAuditLog({
       userName: createdByUserName,
       action: 'RH criou uma nova admissão',
       admissionId,
       employeeName: employee.name,
       details: `Admissão cadastrada para o cargo ${employee.role} (${employee.department} - ${employee.unit})`
+    });
+
+    // Auditoria Específica da Criação do Checklist de Documentos (Bloco 3.4 - Requisito 20)
+    this.addAuditLog({
+      userName: createdByUserName,
+      action: 'admission_document_checklist_created',
+      admissionId,
+      employeeName: employee.name,
+      details: `Checklist da admissão gerado para o cargo "${employee.role}": ${totalDocsCount} documentos (${requiredDocsCount} obrigatórios, ${optionalDocsCount} opcionais).`
     });
 
     this.addAuditLog({
@@ -861,7 +1956,7 @@ export class Database {
 
     this.addNotification({
       title: 'Nova admissão criada',
-      message: `Admissão de ${employee.name} (${employee.role}) foi criada com sucesso.`,
+      message: `Admissão de ${employee.name} (${employee.role}) foi criada com sucesso com ${totalDocsCount} documentos no checklist.`,
       type: 'admission_created',
       admissionId,
       link: `/admissoes/${admissionId}`
@@ -1042,7 +2137,8 @@ export class Database {
     decision: 'Aprovado' | 'Rejeitado', 
     reviewerName: string,
     rejectionReason?: string,
-    rejectionNotes?: string
+    rejectionNotes?: string,
+    expectedVersion?: number
   ): { admission: Admission; document: AdmissionDocument } {
     let targetAdmission: Admission | undefined;
     let targetDocument: AdmissionDocument | undefined;
@@ -1057,19 +2153,40 @@ export class Database {
     }
 
     if (!targetAdmission || !targetDocument) {
-      throw new Error('Documento não encontrado na base de dados');
+      throw new Error('Documento não encontrado na base de dados.');
     }
 
-    if (decision === 'Rejeitado' && !rejectionReason) {
-      throw new Error('É obrigatório informar o motivo da rejeição');
+    // Validação de concorrência
+    if (expectedVersion !== undefined && targetDocument.currentVersion !== expectedVersion) {
+      throw new Error(
+        `Conflito de concorrência: uma nova versão (V${targetDocument.currentVersion}) deste documento foi enviada enquanto você realizava a análise. Por favor, atualize a visualização.`
+      );
+    }
+
+    // Regra: Não permitir aprovação sem documento enviado
+    if (decision === 'Aprovado') {
+      if (targetDocument.status === 'Não enviado' || targetDocument.currentVersion === 0) {
+        throw new Error('Não é possível aprovar um documento que ainda não foi enviado pelo colaborador.');
+      }
+    }
+
+    // Regra: Rejeição exige motivo obrigatório
+    if (decision === 'Rejeitado') {
+      if (!rejectionReason || !rejectionReason.trim()) {
+        throw new Error('É obrigatório selecionar o motivo da rejeição do documento.');
+      }
+      // Se escolher "Outro", exigir descrição/orientação obrigatória
+      if (rejectionReason.trim() === 'Outro' && (!rejectionNotes || !rejectionNotes.trim())) {
+        throw new Error('Para o motivo "Outro", é obrigatório preencher a descrição detalhada da rejeição.');
+      }
     }
 
     const now = new Date().toISOString();
     targetDocument.status = decision;
     targetDocument.reviewedAt = now;
     targetDocument.reviewedBy = reviewerName;
-    targetDocument.rejectionReason = decision === 'Rejeitado' ? rejectionReason : undefined;
-    targetDocument.rejectionNotes = decision === 'Rejeitado' ? rejectionNotes : undefined;
+    targetDocument.rejectionReason = decision === 'Rejeitado' ? rejectionReason.trim() : undefined;
+    targetDocument.rejectionNotes = decision === 'Rejeitado' ? (rejectionNotes ? rejectionNotes.trim() : undefined) : undefined;
     targetDocument.updatedAt = now;
 
     // Atualiza a última versão gravada no histórico
@@ -1078,8 +2195,8 @@ export class Database {
       lastVersion.status = decision;
       lastVersion.reviewedAt = now;
       lastVersion.reviewedBy = reviewerName;
-      lastVersion.rejectionReason = decision === 'Rejeitado' ? rejectionReason : undefined;
-      lastVersion.rejectionNotes = decision === 'Rejeitado' ? rejectionNotes : undefined;
+      lastVersion.rejectionReason = decision === 'Rejeitado' ? rejectionReason.trim() : undefined;
+      lastVersion.rejectionNotes = decision === 'Rejeitado' ? (rejectionNotes ? rejectionNotes.trim() : undefined) : undefined;
     }
 
     this.recalculateAdmissionStatus(targetAdmission);
@@ -1091,7 +2208,15 @@ export class Database {
         admissionId: targetAdmission.id,
         employeeName: targetAdmission.employee.name,
         documentType: targetDocument.documentType,
-        details: `Documento aprovado na versão ${targetDocument.currentVersion}`
+        details: `Documento aprovado na versão ${targetDocument.currentVersion} por ${reviewerName}.`
+      });
+
+      this.addNotification({
+        title: 'Documento aprovado',
+        message: `O documento ${targetDocument.documentType} de ${targetAdmission.employee.name} foi aprovado com sucesso.`,
+        type: 'document_uploaded',
+        admissionId: targetAdmission.id,
+        link: `/admissoes/${targetAdmission.id}`
       });
     } else {
       this.addAuditLog({
@@ -1104,8 +2229,8 @@ export class Database {
       });
 
       this.addNotification({
-        title: 'Documento rejeitado',
-        message: `${targetDocument.documentType} de ${targetAdmission.employee.name} foi recusado: "${rejectionReason}"`,
+        title: 'Documento pendente de reenvio',
+        message: `Seu documento ${targetDocument.documentType} precisa ser reenviado. Motivo: ${rejectionReason}`,
         type: 'pending',
         admissionId: targetAdmission.id,
         link: `/admissoes/${targetAdmission.id}`

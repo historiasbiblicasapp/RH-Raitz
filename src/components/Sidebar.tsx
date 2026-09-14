@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   UserCog,
   Briefcase,
+  FileText,
+  ListChecks,
   Layers,
   ChevronDown,
   ChevronRight,
@@ -31,7 +33,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isCadastrosActive = location.pathname.startsWith('/cadastros') || location.pathname === '/cargos';
+  const isCadastrosActive = 
+    location.pathname.startsWith('/cadastros') || 
+    location.pathname === '/cargos' || 
+    location.pathname === '/tipos-documentos' ||
+    location.pathname === '/checklists';
   const [cadastrosOpen, setCadastrosOpen] = useState(true);
 
   const mainMenuItems = [
@@ -160,6 +166,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
                 >
                   <Briefcase className="w-3.5 h-3.5" />
                   <span>Cargos</span>
+                </NavLink>
+
+                <NavLink
+                  to="/cadastros/documentos"
+                  id="nav-link-tipos-documentos"
+                  onClick={() => onClose()}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Tipos de documentos</span>
+                </NavLink>
+
+                <NavLink
+                  to="/cadastros/checklists"
+                  id="nav-link-checklists"
+                  onClick={() => onClose()}
+                  className={({ isActive }) =>
+                    `flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  <ListChecks className="w-3.5 h-3.5" />
+                  <span>Checklist por cargo</span>
                 </NavLink>
               </div>
             )}
