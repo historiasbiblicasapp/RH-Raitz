@@ -704,6 +704,66 @@ router.get('/dashboard/stats', (req: Request, res: Response) => {
   return res.json(stats);
 });
 
+// =========================================================================
+// BLOCO 4.2: CENTRAL DE PENDÊNCIAS (RH)
+// Fila de trabalho operacional com RLS, IDOR e LGPD (máscara de CPF)
+// =========================================================================
+router.get('/pendencias', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
+  }
+
+  const {
+    tipo,
+    status,
+    cargo,
+    setor,
+    unidade,
+    documento,
+    responsavel,
+    prioridade,
+    search,
+    periodo,
+    startDate,
+    endDate,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  const result = db.getPendingHubData({
+    tipo: tipo as string | undefined,
+    status: status as string | undefined,
+    cargo: cargo as string | undefined,
+    setor: setor as string | undefined,
+    unidade: unidade as string | undefined,
+    documento: documento as string | undefined,
+    responsavel: responsavel as string | undefined,
+    prioridade: prioridade as string | undefined,
+    search: search as string | undefined,
+    periodo: periodo as string | undefined,
+    startDate: startDate as string | undefined,
+    endDate: endDate as string | undefined,
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined,
+    sortBy: sortBy as string | undefined,
+    sortOrder: sortOrder as 'asc' | 'desc' | undefined
+  });
+
+  // LGPD: Higienização rigorosa de CPF nos dados retornados para o frontend
+  const sanitizedItems = result.items.map(item => ({
+    ...item,
+    employeeCpf: maskCPF(item.employeeCpf)
+  }));
+
+  return res.json({
+    ...result,
+    items: sanitizedItems
+  });
+});
+
 // ------------------------------------------------------------------
 // GESTÃO DE ADMISSÕES (RH)
 // ------------------------------------------------------------------

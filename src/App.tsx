@@ -19,6 +19,7 @@ import { UsersManagementPage } from './pages/UsersManagementPage.tsx';
 import { JobPositionsPage } from './pages/JobPositionsPage.tsx';
 import { DocumentTypesPage } from './pages/DocumentTypesPage.tsx';
 import { JobPositionChecklistPage } from './pages/JobPositionChecklistPage.tsx';
+import { PendingHubPage } from './pages/PendingHubPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -39,6 +40,7 @@ export function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admissoes" element={<AdmissionsList />} />
+            <Route path="/pendencias" element={<PendingHubPage />} />
             <Route path="/admissoes/nova" element={<NewAdmission />} />
             <Route path="/nova-admissao" element={<NewAdmission />} />
             <Route path="/admissoes/:id" element={<AdmissionDetails />} />

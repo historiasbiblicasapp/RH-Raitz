@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   ArrowLeft, 
   MessageCircle, 
@@ -54,11 +54,39 @@ type ActiveTab = 'resumo' | 'dados' | 'documentos' | 'pendencias' | 'historico' 
 export const AdmissionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [admission, setAdmission] = useState<Admission | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>('resumo');
+  const [highlightedDocId, setHighlightedDocId] = useState<string | null>(null);
+
+  // Lê parâmetros de URL vindos da Central de Pendências ou links diretos
+  useEffect(() => {
+    const tabParam = searchParams.get('tab') as ActiveTab | null;
+    const docIdParam = searchParams.get('docId');
+
+    if (tabParam && ['resumo', 'dados', 'documentos', 'pendencias', 'historico', 'convite'].includes(tabParam)) {
+      setActiveTab(tabParam);
+    }
+    if (docIdParam) {
+      setHighlightedDocId(docIdParam);
+    }
+  }, [searchParams]);
+
+  // Rola suavemente até o documento destacado
+  useEffect(() => {
+    if (highlightedDocId && activeTab === 'documentos' && !loading) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`doc-row-${highlightedDocId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedDocId, activeTab, loading]);
 
   // Modais de ação
   const [selectedDocForReview, setSelectedDocForReview] = useState<AdmissionDocument | null>(null);
@@ -1248,7 +1276,15 @@ export const AdmissionDetails: React.FC = () => {
 
               <div className="divide-y divide-slate-100">
                 {filteredRequiredDocs.map((doc) => (
-                  <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors">
+                  <div 
+                    key={doc.id} 
+                    id={`doc-row-${doc.id}`}
+                    className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-300 rounded-xl ${
+                      highlightedDocId === doc.id
+                        ? 'bg-blue-50/90 ring-2 ring-blue-500 shadow-sm'
+                        : 'hover:bg-slate-50/60'
+                    }`}
+                  >
                     <div className="flex items-start gap-3.5">
                       <div className={`p-2.5 rounded-xl border mt-0.5 shrink-0 ${
                         doc.status === 'Aprovado' 
@@ -1392,7 +1428,15 @@ export const AdmissionDetails: React.FC = () => {
 
               <div className="divide-y divide-slate-100">
                 {filteredAdditionalDocs.map((doc) => (
-                  <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors">
+                  <div 
+                    key={doc.id} 
+                    id={`doc-row-${doc.id}`}
+                    className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-300 rounded-xl ${
+                      highlightedDocId === doc.id
+                        ? 'bg-blue-50/90 ring-2 ring-blue-500 shadow-sm'
+                        : 'hover:bg-slate-50/60'
+                    }`}
+                  >
                     <div className="flex items-start gap-3.5">
                       <div className={`p-2.5 rounded-xl border mt-0.5 shrink-0 ${
                         doc.status === 'Aprovado' 

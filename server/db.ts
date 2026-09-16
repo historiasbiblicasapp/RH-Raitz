@@ -19,7 +19,12 @@ import {
   DocumentTypeItem,
   DocumentCategory,
   JobPositionDocument,
-  AuditLogChange
+  AuditLogChange,
+  PendingHubResponse,
+  PendingFilters,
+  PendingItem,
+  PendingPriority,
+  PendingSummary
 } from '../src/types/index.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -2739,6 +2744,325 @@ export class Database {
         departments,
         units,
         statuses
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 4.2: CENTRAL DE PENDÊNCIAS
+  // Fila operacional derivada em tempo real a partir das admissões e documentos
+  // =========================================================================
+  getPendingHubData(options?: PendingFilters): PendingHubResponse {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
+
+    // Gera todas as pendências operacionais brutas
+    const allItems: PendingItem[] = [];
+
+    // Contadores para o resumo do topo da tela (sempre calculado sobre a base geral de pendências)
+    let notSentCount = 0;
+    let waitingReviewCount = 0;
+    let rejectedCount = 0;
+    const upcomingWithIssuesSet = new Set<string>();
+
+    // Coletores de filtros dinâmicos
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const documentTypesSet = new Set<string>();
+    const responsiblesSet = new Set<string>();
+
+    for (const adm of this.data.admissions) {
+      if (adm.status === 'Concluída' || adm.status === 'Cancelada') {
+        continue;
+      }
+
+      if (adm.employee.role) rolesSet.add(adm.employee.role);
+      if (adm.employee.department) departmentsSet.add(adm.employee.department);
+      if (adm.employee.unit) unitsSet.add(adm.employee.unit);
+
+      // Checagem de prazo da admissão
+      let isOverdue = false;
+      let isUpcoming = false;
+      if (adm.employee.expectedStartDate) {
+        const [y, m, d] = adm.employee.expectedStartDate.split('T')[0].split('-').map(Number);
+        const expTime = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+        const diffDays = Math.ceil((expTime - todayTime) / (1000 * 60 * 60 * 24));
+        if (expTime < todayTime) {
+          isOverdue = true;
+        } else if (diffDays <= 7) {
+          isUpcoming = true;
+        }
+      }
+
+      // Se a admissão estiver próxima ou vencida e tiver documentos pendentes (progresso < 100)
+      const hasIssues = adm.progressPercent < 100 || adm.status === 'Pendência' || adm.status === 'Em conferência';
+      if ((isOverdue || isUpcoming) && hasIssues) {
+        upcomingWithIssuesSet.add(adm.id);
+
+        // Adiciona registro operacional da admissão próxima
+        allItems.push({
+          id: `pend-${adm.id}-processo`,
+          admissionId: adm.id,
+          admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+          employeeName: adm.employee.name,
+          employeeCpf: adm.employee.cpf,
+          role: adm.employee.role,
+          department: adm.employee.department,
+          unit: adm.employee.unit,
+          documentId: undefined,
+          documentName: `Checklist Geral (${adm.approvedDocuments}/${adm.totalDocuments} aprovados)`,
+          documentCategory: 'Processo Admissional',
+          pendingType: 'admissao_proxima',
+          pendingTypeLabel: isOverdue ? 'Prazo de início ultrapassado' : 'Admissão com início próximo',
+          currentStatus: adm.status,
+          admissionStatus: adm.status,
+          priority: 'Alta',
+          priorityScore: 1,
+          date: adm.employee.expectedStartDate || adm.createdAt,
+          expectedStartDate: adm.employee.expectedStartDate,
+          reviewerOrResponsible: '-',
+          isRequired: true,
+          isOverdue
+        });
+      }
+
+      // Itera sobre os documentos da admissão
+      for (const doc of (adm.documents || [])) {
+        if (doc.documentType) documentTypesSet.add(doc.documentType);
+        if (doc.reviewedBy) responsiblesSet.add(doc.reviewedBy);
+
+        // 1. Documento não enviado
+        if (doc.status === 'Não enviado') {
+          if (doc.required) notSentCount++;
+          const isCritical = (isOverdue || isUpcoming) && doc.required;
+          const priority: PendingPriority = isCritical ? 'Alta' : doc.required ? 'Média' : 'Baixa';
+
+          allItems.push({
+            id: `pend-${adm.id}-${doc.id}`,
+            admissionId: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpf: adm.employee.cpf,
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            documentId: doc.id,
+            documentName: doc.documentType,
+            documentCategory: doc.category,
+            pendingType: 'documento_nao_enviado',
+            pendingTypeLabel: 'Documento não enviado',
+            currentStatus: 'Não enviado',
+            admissionStatus: adm.status,
+            priority,
+            priorityScore: priority === 'Alta' ? 1 : priority === 'Média' ? 2 : 3,
+            date: adm.employee.expectedStartDate || adm.createdAt,
+            expectedStartDate: adm.employee.expectedStartDate,
+            reviewerOrResponsible: '-',
+            isRequired: Boolean(doc.required),
+            isOverdue
+          });
+        }
+        // 2. Aguardando conferência
+        else if (doc.status === 'Em análise' || doc.status === 'Reenviado' || doc.status === 'Enviado') {
+          waitingReviewCount++;
+          const priority: PendingPriority = (isOverdue || isUpcoming) ? 'Alta' : doc.required ? 'Média' : 'Baixa';
+
+          allItems.push({
+            id: `pend-${adm.id}-${doc.id}`,
+            admissionId: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpf: adm.employee.cpf,
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            documentId: doc.id,
+            documentName: doc.documentType,
+            documentCategory: doc.category,
+            pendingType: 'aguardando_conferencia',
+            pendingTypeLabel: 'Aguardando conferência',
+            currentStatus: doc.status,
+            admissionStatus: adm.status,
+            priority,
+            priorityScore: priority === 'Alta' ? 1 : priority === 'Média' ? 2 : 3,
+            date: doc.uploadedAt || adm.createdAt,
+            expectedStartDate: adm.employee.expectedStartDate,
+            reviewerOrResponsible: 'Aguardando RH',
+            isRequired: Boolean(doc.required),
+            isOverdue
+          });
+        }
+        // 3. Documento rejeitado / Aguardando reenvio
+        else if (doc.status === 'Rejeitado') {
+          rejectedCount++;
+
+          allItems.push({
+            id: `pend-${adm.id}-${doc.id}`,
+            admissionId: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpf: adm.employee.cpf,
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            documentId: doc.id,
+            documentName: doc.documentType,
+            documentCategory: doc.category,
+            pendingType: 'documento_rejeitado',
+            pendingTypeLabel: 'Documento rejeitado',
+            currentStatus: 'Rejeitado',
+            admissionStatus: adm.status,
+            priority: 'Alta',
+            priorityScore: 1,
+            date: doc.reviewedAt || doc.uploadedAt || adm.createdAt,
+            expectedStartDate: adm.employee.expectedStartDate,
+            reviewerOrResponsible: doc.reviewedBy || 'RH',
+            rejectionReason: doc.rejectionReason || 'Recusado pelo RH',
+            rejectionNotes: doc.rejectionNotes,
+            isRequired: Boolean(doc.required),
+            isOverdue
+          });
+        }
+      }
+    }
+
+    // Resumo do topo da tela
+    const summary: PendingSummary = {
+      total: allItems.length,
+      notSent: notSentCount,
+      waitingReview: waitingReviewCount,
+      rejected: rejectedCount,
+      upcomingWithIssues: upcomingWithIssuesSet.size
+    };
+
+    // Agora aplica filtros se fornecidos
+    let filtered = [...allItems];
+
+    if (options) {
+      // 1. Busca textual (nome, CPF, documento, admissão)
+      if (options.search && options.search.trim()) {
+        const term = options.search.trim().toLowerCase();
+        const cleanDigits = term.replace(/\D/g, '');
+        filtered = filtered.filter(item => {
+          const nameMatch = item.employeeName.toLowerCase().includes(term);
+          const cpfMatch = cleanDigits ? item.employeeCpf.replace(/\D/g, '').includes(cleanDigits) : false;
+          const docMatch = item.documentName ? item.documentName.toLowerCase().includes(term) : false;
+          const admMatch = item.admissionCode.toLowerCase().includes(term) || item.admissionId.toLowerCase().includes(term);
+          const roleMatch = item.role.toLowerCase().includes(term);
+          return nameMatch || cpfMatch || docMatch || admMatch || roleMatch;
+        });
+      }
+
+      // 2. Tipo de pendência
+      if (options.tipo && options.tipo !== 'todas' && options.tipo !== 'Todas') {
+        const t = options.tipo.toLowerCase();
+        if (t === 'documento_nao_enviado' || t === 'documento não enviado') {
+          filtered = filtered.filter(i => i.pendingType === 'documento_nao_enviado');
+        } else if (t === 'aguardando_conferencia' || t === 'aguardando conferência' || t === 'aguardando conferencia') {
+          filtered = filtered.filter(i => i.pendingType === 'aguardando_conferencia');
+        } else if (t === 'documento_rejeitado' || t === 'documento rejeitado') {
+          filtered = filtered.filter(i => i.pendingType === 'documento_rejeitado');
+        } else if (t === 'aguardando_reenvio' || t === 'aguardando reenvio') {
+          filtered = filtered.filter(i => i.pendingType === 'documento_rejeitado' || i.pendingType === 'aguardando_reenvio');
+        } else if (t === 'admissao_proxima' || t === 'admissão próxima' || t === 'admissao proxima') {
+          filtered = filtered.filter(i => i.pendingType === 'admissao_proxima' || ((i.isOverdue || i.priority === 'Alta') && i.isRequired));
+        }
+      }
+
+      // 3. Status da admissão
+      if (options.status && options.status !== 'TODOS' && options.status !== 'Todos') {
+        filtered = filtered.filter(i => i.admissionStatus === options.status);
+      }
+
+      // 4. Cargo
+      if (options.cargo && options.cargo !== 'TODOS' && options.cargo !== 'Todos') {
+        filtered = filtered.filter(i => i.role === options.cargo);
+      }
+
+      // 5. Setor
+      if (options.setor && options.setor !== 'TODOS' && options.setor !== 'Todos') {
+        filtered = filtered.filter(i => i.department === options.setor);
+      }
+
+      // 6. Unidade
+      if (options.unidade && options.unidade !== 'TODOS' && options.unidade !== 'Todos') {
+        filtered = filtered.filter(i => i.unit === options.unidade);
+      }
+
+      // 7. Documento
+      if (options.documento && options.documento !== 'TODOS' && options.documento !== 'Todos') {
+        filtered = filtered.filter(i => i.documentName === options.documento);
+      }
+
+      // 8. Responsável
+      if (options.responsavel && options.responsavel !== 'TODOS' && options.responsavel !== 'Todos') {
+        filtered = filtered.filter(i => i.reviewerOrResponsible === options.responsavel);
+      }
+
+      // 9. Prioridade
+      if (options.prioridade && options.prioridade !== 'TODAS' && options.prioridade !== 'Todas') {
+        filtered = filtered.filter(i => i.priority === options.prioridade);
+      }
+
+      // 10. Período
+      if (options.startDate) {
+        const start = new Date(options.startDate + 'T00:00:00').getTime();
+        filtered = filtered.filter(i => new Date(i.date).getTime() >= start);
+      }
+      if (options.endDate) {
+        const end = new Date(options.endDate + 'T23:59:59').getTime();
+        filtered = filtered.filter(i => new Date(i.date).getTime() <= end);
+      }
+    }
+
+    // Ordenação padrão (Seção 9):
+    // 1. Prioridade (Alta [1], Média [2], Baixa [3])
+    // 2. Situações mais urgentes (isOverdue primeiro)
+    // 3. Data prevista da admissão
+    // 4. Funcionário (ordem alfabética)
+    filtered.sort((a, b) => {
+      if (options?.sortBy) {
+        const order = options.sortOrder === 'desc' ? -1 : 1;
+        if (options.sortBy === 'prioridade') return (a.priorityScore - b.priorityScore) * order;
+        if (options.sortBy === 'funcionario') return a.employeeName.localeCompare(b.employeeName) * order;
+        if (options.sortBy === 'cargo') return a.role.localeCompare(b.role) * order;
+        if (options.sortBy === 'documento') return (a.documentName || '').localeCompare(b.documentName || '') * order;
+        if (options.sortBy === 'data') return (new Date(a.date).getTime() - new Date(b.date).getTime()) * order;
+      }
+
+      // Default sorting
+      if (a.priorityScore !== b.priorityScore) return a.priorityScore - b.priorityScore;
+      if (Boolean(a.isOverdue) !== Boolean(b.isOverdue)) return a.isOverdue ? -1 : 1;
+      const dateA = a.expectedStartDate || a.date;
+      const dateB = b.expectedStartDate || b.date;
+      const dateComp = dateA.localeCompare(dateB);
+      if (dateComp !== 0) return dateComp;
+      return a.employeeName.localeCompare(b.employeeName);
+    });
+
+    // Paginação
+    const total = filtered.length;
+    const page = Math.max(1, Number(options?.page) || 1);
+    const limit = Math.max(1, Number(options?.limit) || 20);
+    const totalPages = Math.ceil(total / limit) || 1;
+    const offset = (page - 1) * limit;
+    const paginated = filtered.slice(offset, offset + limit);
+
+    return {
+      items: paginated,
+      total,
+      page,
+      limit,
+      totalPages,
+      summary,
+      filters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        documentTypes: Array.from(documentTypesSet).sort(),
+        responsibles: Array.from(responsiblesSet).sort()
       }
     };
   }

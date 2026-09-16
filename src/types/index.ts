@@ -368,3 +368,87 @@ export interface DashboardStatsOptions {
   department?: string;
   unit?: string;
 }
+
+// =========================================================================
+// BLOCO 4.2: CENTRAL DE PENDÊNCIAS
+// =========================================================================
+
+export type PendingType = 
+  | 'documento_nao_enviado'
+  | 'aguardando_conferencia'
+  | 'documento_rejeitado'
+  | 'aguardando_reenvio'
+  | 'admissao_proxima';
+
+export type PendingPriority = 'Alta' | 'Média' | 'Baixa';
+
+export interface PendingItem {
+  id: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeName: string;
+  employeeCpf: string;
+  role: string;
+  department: string;
+  unit?: string;
+  documentId?: string;
+  documentName?: string;
+  documentCategory?: string;
+  pendingType: PendingType;
+  pendingTypeLabel: string;
+  currentStatus: string;
+  admissionStatus: AdmissionStatus;
+  priority: PendingPriority;
+  priorityScore: number; // 1: Alta, 2: Média, 3: Baixa
+  date: string; // Data relevante da pendência ou data prevista
+  expectedStartDate?: string;
+  reviewerOrResponsible?: string;
+  rejectionReason?: string;
+  rejectionNotes?: string;
+  isRequired: boolean;
+  isOverdue?: boolean;
+}
+
+export interface PendingSummary {
+  total: number;
+  notSent: number;
+  waitingReview: number;
+  rejected: number;
+  upcomingWithIssues: number;
+}
+
+export interface PendingFilters {
+  tipo?: string;
+  status?: string;
+  cargo?: string;
+  setor?: string;
+  unidade?: string;
+  documento?: string;
+  responsavel?: string;
+  prioridade?: string;
+  search?: string;
+  periodo?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PendingHubResponse {
+  items: PendingItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: PendingSummary;
+  filters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    documentTypes: string[];
+    responsibles: string[];
+  };
+}
+
