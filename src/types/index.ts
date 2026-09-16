@@ -266,6 +266,13 @@ export interface AdmissionsListResponse {
   };
 }
 
+export interface AuditLogChange {
+  field: string;
+  label: string;
+  previousValue: any;
+  newValue: any;
+}
+
 export interface AuditLog {
   id: string;
   timestamp: string;
@@ -273,9 +280,16 @@ export interface AuditLog {
   userName: string;
   performedBy?: string;
   action: string;
+  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system';
+  entityId?: string;
+  entityName?: string;
   admissionId?: string;
   employeeName?: string;
   documentType?: string;
+  fieldChanged?: string;
+  previousValue?: string;
+  newValue?: string;
+  changes?: AuditLogChange[];
   details: string;
   ipAddress?: string;
 }
@@ -306,6 +320,19 @@ export interface ConsentRecord {
   userAgent?: string;
 }
 
+export interface DocumentStats {
+  notSent: number;
+  sent: number;
+  inReview: number;
+  approved: number;
+  rejected: number;
+  waitingResend: number;
+  total: number;
+  requiredTotal: number;
+  requiredApproved: number;
+  approvalRate: number;
+}
+
 export interface DashboardStats {
   newAdmissions: number;
   waitingDocuments: number;
@@ -313,4 +340,31 @@ export interface DashboardStats {
   pendingIssues: number;
   completed: number;
   totalActive: number;
+  cancelled?: number;
+  upcoming?: number;
+  documentStats?: DocumentStats;
+  byStatus?: {
+    'Rascunho': number;
+    'Aguardando documentos': number;
+    'Em conferência': number;
+    'Pendência': number;
+    'Concluída': number;
+    'Cancelada': number;
+    [key: string]: number;
+  };
+  evolution?: Array<{
+    date: string;
+    label: string;
+    count: number;
+  }>;
+}
+
+export interface DashboardStatsOptions {
+  period?: 'today' | '7d' | '30d' | 'this_month' | 'next_month' | 'custom' | string;
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  role?: string;
+  department?: string;
+  unit?: string;
 }

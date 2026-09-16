@@ -9,6 +9,8 @@ import {
   NotificationItem, 
   ConsentRecord,
   DashboardStats,
+  DashboardStatsOptions,
+  DocumentStats,
   DocumentType,
   DocumentStatus,
   AdmissionStatus,
@@ -16,7 +18,8 @@ import {
   JobPosition,
   DocumentTypeItem,
   DocumentCategory,
-  JobPositionDocument
+  JobPositionDocument,
+  AuditLogChange
 } from '../src/types/index.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -690,7 +693,7 @@ export function buildDefaultJobPositionDocuments(
         id: 'jpd-adm-05',
         job_position_id: auxiliarAdm.id,
         document_type_id: diploma.id,
-        required: true,
+        required: false,
         sort_order: 5,
         instructions: 'Comprovante de escolaridade (Ensino Médio ou Superior).',
         active: true,
@@ -824,17 +827,188 @@ export class Database {
   }
 
   // Estatísticas do Dashboard
-  getStats(): DashboardStats {
-    const admissions = this.data.admissions.filter(a => a.status !== 'Cancelada');
+  getStats(options?: DashboardStatsOptions): DashboardStats {
+    let allAdmissions = [...(this.data.admissions || [])];
+
+    // Se houver filtros de Cargo, Setor ou Unidade, aplica sobre o escopo
+    if (options?.role && options.role !== 'TODOS' && options.role !== 'Todos') {
+      allAdmissions = allAdmissions.filter(a => a.employee?.role === options.role);
+    }
+    if (options?.department && options.department !== 'TODOS' && options.department !== 'Todos') {
+      allAdmissions = allAdmissions.filter(a => a.employee?.department === options.department);
+    }
+    if (options?.unit && options.unit !== 'TODOS' && options.unit !== 'Todos') {
+      allAdmissions = allAdmissions.filter(a => a.employee?.unit === options.unit);
+    }
+
+    // Período para "Novas admissões" e métricas do período
+    const now = new Date();
+    let periodStart: number | null = null;
+    let periodEnd: number | null = null;
+
+    if (options?.period === 'today') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+      periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+    } else if (options?.period === '7d') {
+      periodStart = Date.now() - 7 * 86400000;
+      periodEnd = Date.now();
+    } else if (options?.period === '30d') {
+      periodStart = Date.now() - 30 * 86400000;
+      periodEnd = Date.now();
+    } else if (options?.period === 'this_month') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    } else if (options?.period === 'next_month') {
+      periodStart = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0).getTime();
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999).getTime();
+    } else if (options?.startDate || options?.endDate) {
+      if (options.startDate) periodStart = new Date(options.startDate + 'T00:00:00').getTime();
+      if (options.endDate) periodEnd = new Date(options.endDate + 'T23:59:59').getTime();
+    } else {
+      // Padrão: 7 dias para novas admissões
+      periodStart = Date.now() - 7 * 86400000;
+      periodEnd = Date.now();
+    }
+
+    // Se options.status foi informado e for diferente de TODOS, podemos também calcular dados filtrados
+    let statusFilteredAdmissions = allAdmissions;
+    if (options?.status && options.status !== 'TODOS' && options.status !== 'Todos') {
+      statusFilteredAdmissions = allAdmissions.filter(a => a.status === options.status);
+    }
+
+    // Novas admissões criadas dentro do período selecionado
+    const newAdmissions = allAdmissions.filter(a => {
+      const createdTime = new Date(a.createdAt).getTime();
+      if (periodStart !== null && createdTime < periodStart) return false;
+      if (periodEnd !== null && createdTime > periodEnd) return false;
+      return true;
+    }).length;
+
+    // Métricas por status (baseado em allAdmissions que respeita Cargo, Setor, Unidade)
+    const waitingDocuments = allAdmissions.filter(a => a.status === 'Aguardando documentos').length;
+    const waitingReview = allAdmissions.filter(a => a.status === 'Em conferência').length;
+    const pendingIssues = allAdmissions.filter(a => a.status === 'Pendência').length;
+    const completed = allAdmissions.filter(a => a.status === 'Concluída').length;
+    const cancelled = allAdmissions.filter(a => a.status === 'Cancelada').length;
+    const totalActive = allAdmissions.filter(a => a.status !== 'Cancelada').length;
+
+    // Próximas admissões: expectedStartDate no futuro ou próximos dias
+    const todayZero = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    const upcoming = allAdmissions.filter(a => {
+      if (a.status === 'Concluída' || a.status === 'Cancelada') return false;
+      if (!a.employee?.expectedStartDate) return false;
+      const expectedTime = new Date(a.employee.expectedStartDate + 'T23:59:59').getTime();
+      return expectedTime >= todayZero;
+    }).length;
+
+    // Indicadores agregados de documentos (sobre o conjunto filtrado de admissões)
+    const targetAdmissionsForDocs = (options?.status && options.status !== 'TODOS' && options.status !== 'Todos')
+      ? statusFilteredAdmissions
+      : allAdmissions;
+
+    let notSent = 0;
+    let sent = 0;
+    let inReview = 0;
+    let approved = 0;
+    let rejected = 0;
+    let waitingResend = 0;
+    let totalDocs = 0;
+    let requiredTotal = 0;
+    let requiredApproved = 0;
+
+    targetAdmissionsForDocs.forEach(a => {
+      (a.documents || []).forEach(doc => {
+        totalDocs++;
+        if (doc.required) requiredTotal++;
+        if (doc.required && doc.status === 'Aprovado') requiredApproved++;
+
+        switch (doc.status) {
+          case 'Não enviado':
+            notSent++;
+            break;
+          case 'Enviado':
+            sent++;
+            break;
+          case 'Em análise':
+          case 'Reenviado':
+            inReview++;
+            break;
+          case 'Aprovado':
+            approved++;
+            break;
+          case 'Rejeitado':
+            rejected++;
+            waitingResend++;
+            break;
+          default:
+            break;
+        }
+      });
+    });
+
+    const approvalRate = requiredTotal > 0
+      ? Math.round((requiredApproved / requiredTotal) * 100)
+      : (totalDocs > 0 ? 100 : 0);
+
+    const documentStats: DocumentStats = {
+      notSent,
+      sent,
+      inReview,
+      approved,
+      rejected,
+      waitingResend,
+      total: totalDocs,
+      requiredTotal,
+      requiredApproved,
+      approvalRate
+    };
+
+    // Distribuição por status
+    const byStatus = {
+      'Rascunho': allAdmissions.filter(a => a.status === 'Rascunho').length,
+      'Aguardando documentos': waitingDocuments,
+      'Em conferência': waitingReview,
+      'Pendência': pendingIssues,
+      'Concluída': completed,
+      'Cancelada': cancelled
+    };
+
+    // Evolução das admissões (por data)
+    const dateMap = new Map<string, number>();
     
-    // Novas admissões (últimos 7 dias)
-    const sevenDaysAgo = Date.now() - 7 * 86400000;
-    const newAdmissions = admissions.filter(a => new Date(a.createdAt).getTime() >= sevenDaysAgo).length;
-    
-    const waitingDocuments = admissions.filter(a => a.status === 'Aguardando documentos').length;
-    const waitingReview = admissions.filter(a => a.status === 'Em conferência').length;
-    const pendingIssues = admissions.filter(a => a.status === 'Pendência').length;
-    const completed = admissions.filter(a => a.status === 'Concluída').length;
+    if (periodStart !== null && periodEnd !== null && (periodEnd - periodStart) <= 35 * 86400000) {
+      let cur = new Date(periodStart);
+      const endD = new Date(periodEnd);
+      while (cur <= endD) {
+        const key = cur.toISOString().split('T')[0];
+        dateMap.set(key, 0);
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+
+    allAdmissions.forEach(a => {
+      const createdDate = a.createdAt ? a.createdAt.split('T')[0] : '';
+      if (createdDate) {
+        const time = new Date(createdDate + 'T12:00:00').getTime();
+        if (periodStart !== null && time < periodStart - 86400000) return;
+        if (periodEnd !== null && time > periodEnd + 86400000) return;
+        
+        dateMap.set(createdDate, (dateMap.get(createdDate) || 0) + 1);
+      }
+    });
+
+    const evolution = Array.from(dateMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, count]) => {
+        const parts = date.split('-');
+        const d = parts[2] || '';
+        const m = parts[1] || '';
+        return {
+          date,
+          label: `${d}/${m}`,
+          count
+        };
+      });
 
     return {
       newAdmissions,
@@ -842,7 +1016,12 @@ export class Database {
       waitingReview,
       pendingIssues,
       completed,
-      totalActive: admissions.length
+      totalActive,
+      cancelled,
+      upcoming,
+      documentStats,
+      byStatus,
+      evolution
     };
   }
 
@@ -1016,6 +1195,11 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action: 'job_position_created',
+      entityType: 'job_position',
+      entityId: newPosition.id,
+      entityName: newPosition.name,
+      fieldChanged: 'criação',
+      newValue: newPosition.name,
       details: `Cargo "${newPosition.name}" (${newPosition.code || 'Sem código'}) cadastrado com sucesso por ${userName}.`
     });
 
@@ -1035,6 +1219,7 @@ export class Database {
     }
 
     const changes: string[] = [];
+    const structuredChanges: AuditLogChange[] = [];
 
     // Validação e atualização de nome
     if (updates.name !== undefined) {
@@ -1049,6 +1234,12 @@ export class Database {
         if (existingName) {
           throw new Error(`Já existe outro cargo ativo com o nome "${normalizedName}".`);
         }
+        structuredChanges.push({
+          field: 'name',
+          label: 'Nome do Cargo',
+          previousValue: position.name,
+          newValue: normalizedName
+        });
         changes.push(`nome de "${position.name}" para "${normalizedName}"`);
         position.name = normalizedName;
       }
@@ -1066,6 +1257,12 @@ export class Database {
         }
       }
       if (normalizedCode !== position.code) {
+        structuredChanges.push({
+          field: 'code',
+          label: 'Código do Cargo',
+          previousValue: position.code || 'N/A',
+          newValue: normalizedCode || 'N/A'
+        });
         changes.push(`código de "${position.code || 'N/A'}" para "${normalizedCode || 'N/A'}"`);
         position.code = normalizedCode || undefined;
       }
@@ -1075,6 +1272,12 @@ export class Database {
     if (updates.description !== undefined) {
       const trimmedDesc = updates.description ? updates.description.trim() : undefined;
       if (trimmedDesc !== position.description) {
+        structuredChanges.push({
+          field: 'description',
+          label: 'Descrição do Cargo',
+          previousValue: position.description || 'Nenhuma',
+          newValue: trimmedDesc || 'Nenhuma'
+        });
         changes.push('descrição atualizada');
         position.description = trimmedDesc;
       }
@@ -1102,6 +1305,12 @@ export class Database {
         }
       }
 
+      structuredChanges.push({
+        field: 'active',
+        label: 'Status do Cargo',
+        previousValue: position.active ? 'Ativo' : 'Inativo',
+        newValue: updates.active ? 'Ativo' : 'Inativo'
+      });
       position.active = updates.active;
       changes.push(`status alterado para ${updates.active ? 'Ativo' : 'Inativo'}`);
       isStatusChange = true;
@@ -1119,6 +1328,13 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action,
+      entityType: 'job_position',
+      entityId: position.id,
+      entityName: position.name,
+      fieldChanged: structuredChanges.length === 1 ? structuredChanges[0].label : `${structuredChanges.length} alterações`,
+      previousValue: structuredChanges.length === 1 ? String(structuredChanges[0].previousValue) : undefined,
+      newValue: structuredChanges.length === 1 ? String(structuredChanges[0].newValue) : undefined,
+      changes: structuredChanges,
       details: `Cargo "${position.name}": ${changes.length > 0 ? changes.join(', ') : 'dados atualizados'} por ${userName}.`
     });
 
@@ -1248,6 +1464,11 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action: 'document_type_created',
+      entityType: 'document_type',
+      entityId: newDocType.id,
+      entityName: newDocType.name,
+      fieldChanged: 'criação',
+      newValue: newDocType.name,
       details: `Tipo de documento "${cleanName}" (Categoria: ${cleanCategory}, Obrigatório Padrão: ${newDocType.required_by_default ? 'Sim' : 'Não'}, Validade: ${newDocType.requires_expiration_date ? 'Sim' : 'Não'}) cadastrado por ${userName}.`
     });
 
@@ -1266,6 +1487,7 @@ export class Database {
     }
 
     const changes: string[] = [];
+    const structuredChanges: AuditLogChange[] = [];
     let isStatusChange = false;
     let becameActive = false;
 
@@ -1283,6 +1505,12 @@ export class Database {
         if (existing) {
           throw new Error(`Já existe outro tipo de documento ativo com o nome "${cleanName}".`);
         }
+        structuredChanges.push({
+          field: 'name',
+          label: 'Nome do Documento',
+          previousValue: docType.name,
+          newValue: cleanName
+        });
         changes.push(`nome alterado de "${docType.name}" para "${cleanName}"`);
         docType.name = cleanName;
       }
@@ -1292,6 +1520,12 @@ export class Database {
     if (updates.description !== undefined) {
       const cleanDesc = updates.description ? updates.description.trim() : undefined;
       if (cleanDesc !== docType.description) {
+        structuredChanges.push({
+          field: 'description',
+          label: 'Descrição',
+          previousValue: docType.description || 'Nenhuma',
+          newValue: cleanDesc || 'Nenhuma'
+        });
         changes.push('descrição atualizada');
         docType.description = cleanDesc;
       }
@@ -1304,6 +1538,12 @@ export class Database {
         throw new Error('A categoria do documento é obrigatória.');
       }
       if (cleanCategory !== docType.category) {
+        structuredChanges.push({
+          field: 'category',
+          label: 'Categoria',
+          previousValue: docType.category,
+          newValue: cleanCategory
+        });
         changes.push(`categoria alterada de "${docType.category}" para "${cleanCategory}"`);
         docType.category = cleanCategory;
       }
@@ -1311,12 +1551,24 @@ export class Database {
 
     // Obrigatório por padrão
     if (updates.required_by_default !== undefined && updates.required_by_default !== docType.required_by_default) {
+      structuredChanges.push({
+        field: 'required_by_default',
+        label: 'Obrigatório por Padrão',
+        previousValue: docType.required_by_default ? 'Sim' : 'Não',
+        newValue: updates.required_by_default ? 'Sim' : 'Não'
+      });
       changes.push(`obrigatório por padrão alterado para ${updates.required_by_default ? 'Sim' : 'Não'}`);
       docType.required_by_default = Boolean(updates.required_by_default);
     }
 
     // Exige data de validade
     if (updates.requires_expiration_date !== undefined && updates.requires_expiration_date !== docType.requires_expiration_date) {
+      structuredChanges.push({
+        field: 'requires_expiration_date',
+        label: 'Exige Validade',
+        previousValue: docType.requires_expiration_date ? 'Sim' : 'Não',
+        newValue: updates.requires_expiration_date ? 'Sim' : 'Não'
+      });
       changes.push(`exigência de data de validade alterada para ${updates.requires_expiration_date ? 'Sim' : 'Não'}`);
       docType.requires_expiration_date = Boolean(updates.requires_expiration_date);
     }
@@ -1327,6 +1579,12 @@ export class Database {
       if (cleanTypes.length === 0) {
         throw new Error('Selecione pelo menos um formato de arquivo permitido.');
       }
+      structuredChanges.push({
+        field: 'allowed_file_types',
+        label: 'Formatos Permitidos',
+        previousValue: docType.allowed_file_types.join(', '),
+        newValue: cleanTypes.join(', ')
+      });
       changes.push(`formatos permitidos atualizados: [${cleanTypes.join(', ')}]`);
       docType.allowed_file_types = cleanTypes;
     }
@@ -1338,6 +1596,12 @@ export class Database {
         throw new Error('O tamanho máximo do arquivo deve ser entre 1 MB e 100 MB.');
       }
       if (size !== docType.max_file_size_mb) {
+        structuredChanges.push({
+          field: 'max_file_size_mb',
+          label: 'Tamanho Máximo',
+          previousValue: `${docType.max_file_size_mb} MB`,
+          newValue: `${size} MB`
+        });
         changes.push(`tamanho máximo alterado para ${size} MB`);
         docType.max_file_size_mb = size;
       }
@@ -1347,6 +1611,12 @@ export class Database {
     if (updates.sort_order !== undefined) {
       const order = Number(updates.sort_order);
       if (!isNaN(order) && order !== docType.sort_order) {
+        structuredChanges.push({
+          field: 'sort_order',
+          label: 'Ordem de Exibição',
+          previousValue: String(docType.sort_order),
+          newValue: String(order)
+        });
         changes.push(`ordem alterada para ${order}`);
         docType.sort_order = order;
       }
@@ -1364,6 +1634,12 @@ export class Database {
         }
       }
 
+      structuredChanges.push({
+        field: 'active',
+        label: 'Status',
+        previousValue: docType.active ? 'Ativo' : 'Inativo',
+        newValue: updates.active ? 'Ativo' : 'Inativo'
+      });
       docType.active = updates.active;
       changes.push(`status alterado para ${updates.active ? 'Ativo' : 'Inativo'}`);
       isStatusChange = true;
@@ -1381,6 +1657,13 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action,
+      entityType: 'document_type',
+      entityId: docType.id,
+      entityName: docType.name,
+      fieldChanged: structuredChanges.length === 1 ? structuredChanges[0].label : `${structuredChanges.length} alterações`,
+      previousValue: structuredChanges.length === 1 ? String(structuredChanges[0].previousValue) : undefined,
+      newValue: structuredChanges.length === 1 ? String(structuredChanges[0].newValue) : undefined,
+      changes: structuredChanges,
       details: `Tipo de documento "${docType.name}": ${changes.length > 0 ? changes.join(', ') : 'dados atualizados'} por ${userName}.`
     });
 
@@ -1560,6 +1843,11 @@ export class Database {
         this.addAuditLog({
           userName: userName || 'Usuário RH',
           action: 'job_position_document_added',
+          entityType: 'job_position_document',
+          entityId: existing.id,
+          entityName: `${docType.name} (${jobPos.name})`,
+          fieldChanged: 'reativação',
+          newValue: existing.required ? 'Obrigatório' : 'Opcional',
           details: `Documento "${docType.name}" reativado no checklist do cargo "${jobPos.name}" (${existing.required ? 'Obrigatório' : 'Opcional'}, Ordem: ${existing.sort_order}) por ${userName}.`
         });
 
@@ -1599,6 +1887,11 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action: 'job_position_document_added',
+      entityType: 'job_position_document',
+      entityId: newJpd.id,
+      entityName: `${docType.name} (${jobPos.name})`,
+      fieldChanged: 'inclusão no checklist',
+      newValue: newJpd.required ? 'Obrigatório' : 'Opcional',
       details: `Documento "${docType.name}" adicionado ao checklist do cargo "${jobPos.name}" (${newJpd.required ? 'Obrigatório' : 'Opcional'}, Ordem: ${newJpd.sort_order}) por ${userName}.`
     });
 
@@ -1629,6 +1922,7 @@ export class Database {
     const docType = this.data.documentTypes?.find(dt => dt.id === jpd.document_type_id);
 
     const changes: string[] = [];
+    const structuredChanges: AuditLogChange[] = [];
 
     // Não permitir alteração de cargo ou tipo de documento vinculado
     if (updates.job_position_id && updates.job_position_id !== jpd.job_position_id) {
@@ -1640,6 +1934,12 @@ export class Database {
 
     // Alteração de obrigatoriedade
     if (updates.required !== undefined && updates.required !== jpd.required) {
+      structuredChanges.push({
+        field: 'required',
+        label: 'Obrigatoriedade',
+        previousValue: jpd.required ? 'Obrigatório' : 'Opcional',
+        newValue: updates.required ? 'Obrigatório' : 'Opcional'
+      });
       changes.push(`obrigatoriedade alterada para ${updates.required ? 'Obrigatório' : 'Opcional'}`);
       jpd.required = Boolean(updates.required);
     }
@@ -1648,6 +1948,12 @@ export class Database {
     if (updates.instructions !== undefined) {
       const cleanInst = updates.instructions ? updates.instructions.trim() : undefined;
       if (cleanInst !== jpd.instructions) {
+        structuredChanges.push({
+          field: 'instructions',
+          label: 'Instruções',
+          previousValue: jpd.instructions || 'Nenhuma',
+          newValue: cleanInst || 'Nenhuma'
+        });
         changes.push('instruções atualizadas');
         jpd.instructions = cleanInst;
       }
@@ -1656,6 +1962,12 @@ export class Database {
     // Alteração de ordem
     if (updates.sort_order !== undefined && typeof updates.sort_order === 'number' && updates.sort_order > 0) {
       if (updates.sort_order !== jpd.sort_order) {
+        structuredChanges.push({
+          field: 'sort_order',
+          label: 'Ordem no Checklist',
+          previousValue: String(jpd.sort_order),
+          newValue: String(updates.sort_order)
+        });
         changes.push(`ordem alterada para ${updates.sort_order}`);
         jpd.sort_order = updates.sort_order;
       }
@@ -1671,6 +1983,13 @@ export class Database {
           throw new Error(`Não é possível ativar esta associação. O tipo de documento "${docType.name}" está inativo no catálogo geral.`);
         }
       }
+
+      structuredChanges.push({
+        field: 'active',
+        label: 'Status no Cargo',
+        previousValue: jpd.active ? 'Ativo' : 'Removido',
+        newValue: updates.active ? 'Ativo' : 'Removido'
+      });
       jpd.active = updates.active;
       changes.push(`status alterado para ${updates.active ? 'Ativo' : 'Inativo'}`);
       isStatusChange = true;
@@ -1689,6 +2008,13 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action,
+      entityType: 'job_position_document',
+      entityId: jpd.id,
+      entityName: `${docType?.name || 'Documento'} (${jobPos?.name || 'Cargo'})`,
+      fieldChanged: structuredChanges.length === 1 ? structuredChanges[0].label : `${structuredChanges.length} configurações`,
+      previousValue: structuredChanges.length === 1 ? String(structuredChanges[0].previousValue) : undefined,
+      newValue: structuredChanges.length === 1 ? String(structuredChanges[0].newValue) : undefined,
+      changes: structuredChanges,
       details: `Checklist do cargo "${jobPos?.name || 'Cargo'}" - Documento "${docType?.name || 'Documento'}": ${changes.length > 0 ? changes.join(', ') : 'configurações atualizadas'} por ${userName}.`
     });
 
@@ -1732,7 +2058,12 @@ export class Database {
     this.addAuditLog({
       userName: userName || 'Usuário RH',
       action: 'job_position_document_reordered',
-      details: `Checklist de documentos do cargo "${jobPos.name}" reordenado por ${userName}.`
+      entityType: 'job_position',
+      entityId: jobPositionId,
+      entityName: jobPos.name,
+      fieldChanged: 'ordem do checklist',
+      newValue: `${orderedIds.length} itens reordenados`,
+      details: `Checklist de documentos do cargo "${jobPos.name}" reordenado (${orderedIds.length} itens) por ${userName}.`
     });
 
     this.save();
@@ -2086,6 +2417,9 @@ export class Database {
     const newVersion = doc.currentVersion + 1;
     const now = new Date().toISOString();
 
+    const previousStatus = doc.status;
+    const previousVersion = doc.currentVersion;
+
     const versionEntry = {
       version: newVersion,
       fileName: file.fileName,
@@ -2113,10 +2447,16 @@ export class Database {
     this.addAuditLog({
       userName: admission.employee.name,
       action: isReupload ? `Funcionário reenviou ${doc.documentType}` : `Funcionário enviou ${doc.documentType}`,
+      entityType: 'admission_document',
+      entityId: doc.id,
+      entityName: doc.documentType,
       admissionId,
       employeeName: admission.employee.name,
       documentType: doc.documentType,
-      details: `Arquivo ${file.fileName} (${(file.fileSize / 1024).toFixed(1)} KB) - Versão ${newVersion}`
+      fieldChanged: 'versão do documento',
+      previousValue: previousVersion > 0 ? `V${previousVersion} (${previousStatus})` : 'Não enviado',
+      newValue: `V${newVersion} (${doc.status})`,
+      details: `Arquivo ${file.fileName} (${(file.fileSize / 1024).toFixed(1)} KB) - Versão ${newVersion} enviado por ${admission.employee.name}.`
     });
 
     this.addNotification({
@@ -2182,6 +2522,8 @@ export class Database {
     }
 
     const now = new Date().toISOString();
+    const previousStatus = targetDocument.status;
+
     targetDocument.status = decision;
     targetDocument.reviewedAt = now;
     targetDocument.reviewedBy = reviewerName;
@@ -2205,10 +2547,16 @@ export class Database {
       this.addAuditLog({
         userName: reviewerName,
         action: `RH aprovou ${targetDocument.documentType}`,
+        entityType: 'admission_document',
+        entityId: targetDocument.id,
+        entityName: targetDocument.documentType,
         admissionId: targetAdmission.id,
         employeeName: targetAdmission.employee.name,
         documentType: targetDocument.documentType,
-        details: `Documento aprovado na versão ${targetDocument.currentVersion} por ${reviewerName}.`
+        fieldChanged: 'status de aprovação',
+        previousValue: previousStatus,
+        newValue: 'Aprovado',
+        details: `Documento aprovado na versão ${targetDocument.currentVersion} por ${reviewerName}. Status anterior: ${previousStatus} ➔ Novo: Aprovado.`
       });
 
       this.addNotification({
@@ -2222,10 +2570,16 @@ export class Database {
       this.addAuditLog({
         userName: reviewerName,
         action: `RH rejeitou ${targetDocument.documentType}`,
+        entityType: 'admission_document',
+        entityId: targetDocument.id,
+        entityName: targetDocument.documentType,
         admissionId: targetAdmission.id,
         employeeName: targetAdmission.employee.name,
         documentType: targetDocument.documentType,
-        details: `Motivo: ${rejectionReason}. Observação: ${rejectionNotes || 'Sem observações adicionais'}`
+        fieldChanged: 'status de aprovação',
+        previousValue: previousStatus,
+        newValue: 'Rejeitado',
+        details: `Documento rejeitado na versão ${targetDocument.currentVersion} por ${reviewerName}. Motivo: ${rejectionReason.trim()}.${rejectionNotes ? ` Orientação: "${rejectionNotes.trim()}".` : ''} Status anterior: ${previousStatus} ➔ Novo: Rejeitado.`
       });
 
       this.addNotification({
@@ -2551,6 +2905,9 @@ export class Database {
     const admission = this.getAdmissionById(id);
     if (!admission) throw new Error('Admissão não encontrada.');
 
+    const changes: string[] = [];
+    const structuredChanges: AuditLogChange[] = [];
+
     // Se houver alteração de CPF, valida duplicidade
     if (updates.cpf) {
       const cleanCPF = updates.cpf.replace(/\D/g, '');
@@ -2562,19 +2919,120 @@ export class Database {
       if (duplicate) {
         throw new Error(`O CPF informado já está em uso na admissão de ${duplicate.employee.name}.`);
       }
-      admission.employee.cpf = cleanCPF;
+      if (cleanCPF !== admission.employee.cpf.replace(/\D/g, '')) {
+        structuredChanges.push({
+          field: 'cpf',
+          label: 'CPF',
+          previousValue: admission.employee.cpf,
+          newValue: cleanCPF
+        });
+        changes.push('CPF atualizado');
+        admission.employee.cpf = cleanCPF;
+      }
     }
 
-    if (updates.name) admission.employee.name = updates.name.trim();
-    if (updates.birthDate) admission.employee.birthDate = updates.birthDate;
-    if (updates.phone) admission.employee.phone = updates.phone.trim();
-    if (updates.email) admission.employee.email = updates.email.toLowerCase().trim();
-    if (updates.role) admission.employee.role = updates.role.trim();
-    if (updates.department) admission.employee.department = updates.department.trim();
-    if (updates.unit) admission.employee.unit = updates.unit.trim();
-    if (updates.expectedStartDate) admission.employee.expectedStartDate = updates.expectedStartDate;
+    if (updates.name && updates.name.trim() !== admission.employee.name) {
+      const newName = updates.name.trim();
+      structuredChanges.push({
+        field: 'name',
+        label: 'Nome do Colaborador',
+        previousValue: admission.employee.name,
+        newValue: newName
+      });
+      changes.push(`nome de "${admission.employee.name}" para "${newName}"`);
+      admission.employee.name = newName;
+    }
+
+    if (updates.birthDate && updates.birthDate !== admission.employee.birthDate) {
+      structuredChanges.push({
+        field: 'birthDate',
+        label: 'Data de Nascimento',
+        previousValue: admission.employee.birthDate,
+        newValue: updates.birthDate
+      });
+      changes.push('data de nascimento alterada');
+      admission.employee.birthDate = updates.birthDate;
+    }
+
+    if (updates.phone && updates.phone.trim() !== admission.employee.phone) {
+      const newPhone = updates.phone.trim();
+      structuredChanges.push({
+        field: 'phone',
+        label: 'Telefone',
+        previousValue: admission.employee.phone,
+        newValue: newPhone
+      });
+      changes.push(`telefone de "${admission.employee.phone}" para "${newPhone}"`);
+      admission.employee.phone = newPhone;
+    }
+
+    if (updates.email && updates.email.toLowerCase().trim() !== admission.employee.email.toLowerCase().trim()) {
+      const newEmail = updates.email.toLowerCase().trim();
+      structuredChanges.push({
+        field: 'email',
+        label: 'E-mail',
+        previousValue: admission.employee.email,
+        newValue: newEmail
+      });
+      changes.push(`e-mail de "${admission.employee.email}" para "${newEmail}"`);
+      admission.employee.email = newEmail;
+    }
+
+    if (updates.role && updates.role.trim() !== admission.employee.role) {
+      const newRole = updates.role.trim();
+      structuredChanges.push({
+        field: 'role',
+        label: 'Cargo',
+        previousValue: admission.employee.role,
+        newValue: newRole
+      });
+      changes.push(`cargo de "${admission.employee.role}" para "${newRole}"`);
+      admission.employee.role = newRole;
+    }
+
+    if (updates.department && updates.department.trim() !== admission.employee.department) {
+      const newDept = updates.department.trim();
+      structuredChanges.push({
+        field: 'department',
+        label: 'Departamento',
+        previousValue: admission.employee.department,
+        newValue: newDept
+      });
+      changes.push(`departamento de "${admission.employee.department}" para "${newDept}"`);
+      admission.employee.department = newDept;
+    }
+
+    if (updates.unit && updates.unit.trim() !== admission.employee.unit) {
+      const newUnit = updates.unit.trim();
+      structuredChanges.push({
+        field: 'unit',
+        label: 'Unidade',
+        previousValue: admission.employee.unit,
+        newValue: newUnit
+      });
+      changes.push(`unidade de "${admission.employee.unit}" para "${newUnit}"`);
+      admission.employee.unit = newUnit;
+    }
+
+    if (updates.expectedStartDate && updates.expectedStartDate !== admission.employee.expectedStartDate) {
+      structuredChanges.push({
+        field: 'expectedStartDate',
+        label: 'Previsão de Início',
+        previousValue: admission.employee.expectedStartDate,
+        newValue: updates.expectedStartDate
+      });
+      changes.push('previsão de início alterada');
+      admission.employee.expectedStartDate = updates.expectedStartDate;
+    }
 
     if (updates.status && updates.status !== admission.status) {
+      structuredChanges.push({
+        field: 'status',
+        label: 'Status da Admissão',
+        previousValue: admission.status,
+        newValue: updates.status
+      });
+      changes.push(`status de "${admission.status}" para "${updates.status}"`);
       admission.status = updates.status;
     }
 
@@ -2591,9 +3049,16 @@ export class Database {
     this.addAuditLog({
       userName: updatedBy,
       action: 'Cadastro de admissão atualizado pelo RH',
+      entityType: 'admission',
+      entityId: admission.id,
+      entityName: admission.employee.name,
       admissionId: admission.id,
       employeeName: admission.employee.name,
-      details: `Dados cadastrais do colaborador ${admission.employee.name} (${admission.employee.role}) foram alterados.`
+      fieldChanged: structuredChanges.length === 1 ? structuredChanges[0].label : `${structuredChanges.length} alterações cadastrais`,
+      previousValue: structuredChanges.length === 1 ? String(structuredChanges[0].previousValue) : undefined,
+      newValue: structuredChanges.length === 1 ? String(structuredChanges[0].newValue) : undefined,
+      changes: structuredChanges,
+      details: `Dados cadastrais de ${admission.employee.name}: ${changes.length > 0 ? changes.join(', ') : 'dados atualizados'} por ${updatedBy}.`
     });
 
     this.save();
@@ -2786,18 +3251,44 @@ export class Database {
       timestamp: new Date().toISOString(),
       ...log
     };
+    if (!this.data.auditLogs) this.data.auditLogs = [];
     this.data.auditLogs.unshift(newLog);
-    // Limita a 500 registros mais recentes em memória
-    if (this.data.auditLogs.length > 500) {
-      this.data.auditLogs = this.data.auditLogs.slice(0, 500);
+    // Limita a 1000 registros mais recentes em memória
+    if (this.data.auditLogs.length > 1000) {
+      this.data.auditLogs = this.data.auditLogs.slice(0, 1000);
     }
   }
 
-  getAuditLogs(admissionId?: string): AuditLog[] {
+  getAuditLogs(
+    admissionId?: string, 
+    options?: { entityType?: string; entityId?: string; action?: string; search?: string }
+  ): AuditLog[] {
+    let logs = this.data.auditLogs || [];
     if (admissionId) {
-      return this.data.auditLogs.filter(l => l.admissionId === admissionId);
+      logs = logs.filter(l => l.admissionId === admissionId);
     }
-    return this.data.auditLogs;
+    if (options?.entityType) {
+      logs = logs.filter(l => l.entityType === options.entityType);
+    }
+    if (options?.entityId) {
+      logs = logs.filter(l => l.entityId === options.entityId);
+    }
+    if (options?.action) {
+      const act = options.action.toLowerCase();
+      logs = logs.filter(l => l.action.toLowerCase().includes(act));
+    }
+    if (options?.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      logs = logs.filter(l => 
+        l.details.toLowerCase().includes(q) ||
+        l.userName.toLowerCase().includes(q) ||
+        (l.employeeName && l.employeeName.toLowerCase().includes(q)) ||
+        (l.documentType && l.documentType.toLowerCase().includes(q)) ||
+        (l.entityName && l.entityName.toLowerCase().includes(q)) ||
+        l.action.toLowerCase().includes(q)
+      );
+    }
+    return logs;
   }
 
   // Notificações

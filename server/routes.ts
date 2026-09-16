@@ -681,8 +681,26 @@ router.get('/system-config', (req: Request, res: Response) => {
 // ------------------------------------------------------------------
 // DASHBOARD & ESTATÍSTICAS
 // ------------------------------------------------------------------
-router.get('/dashboard/stats', (_req: Request, res: Response) => {
-  const stats = db.getStats();
+router.get('/dashboard/stats', (req: Request, res: Response) => {
+  const {
+    period,
+    startDate,
+    endDate,
+    status,
+    role,
+    department,
+    unit
+  } = req.query;
+
+  const stats = db.getStats({
+    period: period as string | undefined,
+    startDate: startDate as string | undefined,
+    endDate: endDate as string | undefined,
+    status: status as string | undefined,
+    role: role as string | undefined,
+    department: department as string | undefined,
+    unit: unit as string | undefined
+  });
   return res.json(stats);
 });
 
@@ -1032,6 +1050,15 @@ router.post('/invite/:token/upload/:documentId', upload.single('file'), (req: Re
     return res.status(404).json({ error: 'Convite não encontrado.' });
   }
 
+  // Validação de segurança anti-IDOR: o documento DEVE pertencer à admissão vinculada ao token
+  const targetDoc = admission.documents.find(d => d.id === req.params.documentId);
+  if (!targetDoc) {
+    if (req.file && fs.existsSync(req.file.path)) {
+      try { fs.unlinkSync(req.file.path); } catch (_) {}
+    }
+    return res.status(403).json({ error: 'Acesso negado. O documento solicitado não pertence a esta admissão.' });
+  }
+
   if (!req.file) {
     return res.status(400).json({ error: 'Nenhum arquivo recebido para envio.' });
   }
@@ -1074,11 +1101,12 @@ function generateDocumentSignature(docId: string, version: number | string, expi
     .digest('hex');
 }
 
-// Endpoint para obter URL assinada temporária (15 minutos)
-router.get('/documents/:id/signed-url', (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
+// Endpoint para obter URL assinada temporária (15 minutos) / preview seguro
+router.get(['/documents/:id/signed-url', '/documents/:id/preview'], (req: Request, res: Response) => {
   const docId = req.params.id;
   const versionParam = req.query.version ? Number(req.query.version) : 0;
+  const tokenParam = (req.query.token as string) || (req.headers['x-invite-token'] as string);
+  const emailHeader = req.headers['x-user-email'] as string;
 
   // Localiza o documento e sua admissão
   let foundDoc;
@@ -1096,12 +1124,15 @@ router.get('/documents/:id/signed-url', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Documento não encontrado.' });
   }
 
-  // Se o usuário for funcionário, só pode se for da sua própria admissão
-  if (user.role === 'FUNCIONARIO') {
-    const inviteToken = (req.query.token as string) || (req.headers['x-invite-token'] as string);
-    if (!inviteToken || foundAdm.inviteToken !== inviteToken) {
-      return res.status(403).json({ error: 'Acesso negado. Você não tem permissão para visualizar este documento.' });
-    }
+  // Validação estrita de autorização (Storage privado):
+  // Se não foi fornecido token de convite e não há cabeçalho de usuário RH
+  if (!tokenParam && !emailHeader) {
+    return res.status(403).json({ error: 'Acesso negado. Acesso anônimo direto ao preview é restrito.' });
+  }
+
+  // Se houver token de convite, valida se corresponde a esta admissão e está ativo
+  if (tokenParam && (foundAdm.inviteToken !== tokenParam || foundAdm.inviteRevoked)) {
+    return res.status(403).json({ error: 'Acesso negado. Token de convite inválido ou expirado para este documento.' });
   }
 
   const version = versionParam || foundDoc.currentVersion || 1;
@@ -1334,7 +1365,12 @@ router.get('/documents/:id/file', (req: Request, res: Response) => {
 // ------------------------------------------------------------------
 router.get('/audit-logs', (req: Request, res: Response) => {
   const admissionId = req.query.admissionId as string | undefined;
-  const logs = db.getAuditLogs(admissionId);
+  const entityType = req.query.entityType as string | undefined;
+  const entityId = req.query.entityId as string | undefined;
+  const action = req.query.action as string | undefined;
+  const search = req.query.search as string | undefined;
+
+  const logs = db.getAuditLogs(admissionId, { entityType, entityId, action, search });
   return res.json(logs);
 });
 

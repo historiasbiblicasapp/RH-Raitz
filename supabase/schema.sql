@@ -85,6 +85,25 @@ INSERT INTO public.job_positions (name, code, description, active) VALUES
 ('Assistente Administrativo', 'ADM-002', 'Lançamentos, controle de documentos e suporte ao setor', true)
 ON CONFLICT DO NOTHING;
 
+-- 3.2 TABELA DE ASSOCIAÇÃO CHECKLIST POR CARGO (Job Position Documents - Bloco 3.3)
+CREATE TABLE IF NOT EXISTS public.job_position_documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_position_id UUID NOT NULL REFERENCES public.job_positions(id) ON DELETE RESTRICT,
+    document_type_id UUID NOT NULL REFERENCES public.document_types(id) ON DELETE RESTRICT,
+    required BOOLEAN DEFAULT TRUE NOT NULL,
+    sort_order INT DEFAULT 1 NOT NULL,
+    instructions TEXT,
+    active BOOLEAN DEFAULT TRUE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    created_by VARCHAR(255),
+    updated_by VARCHAR(255),
+    CONSTRAINT uk_job_position_document UNIQUE (job_position_id, document_type_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_jpd_job_position ON public.job_position_documents(job_position_id, active);
+CREATE INDEX IF NOT EXISTS idx_jpd_doc_type ON public.job_position_documents(document_type_id);
+
 -- 4. TABELA DE ADMISSÕES
 CREATE TABLE IF NOT EXISTS public.admissions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -199,12 +218,29 @@ ALTER TABLE public.consent_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.job_positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.job_position_documents ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para usuários autenticados (Equipe de RH)
 CREATE POLICY "RH e Administradores podem visualizar cargos"
     ON public.job_positions FOR SELECT
     TO authenticated
     USING (true);
+
+CREATE POLICY "RH e Administradores podem visualizar checklists de cargos"
+    ON public.job_position_documents FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE POLICY "Apenas usuários autorizados de RH/ADMIN podem gerenciar checklists de cargos"
+    ON public.job_position_documents FOR ALL
+    TO authenticated
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.users 
+            WHERE users.id = auth.uid() 
+            AND users.role IN ('ADMIN', 'RH', 'GESTOR')
+        )
+    );
 
 CREATE POLICY "Apenas usuários autorizados de RH/ADMIN podem cadastrar cargos"
     ON public.job_positions FOR INSERT

@@ -36,7 +36,8 @@ import {
   KeyRound,
   Search,
   Filter,
-  Info
+  Info,
+  ArrowRight
 } from 'lucide-react';
 import { Admission, AdmissionDocument, AuditLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -1582,32 +1583,106 @@ export const AdmissionDetails: React.FC = () => {
       {/* ABA 5: HISTÓRICO COMPLETO (Item 26) */}
       {activeTab === 'historico' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <div className="pb-4 border-b border-slate-100">
-            <h2 className="text-sm font-bold text-slate-900">Histórico e Trilha de Auditoria</h2>
-            <p className="text-xs text-slate-500">
-              Linha do tempo imutável de todos os eventos registrados no processo admissional.
-            </p>
+          <div className="pb-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Histórico e Trilha de Auditoria</h2>
+              <p className="text-xs text-slate-500">
+                Linha do tempo imutável de todas as ações, envios, análises, versões e alterações com rastreabilidade completa (LGPD).
+              </p>
+            </div>
+            <span className="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full border border-slate-200 w-fit">
+              {auditLogs.length} registro{auditLogs.length === 1 ? '' : 's'}
+            </span>
           </div>
 
           {auditLogs.length === 0 ? (
             <p className="text-xs text-slate-400 py-8 text-center">Nenhum evento registrado ainda.</p>
           ) : (
-            <div className="relative pl-6 border-l border-slate-200 space-y-6 my-2">
-              {auditLogs.map((log) => (
-                <div key={log.id} className="relative">
-                  <div className="w-2.5 h-2.5 rounded-full bg-blue-600 absolute -left-[30px] top-1 border-2 border-white ring-2 ring-blue-100" />
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <span className="text-xs font-bold text-slate-900">{log.action}</span>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {new Date(log.timestamp).toLocaleString('pt-BR')}
-                    </span>
+            <div className="relative pl-6 border-l-2 border-slate-200 space-y-6 my-4">
+              {auditLogs.map((log) => {
+                const isApproval = log.action.includes('aprovou') || log.action.includes('Aprovado');
+                const isRejection = log.action.includes('rejeitou') || log.action.includes('Rejeitado') || log.action.includes('cancelou');
+                const isUpload = log.action.includes('enviou') || log.action.includes('reenviou');
+
+                return (
+                  <div key={log.id} className="relative group">
+                    <div className={`w-3 h-3 rounded-full absolute -left-[31px] top-1 border-2 border-white ring-2 ${
+                      isApproval 
+                        ? 'bg-emerald-500 ring-emerald-100' 
+                        : isRejection 
+                        ? 'bg-rose-500 ring-rose-100' 
+                        : isUpload
+                        ? 'bg-blue-500 ring-blue-100'
+                        : 'bg-slate-400 ring-slate-100'
+                    }`} />
+                    
+                    <div className="bg-slate-50/70 hover:bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 transition-colors space-y-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-slate-900">{log.action}</span>
+                          {log.documentType && (
+                            <span className="text-[10px] bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
+                              {log.documentType}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {new Date(log.timestamp).toLocaleString('pt-BR')}
+                        </span>
+                      </div>
+
+                      {/* De / Para Estruturado se houver */}
+                      {log.changes && log.changes.length > 0 ? (
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase block">
+                            Alterações registradas ({log.changes.length}):
+                          </span>
+                          <div className="space-y-1">
+                            {log.changes.map((c, i) => (
+                              <div key={i} className="text-xs flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold text-slate-700 text-[11px]">{c.label || c.field}:</span>
+                                <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-mono line-through">
+                                  {String(c.previousValue ?? 'Vazio')}
+                                </span>
+                                <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-mono font-bold">
+                                  {String(c.newValue ?? 'Vazio')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : log.fieldChanged ? (
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center gap-2 text-xs flex-wrap">
+                          <span className="font-bold text-slate-600 text-[11px]">{log.fieldChanged}:</span>
+                          {log.previousValue !== undefined && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-mono line-through">
+                              {log.previousValue}
+                            </span>
+                          )}
+                          {log.previousValue !== undefined && log.newValue !== undefined && (
+                            <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
+                          )}
+                          {log.newValue !== undefined && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-mono font-bold">
+                              {log.newValue}
+                            </span>
+                          )}
+                        </div>
+                      ) : null}
+
+                      <p className="text-xs text-slate-600 leading-relaxed">{log.details}</p>
+
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-200/60">
+                        <span>
+                          Responsável: <strong className="text-slate-700">{log.userName || log.performedBy}</strong>
+                        </span>
+                        {log.id && <span className="font-mono text-[10px]">ID: {log.id}</span>}
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-600 mt-1">{log.details}</p>
-                  <span className="text-[11px] text-slate-400 mt-0.5 block">
-                    Por: <strong>{log.userName}</strong>
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
