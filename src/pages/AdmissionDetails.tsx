@@ -33,7 +33,10 @@ import {
   Smartphone,
   Edit3,
   Trash2,
-  KeyRound
+  KeyRound,
+  Search,
+  Filter,
+  Info
 } from 'lucide-react';
 import { Admission, AdmissionDocument, AuditLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -82,6 +85,11 @@ export const AdmissionDetails: React.FC = () => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [showSimulator, setShowSimulator] = useState(false);
 
+  // Filtros da aba de Documentos (Bloco 3.5)
+  const [docSearchQuery, setDocSearchQuery] = useState('');
+  const [docStatusFilter, setDocStatusFilter] = useState<'todos' | 'aguardando' | 'Aprovado' | 'Rejeitado' | 'Não enviado'>('todos');
+  const [docTypeFilter, setDocTypeFilter] = useState<'todos' | 'obrigatorios' | 'adicionais'>('todos');
+
   const fetchAdmission = async () => {
     if (!id) return;
     try {
@@ -114,12 +122,18 @@ export const AdmissionDetails: React.FC = () => {
     documentId: string, 
     decision: 'Aprovado' | 'Rejeitado', 
     reason?: string, 
-    notes?: string
+    notes?: string,
+    expectedVersion?: number
   ) => {
     const res = await fetch(`/api/documents/${documentId}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision, rejectionReason: reason, rejectionNotes: notes })
+      body: JSON.stringify({ 
+        decision, 
+        rejectionReason: reason, 
+        rejectionNotes: notes,
+        expectedVersion
+      })
     });
 
     if (!res.ok) {
@@ -129,6 +143,15 @@ export const AdmissionDetails: React.FC = () => {
 
     const data = await res.json();
     setAdmission(data.admission);
+
+    // Se houver um documento aberto no modal, atualiza para o estado fresco
+    if (selectedDocForReview && selectedDocForReview.id === documentId) {
+      const updatedDoc = data.admission.documents.find((d: AdmissionDocument) => d.id === documentId);
+      if (updatedDoc) {
+        setSelectedDocForReview(updatedDoc);
+      }
+    }
+
     // Recarrega trilha de auditoria
     const resLogs = await fetch(`/api/audit-logs?admissionId=${id}`);
     if (resLogs.ok) {
@@ -272,6 +295,36 @@ export const AdmissionDetails: React.FC = () => {
   const inReviewDocs = requiredDocs.filter(d => d.status === 'Em análise' || d.status === 'Reenviado');
   const rejectedDocs = requiredDocs.filter(d => d.status === 'Rejeitado');
   const notSentDocs = requiredDocs.filter(d => d.status === 'Não enviado');
+
+  // Métricas completas para a conferência do checklist (Bloco 3.5)
+  const allInReviewDocs = admission.documents.filter(d => d.status === 'Em análise' || d.status === 'Reenviado');
+  const allApprovedDocs = admission.documents.filter(d => d.status === 'Aprovado');
+  const allRejectedDocs = admission.documents.filter(d => d.status === 'Rejeitado');
+  const allNotSentDocs = admission.documents.filter(d => d.status === 'Não enviado');
+  const totalDocsCount = admission.documents.length;
+  const progressPercent = requiredDocs.length > 0 ? Math.round((approvedDocs.length / requiredDocs.length) * 100) : 100;
+
+  // Filtragem na aba de documentos
+  const filterDoc = (doc: AdmissionDocument) => {
+    if (docSearchQuery.trim()) {
+      const q = docSearchQuery.toLowerCase();
+      const matchName = doc.documentType.toLowerCase().includes(q);
+      const matchCat = doc.category?.toLowerCase().includes(q);
+      const matchFile = doc.fileName?.toLowerCase().includes(q);
+      if (!matchName && !matchCat && !matchFile) return false;
+    }
+    if (docStatusFilter === 'aguardando') {
+      return doc.status === 'Em análise' || doc.status === 'Reenviado';
+    }
+    if (docStatusFilter !== 'todos') {
+      return doc.status === docStatusFilter;
+    }
+    return true;
+  };
+
+  const filteredRequiredDocs = requiredDocs.filter(filterDoc);
+  const filteredAdditionalDocs = additionalDocs.filter(filterDoc);
+  const hasActiveDocFilters = docSearchQuery.trim() !== '' || docStatusFilter !== 'todos' || docTypeFilter !== 'todos';
 
   // Pendências: documentos rejeitados, documentos obrigatórios ainda não enviados, ou solicitação de correção cadastral
   const pendingItems = [
@@ -914,139 +967,454 @@ export const AdmissionDetails: React.FC = () => {
         </div>
       )}
 
-      {/* ABA 3: DOCUMENTOS (Itens 14, 15, 16) */}
+      {/* ABA 3: DOCUMENTOS - CONFERÊNCIA DO CHECKLIST (Bloco 3.5) */}
       {activeTab === 'documentos' && (
         <div className="space-y-6">
-          {/* Seção 1: Documentos Obrigatórios */}
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          {/* Header de Progresso e Métricas da Conferência */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <h2 className="text-sm font-bold text-slate-900">Documentos Obrigatórios</h2>
-                <p className="text-xs text-slate-500">
-                  Lista dos documentos que precisam estar 100% aprovados para concluir a admissão.
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <FileCheck2 className="w-5 h-5 text-blue-600" />
+                  <span>Conferência do Checklist de Documentos</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Valide ou aponte pendências nos documentos enviados pelo colaborador.
                 </p>
               </div>
-              <span className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
-                {approvedDocs.length} de {requiredDocs.length} aprovados
-              </span>
+
+              {/* Status geral de conclusão */}
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                {canComplete ? (
+                  <span className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Checklist 100% Aprovado</span>
+                  </span>
+                ) : allInReviewDocs.length > 0 ? (
+                  <span className="flex items-center gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <span>{allInReviewDocs.length} aguardando conferência do RH</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+                    <Clock className="w-4 h-4 text-slate-400" />
+                    <span>{approvedDocs.length} de {requiredDocs.length} obrigatórios aprovados</span>
+                  </span>
+                )}
+              </div>
             </div>
 
-            <div className="divide-y divide-slate-100">
-              {requiredDocs.length === 0 ? (
-                <div className="p-6 text-center text-xs text-slate-500">
-                  <AlertCircle className="w-5 h-5 mx-auto text-amber-500 mb-1.5" />
-                  <p className="font-semibold text-slate-800">Esta admissão não possui documentos obrigatórios configurados.</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">O cargo desta admissão não continha documentos obrigatórios no momento da sua criação.</p>
+            {/* Barra de Progresso dos Obrigatórios */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-medium">
+                <span className="text-slate-600">Progresso dos Documentos Obrigatórios</span>
+                <span className="font-bold text-slate-900">{progressPercent}%</span>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                <div 
+                  className={`h-full transition-all duration-500 ${
+                    progressPercent === 100 ? 'bg-emerald-500' : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Cards de Métricas da Conferência */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3 pt-1">
+              <button 
+                type="button"
+                onClick={() => { setDocStatusFilter('todos'); setDocTypeFilter('todos'); }}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  docStatusFilter === 'todos' && docTypeFilter === 'todos'
+                    ? 'bg-blue-50/70 border-blue-300 ring-2 ring-blue-500/20'
+                    : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className="text-[11px] font-medium text-slate-500">Total</div>
+                <div className="text-xl font-extrabold text-slate-900 mt-0.5">{totalDocsCount}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">{requiredDocs.length} obrigatórios</div>
+              </button>
+
+              <button 
+                type="button"
+                onClick={() => setDocStatusFilter('aguardando')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  docStatusFilter === 'aguardando'
+                    ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-500/20'
+                    : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className="text-[11px] font-medium text-amber-700 flex items-center justify-between">
+                  <span>Conferir</span>
+                  {allInReviewDocs.length > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                  )}
                 </div>
-              ) : (
-                requiredDocs.map((doc) => (
-                <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
-                  <div className="flex items-start gap-3.5">
-                    <div className={`p-2.5 rounded-xl border mt-0.5 ${
-                      doc.status === 'Aprovado' 
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                        : doc.status === 'Rejeitado'
-                        ? 'bg-rose-50 text-rose-700 border-rose-200'
-                        : doc.status === 'Não enviado'
-                        ? 'bg-slate-50 text-slate-400 border-slate-200'
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}>
-                      <FileText className="w-5 h-5" />
-                    </div>
+                <div className="text-xl font-extrabold text-amber-900 mt-0.5">{allInReviewDocs.length}</div>
+                <div className="text-[10px] text-amber-700/80 mt-0.5">Em análise / Reenviados</div>
+              </button>
 
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-bold text-slate-900">{doc.documentType}</h3>
-                        <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded">
-                          Obrigatório
-                        </span>
-                        {doc.category && (
-                          <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded">
-                            {doc.category}
-                          </span>
-                        )}
-                        <StatusBadge status={doc.status} size="sm" />
-                      </div>
+              <button 
+                type="button"
+                onClick={() => setDocStatusFilter('Aprovado')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  docStatusFilter === 'Aprovado'
+                    ? 'bg-emerald-50 border-emerald-300 ring-2 ring-emerald-500/20'
+                    : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className="text-[11px] font-medium text-emerald-700">Aprovados</div>
+                <div className="text-xl font-extrabold text-emerald-900 mt-0.5">{allApprovedDocs.length}</div>
+                <div className="text-[10px] text-emerald-700/80 mt-0.5">{approvedDocs.length} obrigatórios</div>
+              </button>
 
-                      <div className="text-xs text-slate-500 mt-1 space-y-0.5">
-                        {doc.instructions && (
-                          <p className="text-[11px] text-blue-800 bg-blue-50/80 border border-blue-100/60 px-2 py-0.5 rounded font-medium inline-block mb-1">
-                            Instruções: {doc.instructions}
-                          </p>
-                        )}
+              <button 
+                type="button"
+                onClick={() => setDocStatusFilter('Rejeitado')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  docStatusFilter === 'Rejeitado'
+                    ? 'bg-rose-50 border-rose-300 ring-2 ring-rose-500/20'
+                    : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className="text-[11px] font-medium text-rose-700">Rejeitados</div>
+                <div className="text-xl font-extrabold text-rose-900 mt-0.5">{allRejectedDocs.length}</div>
+                <div className="text-[10px] text-rose-700/80 mt-0.5">Com pendências</div>
+              </button>
 
-                        {doc.fileName ? (
-                          <p>
-                            Arquivo: <span className="font-mono text-slate-700 font-medium">{doc.fileName}</span>
-                            {doc.currentVersion > 0 && ` (Versão ${doc.currentVersion})`}
-                          </p>
-                        ) : (
-                          <p className="text-slate-400 italic">Nenhum arquivo enviado ainda pelo colaborador.</p>
-                        )}
-
-                        {(doc.allowed_file_types || doc.max_file_size_mb) && (
-                          <p className="text-[10px] text-slate-400">
-                            Formatos aceitos: {(doc.allowed_file_types || ['PDF', 'JPG', 'PNG']).join(', ')} • Limite: {doc.max_file_size_mb || 10}MB
-                          </p>
-                        )}
-
-                        {doc.uploadedAt && (
-                          <p className="text-[11px] text-slate-400">
-                            Enviado em: {new Date(doc.uploadedAt).toLocaleString('pt-BR')}
-                          </p>
-                        )}
-
-                        {doc.status === 'Rejeitado' && doc.rejectionReason && (
-                          <p className="text-rose-600 font-medium text-[11px] pt-0.5">
-                            Motivo da recusa: {doc.rejectionReason}
-                            {doc.rejectionNotes && ` - "${doc.rejectionNotes}"`}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-end sm:self-center">
-                    {doc.currentVersion > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDocForReview(doc)}
-                        className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Conferir Documento</span>
-                      </button>
-                    ) : (
-                      <span className="text-xs text-slate-400 italic px-2 py-1">
-                        Aguardando envio
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )))}
+              <button 
+                type="button"
+                onClick={() => setDocStatusFilter('Não enviado')}
+                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  docStatusFilter === 'Não enviado'
+                    ? 'bg-slate-200/70 border-slate-400 ring-2 ring-slate-500/20'
+                    : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+                }`}
+              >
+                <div className="text-[11px] font-medium text-slate-500">Não enviados</div>
+                <div className="text-xl font-extrabold text-slate-700 mt-0.5">{allNotSentDocs.length}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Aguardando candidato</div>
+              </button>
             </div>
           </div>
 
-          {/* Seção 2: Documentos Adicionais (Item 15) */}
-          {additionalDocs.length > 0 && (
+          {/* Barra de Filtros e Busca */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={docSearchQuery}
+                  onChange={(e) => setDocSearchQuery(e.target.value)}
+                  placeholder="Buscar documento por nome, categoria ou arquivo..."
+                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={docTypeFilter}
+                  onChange={(e) => setDocTypeFilter(e.target.value as any)}
+                  className="text-xs border border-slate-200 rounded-xl px-3 py-2 bg-white text-slate-700 font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                >
+                  <option value="todos">Todos os Tipos ({totalDocsCount})</option>
+                  <option value="obrigatorios">Somente Obrigatórios ({requiredDocs.length})</option>
+                  <option value="adicionais">Somente Adicionais ({additionalDocs.length})</option>
+                </select>
+
+                {hasActiveDocFilters && (
+                  <button
+                    onClick={() => {
+                      setDocSearchQuery('');
+                      setDocStatusFilter('todos');
+                      setDocTypeFilter('todos');
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium px-2 py-1 hover:bg-blue-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                  >
+                    Limpar Filtros
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Chips de filtro rápido por status */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+              <span className="text-[11px] text-slate-400 font-medium mr-1">Status:</span>
+              <button
+                type="button"
+                onClick={() => setDocStatusFilter('todos')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                  docStatusFilter === 'todos'
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Todos ({totalDocsCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocStatusFilter('aguardando')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  docStatusFilter === 'aguardando'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                <span>Aguardando Conferência</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-bold">{allInReviewDocs.length}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocStatusFilter('Aprovado')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                  docStatusFilter === 'Aprovado'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                }`}
+              >
+                Aprovados ({allApprovedDocs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocStatusFilter('Rejeitado')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                  docStatusFilter === 'Rejeitado'
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100'
+                }`}
+              >
+                Rejeitados ({allRejectedDocs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocStatusFilter('Não enviado')}
+                className={`px-2.5 py-1 rounded-lg font-medium transition-colors cursor-pointer ${
+                  docStatusFilter === 'Não enviado'
+                    ? 'bg-slate-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                Não enviados ({allNotSentDocs.length})
+              </button>
+            </div>
+          </div>
+
+          {/* Empty state quando a filtragem não retorna itens */}
+          {filteredRequiredDocs.length === 0 && filteredAdditionalDocs.length === 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center">
+              <AlertCircle className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+              <p className="text-sm font-bold text-slate-800">Nenhum documento encontrado</p>
+              <p className="text-xs text-slate-500 mt-1">
+                Tente ajustar os termos de busca ou remover os filtros de status e tipo.
+              </p>
+              {hasActiveDocFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocSearchQuery('');
+                    setDocStatusFilter('todos');
+                    setDocTypeFilter('todos');
+                  }}
+                  className="mt-3 text-xs font-semibold text-blue-600 hover:underline cursor-pointer"
+                >
+                  Limpar todos os filtros
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Seção 1: Documentos Obrigatórios */}
+          {docTypeFilter !== 'adicionais' && filteredRequiredDocs.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-              <div className="p-4 sm:p-5 border-b border-slate-100 bg-slate-50/50">
-                <h2 className="text-sm font-bold text-slate-900">Documentos Adicionais</h2>
-                <p className="text-xs text-slate-500">
-                  Documentos complementares que não impedem a conclusão do processo.
-                </p>
+              <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <span>Documentos Obrigatórios</span>
+                    <span className="text-[11px] font-normal text-slate-500">
+                      ({filteredRequiredDocs.length} de {requiredDocs.length})
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Lista dos documentos indispensáveis para conclusão formal do processo.
+                  </p>
+                </div>
+                <span className="text-xs font-semibold text-slate-700 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
+                  {approvedDocs.length} de {requiredDocs.length} aprovados
+                </span>
               </div>
 
               <div className="divide-y divide-slate-100">
-                {additionalDocs.map((doc) => (
-                  <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                {filteredRequiredDocs.map((doc) => (
+                  <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors">
                     <div className="flex items-start gap-3.5">
-                      <div className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-500 mt-0.5">
-                        <FileText className="w-5 h-5" />
+                      <div className={`p-2.5 rounded-xl border mt-0.5 shrink-0 ${
+                        doc.status === 'Aprovado' 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                          : doc.status === 'Rejeitado'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : doc.status === 'Não enviado'
+                          ? 'bg-slate-50 text-slate-400 border-slate-200'
+                          : 'bg-amber-50 text-amber-700 border-amber-200 ring-2 ring-amber-400/20'
+                      }`}>
+                        {doc.status === 'Aprovado' ? (
+                          <FileCheck2 className="w-5 h-5" />
+                        ) : doc.status === 'Rejeitado' ? (
+                          <AlertCircle className="w-5 h-5" />
+                        ) : doc.status === 'Não enviado' ? (
+                          <FileText className="w-5 h-5" />
+                        ) : (
+                          <Clock className="w-5 h-5" />
+                        )}
                       </div>
 
-                      <div>
-                        <div className="flex items-center gap-2">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-bold text-slate-900">{doc.documentType}</h3>
+                          <span className="text-[10px] bg-slate-100 text-slate-700 font-bold px-1.5 py-0.5 rounded">
+                            Obrigatório
+                          </span>
+                          {doc.category && (
+                            <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded">
+                              {doc.category}
+                            </span>
+                          )}
+                          <StatusBadge status={doc.status} size="sm" />
+                        </div>
+
+                        <div className="text-xs text-slate-500 space-y-1">
+                          {doc.instructions && (
+                            <p className="text-[11px] text-blue-800 bg-blue-50/80 border border-blue-100/60 px-2 py-0.5 rounded font-medium inline-block">
+                              Instruções: {doc.instructions}
+                            </p>
+                          )}
+
+                          {doc.fileName ? (
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span>
+                                Arquivo: <span className="font-mono text-slate-800 font-medium">{doc.fileName}</span>
+                              </span>
+                              {doc.currentVersion > 0 && (
+                                <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded">
+                                  Versão {doc.currentVersion}
+                                </span>
+                              )}
+                              {doc.uploadedAt && (
+                                <span className="text-[11px] text-slate-400">
+                                  • Enviado em {new Date(doc.uploadedAt).toLocaleString('pt-BR')}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-slate-400 italic">Nenhum arquivo enviado ainda pelo colaborador.</p>
+                          )}
+
+                          {(doc.allowed_file_types || doc.max_file_size_mb) && (
+                            <p className="text-[10px] text-slate-400">
+                              Formatos aceitos: {(doc.allowed_file_types || ['PDF', 'JPG', 'PNG']).join(', ')} • Limite: {doc.max_file_size_mb || 10}MB
+                            </p>
+                          )}
+
+                          {doc.reviewedAt && (
+                            <p className="text-[11px] text-slate-500">
+                              Conferido por <strong>{doc.reviewedBy || 'RH'}</strong> em {new Date(doc.reviewedAt).toLocaleString('pt-BR')}
+                            </p>
+                          )}
+
+                          {doc.status === 'Rejeitado' && doc.rejectionReason && (
+                            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-0.5">
+                              <p className="text-rose-900 font-bold text-[11px]">
+                                Motivo da recusa: <span className="font-semibold text-rose-800">{doc.rejectionReason}</span>
+                              </p>
+                              {doc.rejectionNotes && (
+                                <p className="text-[11px] text-rose-700 italic">
+                                  Orientação enviada: "{doc.rejectionNotes}"
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      {doc.currentVersion > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDocForReview(doc)}
+                          className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl transition-all cursor-pointer ${
+                            doc.status === 'Em análise' || doc.status === 'Reenviado'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs ring-2 ring-blue-500/20'
+                              : doc.status === 'Rejeitado'
+                              ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>
+                            {doc.status === 'Em análise' || doc.status === 'Reenviado'
+                              ? 'Conferir Documento'
+                              : doc.status === 'Rejeitado'
+                              ? 'Reavaliar Documento'
+                              : 'Revisar / Ver Arquivo'}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic px-2 py-1">
+                          Aguardando envio
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Seção 2: Documentos Adicionais */}
+          {docTypeFilter !== 'obrigatorios' && filteredAdditionalDocs.length > 0 && (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <span>Documentos Adicionais</span>
+                    <span className="text-[11px] font-normal text-slate-500">
+                      ({filteredAdditionalDocs.length} de {additionalDocs.length})
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Documentos complementares que não impedem a conclusão do processo.
+                  </p>
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {filteredAdditionalDocs.map((doc) => (
+                  <div key={doc.id} className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 transition-colors">
+                    <div className="flex items-start gap-3.5">
+                      <div className={`p-2.5 rounded-xl border mt-0.5 shrink-0 ${
+                        doc.status === 'Aprovado' 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                          : doc.status === 'Rejeitado'
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : doc.status === 'Não enviado'
+                          ? 'bg-slate-50 text-slate-400 border-slate-200'
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        {doc.status === 'Aprovado' ? (
+                          <FileCheck2 className="w-5 h-5" />
+                        ) : doc.status === 'Rejeitado' ? (
+                          <AlertCircle className="w-5 h-5" />
+                        ) : doc.status === 'Não enviado' ? (
+                          <FileText className="w-5 h-5" />
+                        ) : (
+                          <Clock className="w-5 h-5" />
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-sm font-bold text-slate-900">{doc.documentType}</h3>
                           <span className="text-[10px] bg-slate-100 text-slate-500 font-medium px-1.5 py-0.5 rounded">
                             Opcional
@@ -1059,15 +1427,27 @@ export const AdmissionDetails: React.FC = () => {
                           <StatusBadge status={doc.status} size="sm" />
                         </div>
 
-                        <div className="text-xs text-slate-500 mt-1 space-y-0.5">
+                        <div className="text-xs text-slate-500 space-y-1">
                           {doc.instructions && (
-                            <p className="text-[11px] text-blue-800 bg-blue-50/80 border border-blue-100/60 px-2 py-0.5 rounded font-medium inline-block mb-1">
+                            <p className="text-[11px] text-blue-800 bg-blue-50/80 border border-blue-100/60 px-2 py-0.5 rounded font-medium inline-block">
                               Instruções: {doc.instructions}
                             </p>
                           )}
 
                           {doc.fileName ? (
-                            <p>Arquivo: <span className="font-mono text-slate-700 font-medium">{doc.fileName}</span></p>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span>Arquivo: <span className="font-mono text-slate-800 font-medium">{doc.fileName}</span></span>
+                              {doc.currentVersion > 0 && (
+                                <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-1.5 py-0.2 rounded">
+                                  Versão {doc.currentVersion}
+                                </span>
+                              )}
+                              {doc.uploadedAt && (
+                                <span className="text-[11px] text-slate-400">
+                                  • Enviado em {new Date(doc.uploadedAt).toLocaleString('pt-BR')}
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <p className="text-slate-400 italic">Não enviado.</p>
                           )}
@@ -1077,20 +1457,47 @@ export const AdmissionDetails: React.FC = () => {
                               Formatos aceitos: {(doc.allowed_file_types || ['PDF', 'JPG', 'PNG']).join(', ')} • Limite: {doc.max_file_size_mb || 10}MB
                             </p>
                           )}
+
+                          {doc.reviewedAt && (
+                            <p className="text-[11px] text-slate-500">
+                              Conferido por <strong>{doc.reviewedBy || 'RH'}</strong> em {new Date(doc.reviewedAt).toLocaleString('pt-BR')}
+                            </p>
+                          )}
+
+                          {doc.status === 'Rejeitado' && doc.rejectionReason && (
+                            <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-0.5">
+                              <p className="text-rose-900 font-bold text-[11px]">
+                                Motivo da recusa: <span className="font-semibold text-rose-800">{doc.rejectionReason}</span>
+                              </p>
+                              {doc.rejectionNotes && (
+                                <p className="text-[11px] text-rose-700 italic">
+                                  Orientação enviada: "{doc.rejectionNotes}"
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-end sm:self-center">
-                      {doc.currentVersion > 0 && (
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      {doc.currentVersion > 0 ? (
                         <button
                           type="button"
                           onClick={() => setSelectedDocForReview(doc)}
-                          className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer"
+                          className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl transition-all cursor-pointer ${
+                            doc.status === 'Em análise' || doc.status === 'Reenviado'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          }`}
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>Conferir</span>
                         </button>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic px-2 py-1">
+                          Não enviado
+                        </span>
                       )}
                     </div>
                   </div>
