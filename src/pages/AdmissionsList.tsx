@@ -22,7 +22,8 @@ import {
   UserPlus,
   Edit3,
   Trash2,
-  KeyRound
+  KeyRound,
+  AlertCircle
 } from 'lucide-react';
 import { Admission, AdmissionStatus, DashboardStats } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -304,13 +305,27 @@ export const AdmissionsList: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => navigate('/admissoes/nova')}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
-        >
-          <Plus className="w-4 h-4 stroke-[2.5]" />
-          <span>Nova Admissão</span>
-        </button>
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <button
+            type="button"
+            id="btn-admissoes-central-pendencias"
+            onClick={() => navigate('/pendencias')}
+            className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold px-3.5 py-2.5 rounded-xl shadow-2xs transition-colors cursor-pointer"
+          >
+            <AlertCircle className="w-4 h-4 text-rose-600" />
+            <span>Central de Pendências</span>
+          </button>
+
+          <button
+            type="button"
+            id="btn-nova-admissao"
+            onClick={() => navigate('/admissoes/nova')}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>Nova Admissão</span>
+          </button>
+        </div>
       </div>
 
       {/* 5 Cards de Status / Navegação */}

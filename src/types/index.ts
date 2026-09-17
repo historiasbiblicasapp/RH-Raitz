@@ -452,3 +452,410 @@ export interface PendingHubResponse {
   };
 }
 
+// ------------------------------------------------------------------
+// BLOCO 4.3 — COMUNICAÇÃO COM O FUNCIONÁRIO
+// ------------------------------------------------------------------
+
+export type CommunicationType = 
+  | 'documents_pending' 
+  | 'document_rejected' 
+  | 'reminder' 
+  | 'admission_upcoming'
+  | 'general_notice';
+
+export type CommunicationChannel = 'whatsapp' | 'copy';
+
+export type CommunicationActionStatus = 'whatsapp_opened' | 'message_copied' | 'link_copied';
+
+export interface CommunicationLog {
+  id: string;
+  admissionId: string;
+  employeeId: string;
+  userId?: string;
+  userName: string;
+  communicationType: CommunicationType;
+  channel: CommunicationChannel;
+  templateId: string;
+  documentId?: string;
+  documentName?: string;
+  rejectionReason?: string;
+  messagePreview: string;
+  actionStatus: CommunicationActionStatus;
+  actionStatusLabel: string;
+  createdAt: string;
+}
+
+export interface CommunicationPendingReason {
+  type: CommunicationType;
+  label: string;
+  documentId?: string;
+  documentName?: string;
+  rejectionReason?: string;
+  detail: string;
+  priority: 'Alta' | 'Média' | 'Baixa';
+}
+
+export interface CommunicationItem {
+  id: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpf: string; // Mascarado
+  employeePhone: string;
+  role: string;
+  department: string;
+  unit?: string;
+  expectedStartDate?: string;
+  admissionStatus: AdmissionStatus;
+  mainPendingReason: CommunicationPendingReason;
+  inviteToken: string;
+  inviteExpiresAt: string;
+  inviteRevoked?: boolean;
+  isInviteValid: boolean;
+  lastCommunication?: {
+    id: string;
+    createdAt: string;
+    channel: CommunicationChannel;
+    userName: string;
+    actionStatusLabel: string;
+    communicationType: CommunicationType;
+  };
+}
+
+export interface CommunicationSummary {
+  inProgressCount: number;
+  waitingDocumentsCount: number;
+  rejectedDocumentsCount: number;
+  waitingResponseCount: number;
+  upcomingWithIssuesCount: number;
+}
+
+export interface CommunicationFilters {
+  search?: string;
+  status?: string;
+  documentStatus?: string;
+  cargo?: string;
+  setor?: string;
+  unidade?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface CommunicationHubResponse {
+  items: CommunicationItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: CommunicationSummary;
+  filters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    statuses: string[];
+  };
+}
+
+// =========================================================================
+// BLOCO 4.4: PRAZOS E ACOMPANHAMENTO OPERACIONAL
+// =========================================================================
+
+export type OperationalSituation =
+  | 'proxima_admissao'
+  | 'data_ultrapassada'
+  | 'aguardando_funcionario'
+  | 'aguardando_rh'
+  | 'documento_rejeitado'
+  | 'sem_movimentacao'
+  | 'em_andamento'
+  | 'concluida'
+  | 'cancelada';
+
+export interface TrackingTimeByStage {
+  waitingDocumentsDays?: number | null;
+  waitingRhDays?: number | null;
+  inPendingDays?: number | null;
+  totalAdmissionDays?: number | null;
+}
+
+export interface TrackingItem {
+  id: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpf: string; // Mascarado LGPD
+  employeePhone: string;
+  role: string;
+  department: string;
+  unit: string;
+  admissionStatus: AdmissionStatus;
+  expectedStartDate: string;
+  daysToExpectedDate: number; // Negativo se data ultrapassada
+  daysSinceOverdue?: number; // >= 0 se data ultrapassada
+  isOverdue: boolean;
+  isUpcoming: boolean;
+  operationalSituation: OperationalSituation;
+  operationalSituationLabel: string;
+  secondarySituations: Array<{ type: OperationalSituation; label: string }>;
+  lastMovementDate: string;
+  lastMovementDescription: string;
+  daysWithoutMovement: number;
+  hoursWithoutMovement: number;
+  mainPendingReason: string;
+  mainPendingDocumentId?: string;
+  progressPercent: number;
+  totalDocuments: number;
+  approvedDocuments: number;
+  needsAttention: boolean;
+  attentionReason?: string;
+  timeByStage?: TrackingTimeByStage;
+  inviteToken?: string;
+  isInviteValid?: boolean;
+}
+
+export interface TrackingSummary {
+  upcomingCount: number;
+  overdueCount: number;
+  waitingEmployeeCount: number;
+  waitingRhCount: number;
+  noMovementCount: number;
+  completedCount: number;
+  attentionCount: number;
+  totalCount: number;
+}
+
+export interface TrackingFilters {
+  period?: string; // 'all' | 'today' | 'next_7' | 'next_15' | 'next_30' | 'overdue' | 'custom'
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  cargo?: string;
+  setor?: string;
+  unidade?: string;
+  situacao?: string;
+  tempoSemMovimentacao?: string; // 'all' | 'ate_2' | '3_a_5' | '6_a_10' | 'mais_10'
+  search?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface TrackingResponse {
+  items: TrackingItem[];
+  attentionItems: TrackingItem[];
+  summary: TrackingSummary;
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  filters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    statuses: string[];
+  };
+}
+
+// Linha do tempo da admissão (Seção 12)
+export interface AdmissionTimelineEvent {
+  id: string;
+  stage: 
+    | 'criacao' 
+    | 'convite_enviado' 
+    | 'funcionario_acessou' 
+    | 'dados_confirmados' 
+    | 'documentos_enviados' 
+    | 'conferencia_rh' 
+    | 'pendencia' 
+    | 'reenvio' 
+    | 'aprovacao' 
+    | 'concluida' 
+    | 'cancelada';
+  title: string;
+  description: string;
+  date: string;
+  performedBy?: string;
+  status: 'completed' | 'current' | 'pending';
+  metadata?: Record<string, any>;
+}
+
+export interface AdmissionStageTimes {
+  waitingDocuments: string; // Ex: "2 dias" ou "Não disponível"
+  waitingRh: string; // Ex: "4 horas" ou "Não disponível"
+  inPending: string; // Ex: "1 dia" ou "Não disponível"
+  totalAdmission: string; // Ex: "5 dias" ou "Não disponível"
+}
+
+// =========================================================================
+// BLOCO 4.5 — RELATÓRIOS E INDICADORES DE RH
+// =========================================================================
+
+export type ReportType = 
+  | 'admissoes' 
+  | 'documentos' 
+  | 'pendencias' 
+  | 'concluidas' 
+  | 'canceladas';
+
+export interface ReportFilterOptions {
+  reportType?: ReportType;
+  period?: string; // 'all' | 'today' | '7d' | '30d' | 'this_month' | 'next_month' | 'custom'
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+  cargo?: string;
+  setor?: string;
+  unidade?: string;
+  documentStatus?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface ReportIndicators {
+  totalAdmissions: number;
+  inProgressAdmissions: number;
+  completedAdmissions: number;
+  cancelledAdmissions: number;
+  completionRate: number;
+  avgDaysToCompletion: number | null;
+  totalDocuments: number;
+  approvedDocuments: number;
+  pendingDocuments: number;
+  reviewingDocuments: number;
+  documentApprovalRate: number;
+}
+
+export interface ReportChartItem {
+  name: string;
+  count: number;
+  percentage: number;
+  color?: string;
+}
+
+export interface ReportTimelineEvolution {
+  date: string;
+  label: string;
+  count: number;
+}
+
+export interface ReportCharts {
+  byStatus: ReportChartItem[];
+  byDepartment: ReportChartItem[];
+  byRole: ReportChartItem[];
+  byUnit: ReportChartItem[];
+  byDocumentStatus: ReportChartItem[];
+  evolution: ReportTimelineEvolution[];
+}
+
+export interface ReportRowAdmission {
+  id: string;
+  admissionCode: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  employeeEmail: string;
+  employeePhone: string;
+  role: string;
+  department: string;
+  unit: string;
+  status: AdmissionStatus;
+  expectedStartDate?: string;
+  createdAt: string;
+  completedAt?: string;
+  progressPercent: number;
+  approvedDocuments: number;
+  totalDocuments: number;
+  durationDays?: number;
+}
+
+export interface ReportRowDocument {
+  id: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  role: string;
+  department: string;
+  unit: string;
+  documentName: string;
+  category: string;
+  required: boolean;
+  status: DocumentStatus;
+  currentVersion: number;
+  uploadedAt?: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
+}
+
+export interface ReportRowPending {
+  id: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  role: string;
+  department: string;
+  unit: string;
+  documentName?: string;
+  pendingType: string;
+  pendingTypeLabel: string;
+  priority: 'Alta' | 'Média' | 'Baixa';
+  daysPending: number;
+  status: string;
+  rejectionReason?: string;
+  date: string;
+}
+
+export interface ReportRowCompleted {
+  id: string;
+  admissionCode: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  role: string;
+  department: string;
+  unit: string;
+  createdAt: string;
+  completedAt: string;
+  completedBy: string;
+  durationDays: number;
+  approvedDocuments: number;
+  totalDocuments: number;
+}
+
+export interface ReportRowCancelled {
+  id: string;
+  admissionCode: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  role: string;
+  department: string;
+  unit: string;
+  createdAt: string;
+  cancelledAt: string;
+  cancelledBy: string;
+  cancellationReason: string;
+}
+
+export interface ReportDataResponse {
+  reportType: ReportType;
+  indicators: ReportIndicators;
+  charts: ReportCharts;
+  rows: any[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  availableFilters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    statuses: string[];
+  };
+}
+

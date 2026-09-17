@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
   UserPlus, 
   Clock, 
@@ -21,7 +21,8 @@ import {
   Building2,
   Briefcase,
   Layers,
-  ChevronDown
+  ChevronDown,
+  CalendarClock
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -401,7 +402,7 @@ export const Dashboard: React.FC = () => {
       icon: FileCheck,
       color: 'bg-amber-50 text-amber-800 border-amber-200 ring-amber-500/10',
       textColor: 'text-amber-700',
-      actionPath: '/admissoes?status=Em conferência',
+      actionPath: '/pendencias?tipo=aguardando_conferencia',
       actionLabel: 'Conferir'
     },
     {
@@ -412,7 +413,7 @@ export const Dashboard: React.FC = () => {
       icon: AlertTriangle,
       color: 'bg-rose-50 text-rose-700 border-rose-200 ring-rose-500/10',
       textColor: 'text-rose-600',
-      actionPath: '/admissoes?status=Pendência',
+      actionPath: '/pendencias?tipo=documento_rejeitado',
       actionLabel: 'Resolver'
     },
     {
@@ -472,6 +473,17 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5 shrink-0">
+          {/* Botão Acompanhamento Operacional (Bloco 4.4) */}
+          <button
+            id="btn-goto-prazos-dashboard"
+            onClick={() => navigate('/prazos')}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all shadow-xs"
+            title="Acessar painel de Prazos e Acompanhamento Operacional"
+          >
+            <CalendarClock className="w-4 h-4 text-blue-600" />
+            <span className="hidden sm:inline">Prazos & Acompanhamento</span>
+          </button>
+
           {/* Botão de Atualizar Dados */}
           <button
             id="btn-refresh-dashboard"
@@ -925,7 +937,7 @@ export const Dashboard: React.FC = () => {
       {/* 7. SEÇÃO "ADMISSÕES QUE PRECISAM DE ATENÇÃO" */}
       {/* ========================================================================= */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-rose-50 text-rose-600 border border-rose-200">
@@ -942,6 +954,15 @@ export const Dashboard: React.FC = () => {
               Priorizadas por prazo ultrapassado, documentos rejeitados e pendências de conferência.
             </p>
           </div>
+
+          <Link
+            to="/pendencias"
+            id="link-dashboard-central-pendencias"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100/80 transition-colors shadow-2xs self-start sm:self-auto cursor-pointer"
+          >
+            <span>Ver Central de Pendências</span>
+            <ArrowUpRight className="w-3.5 h-3.5 text-rose-600" />
+          </Link>
         </div>
 
         {loading ? (

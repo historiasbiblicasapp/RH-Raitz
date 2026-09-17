@@ -24,8 +24,37 @@ import {
   PendingFilters,
   PendingItem,
   PendingPriority,
-  PendingSummary
+  PendingSummary,
+  CommunicationLog,
+  CommunicationType,
+  CommunicationChannel,
+  CommunicationActionStatus,
+  CommunicationItem,
+  CommunicationSummary,
+  CommunicationFilters,
+  CommunicationHubResponse,
+  CommunicationPendingReason,
+  TrackingItem,
+  TrackingSummary,
+  TrackingFilters,
+  TrackingResponse,
+  OperationalSituation,
+  AdmissionTimelineEvent,
+  AdmissionStageTimes,
+  ReportType,
+  ReportFilterOptions,
+  ReportIndicators,
+  ReportCharts,
+  ReportChartItem,
+  ReportTimelineEvolution,
+  ReportRowAdmission,
+  ReportRowDocument,
+  ReportRowPending,
+  ReportRowCompleted,
+  ReportRowCancelled,
+  ReportDataResponse
 } from '../src/types/index.ts';
+import { maskCPF } from '../src/lib/cpf.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const STORAGE_DIR = path.join(DATA_DIR, 'storage');
@@ -41,6 +70,7 @@ export interface DatabaseSchema {
   jobPositions: JobPosition[];
   documentTypes: DocumentTypeItem[];
   jobPositionDocuments: JobPositionDocument[];
+  communicationLogs: CommunicationLog[];
 }
 
 function ensureDirectories() {
@@ -492,7 +522,8 @@ function generateInitialData(): DatabaseSchema {
     consentRecords: [],
     jobPositions: initialJobPositions,
     documentTypes: initialDocTypes,
-    jobPositionDocuments: initialJobPositionDocs
+    jobPositionDocuments: initialJobPositionDocs,
+    communicationLogs: []
   };
 }
 
@@ -723,6 +754,7 @@ export class Database {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         this.data = JSON.parse(raw);
         if (!this.data.users) this.data.users = [];
+        if (!this.data.communicationLogs) this.data.communicationLogs = [];
 
         // Garante a existência e integridade dos cargos (Job Positions)
         if (!this.data.jobPositions || this.data.jobPositions.length === 0) {
@@ -3645,7 +3677,1869 @@ export class Database {
     this.data.notifications.forEach(item => { item.read = true; });
     this.save();
   }
+
+  // =========================================================================
+  // BLOCO 4.3 — COMUNICAÇÃO COM O FUNCIONÁRIO
+  // =========================================================================
+
+  /**
+   * Registra um evento de comunicação no histórico imutável (append-only)
+   * e grava o log de auditoria correspondente.
+   */
+  addCommunicationLog(logData: {
+    admissionId: string;
+    employeeId: string;
+    userId?: string;
+    userName: string;
+    communicationType: CommunicationType;
+    channel: CommunicationChannel;
+    templateId: string;
+    documentId?: string;
+    documentName?: string;
+    rejectionReason?: string;
+    messagePreview: string;
+    actionStatus: CommunicationActionStatus;
+    actionStatusLabel?: string;
+  }): CommunicationLog {
+    if (!this.data.communicationLogs) {
+      this.data.communicationLogs = [];
+    }
+
+    const defaultLabelMap: Record<CommunicationActionStatus, string> = {
+      whatsapp_opened: 'WhatsApp aberto para envio',
+      message_copied: 'Mensagem copiada',
+      link_copied: 'Link copiado'
+    };
+
+    const newLog: CommunicationLog = {
+      id: 'comm-' + crypto.randomUUID(),
+      admissionId: logData.admissionId,
+      employeeId: logData.employeeId,
+      userId: logData.userId,
+      userName: logData.userName,
+      communicationType: logData.communicationType,
+      channel: logData.channel,
+      templateId: logData.templateId,
+      documentId: logData.documentId,
+      documentName: logData.documentName,
+      rejectionReason: logData.rejectionReason,
+      // Minimização de dados LGPD: armazena no preview apenas trecho resumido
+      messagePreview: (logData.messagePreview || '').slice(0, 160),
+      actionStatus: logData.actionStatus,
+      actionStatusLabel: logData.actionStatusLabel || defaultLabelMap[logData.actionStatus] || 'Comunicação realizada',
+      createdAt: new Date().toISOString()
+    };
+
+    this.data.communicationLogs.unshift(newLog);
+
+    // Se o WhatsApp foi aberto, atualiza o status de envio no modelo de admissão
+    const admission = this.data.admissions.find(a => a.id === logData.admissionId);
+    if (admission && logData.actionStatus === 'whatsapp_opened') {
+      admission.inviteSentViaWhatsApp = true;
+      admission.inviteLastSentAt = newLog.createdAt;
+      admission.updatedAt = newLog.createdAt;
+    }
+
+    // Grava registro de auditoria correspondente
+    const auditAction = logData.actionStatus === 'whatsapp_opened'
+      ? 'communication_whatsapp_opened'
+      : logData.actionStatus === 'link_copied'
+      ? 'communication_link_copied'
+      : 'communication_message_copied';
+
+    this.addAuditLog({
+      userName: logData.userName,
+      performedBy: logData.userName,
+      userId: logData.userId,
+      action: auditAction,
+      entityType: 'admission',
+      entityId: logData.admissionId,
+      admissionId: logData.admissionId,
+      employeeName: admission?.employee?.name,
+      documentType: logData.documentName,
+      details: `Comunicação (${newLog.actionStatusLabel}) via ${logData.channel.toUpperCase()} - Tipo: ${logData.communicationType}.`
+    });
+
+    this.save();
+    return newLog;
+  }
+
+  /**
+   * Retorna os registros do histórico de comunicação (opcionalmente filtrados por admissão)
+   */
+  getCommunicationLogs(admissionId?: string): CommunicationLog[] {
+    let logs = this.data.communicationLogs || [];
+    if (admissionId) {
+      logs = logs.filter(l => l.admissionId === admissionId);
+    }
+    return logs;
+  }
+
+  /**
+   * Retorna a visão consolidada para a tela de Comunicação com Funcionários (Bloco 4.3),
+   * com cards de resumo, determinação da pendência principal e filtros operacionais.
+   */
+  getCommunicationHubData(options?: CommunicationFilters): CommunicationHubResponse {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayTime = today.getTime();
+
+    const allAdmissions = this.data.admissions || [];
+
+    // Contadores para os Cards de Resumo do topo
+    let inProgressCount = 0;
+    let waitingDocumentsCount = 0;
+    let rejectedDocumentsCount = 0;
+    let waitingResponseCount = 0;
+    let upcomingWithIssuesCount = 0;
+
+    // Coletores de opções de filtros dinâmicos
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const statusesSet = new Set<string>();
+
+    const communicationItems: CommunicationItem[] = [];
+
+    for (const adm of allAdmissions) {
+      if (adm.employee?.role) rolesSet.add(adm.employee.role);
+      if (adm.employee?.department) departmentsSet.add(adm.employee.department);
+      if (adm.employee?.unit) unitsSet.add(adm.employee.unit);
+      if (adm.status) statusesSet.add(adm.status);
+
+      const isInProgress = adm.status !== 'Concluída' && adm.status !== 'Cancelada';
+      if (isInProgress) {
+        inProgressCount++;
+      }
+
+      const docs = adm.documents || [];
+      const hasNotSent = docs.some(d => d.status === 'Não enviado');
+      const hasRejected = docs.some(d => d.status === 'Rejeitado');
+
+      if (isInProgress && hasNotSent) {
+        waitingDocumentsCount++;
+      }
+      if (isInProgress && hasRejected) {
+        rejectedDocumentsCount++;
+      }
+
+      // Checagem de prazo de início
+      let isUpcomingOrOverdue = false;
+      if (adm.employee?.expectedStartDate) {
+        const [y, m, d] = adm.employee.expectedStartDate.split('T')[0].split('-').map(Number);
+        const expTime = new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+        const diffDays = Math.ceil((expTime - todayTime) / (1000 * 60 * 60 * 24));
+        if (diffDays <= 7) {
+          isUpcomingOrOverdue = true;
+        }
+      }
+
+      const hasPendingIssues = adm.progressPercent < 100 || adm.status === 'Pendência' || adm.status === 'Em conferência' || hasNotSent || hasRejected;
+      if (isInProgress && isUpcomingOrOverdue && hasPendingIssues) {
+        upcomingWithIssuesCount++;
+      }
+
+      // Histórico de comunicações para esta admissão
+      const admLogs = (this.data.communicationLogs || []).filter(l => l.admissionId === adm.id);
+      const lastComm = admLogs.length > 0 ? admLogs[0] : undefined;
+
+      // Aguardando resposta: quando houve comunicação/convite ativo e ainda existem pendências documentais
+      if (isInProgress && (lastComm || adm.inviteSentViaWhatsApp || adm.inviteSentAt) && hasPendingIssues) {
+        waitingResponseCount++;
+      }
+
+      // -----------------------------------------------------------------------
+      // Determinação da Pendência Principal para Comunicação (Seção 10)
+      // Prioridade conceitual:
+      // 1. documento rejeitado;
+      // 2. aguardando reenvio;
+      // 3. documento obrigatório não enviado;
+      // 4. admissão próxima com pendência;
+      // 5. outras situações operacionais existentes.
+      // -----------------------------------------------------------------------
+      let mainPendingReason: CommunicationPendingReason;
+
+      const rejectedDoc = docs.find(d => d.status === 'Rejeitado');
+      const notSentRequiredDoc = docs.find(d => d.status === 'Não enviado' && d.required);
+      const notSentOptionalDoc = docs.find(d => d.status === 'Não enviado' && !d.required);
+      const inReviewDoc = docs.find(d => d.status === 'Em análise');
+
+      if (rejectedDoc) {
+        mainPendingReason = {
+          type: 'document_rejected',
+          label: 'Documento rejeitado',
+          documentId: rejectedDoc.id,
+          documentName: rejectedDoc.document_type_name || (typeof rejectedDoc.documentType === 'string' ? rejectedDoc.documentType : 'Documento'),
+          rejectionReason: rejectedDoc.rejectionReason || 'Documento ilegível ou divergente',
+          detail: `${rejectedDoc.document_type_name || rejectedDoc.documentType}: ${rejectedDoc.rejectionReason || 'Necessita correção'}`,
+          priority: 'Alta'
+        };
+      } else if (notSentRequiredDoc) {
+        mainPendingReason = {
+          type: 'documents_pending',
+          label: 'Documento obrigatório pendente',
+          documentId: notSentRequiredDoc.id,
+          documentName: notSentRequiredDoc.document_type_name || (typeof notSentRequiredDoc.documentType === 'string' ? notSentRequiredDoc.documentType : 'Documento'),
+          detail: `Pendente de envio: ${notSentRequiredDoc.document_type_name || notSentRequiredDoc.documentType}`,
+          priority: isUpcomingOrOverdue ? 'Alta' : 'Média'
+        };
+      } else if (isUpcomingOrOverdue && hasPendingIssues) {
+        mainPendingReason = {
+          type: 'admission_upcoming',
+          label: 'Admissão próxima com pendências',
+          detail: `Início previsto em ${adm.employee.expectedStartDate ? new Date(adm.employee.expectedStartDate).toLocaleDateString('pt-BR') : 'breve'} e checklist incompleto`,
+          priority: 'Alta'
+        };
+      } else if (notSentOptionalDoc) {
+        mainPendingReason = {
+          type: 'documents_pending',
+          label: 'Documento complementar pendente',
+          documentId: notSentOptionalDoc.id,
+          documentName: notSentOptionalDoc.document_type_name || (typeof notSentOptionalDoc.documentType === 'string' ? notSentOptionalDoc.documentType : 'Documento'),
+          detail: `Pendente de envio: ${notSentOptionalDoc.document_type_name || notSentOptionalDoc.documentType}`,
+          priority: 'Baixa'
+        };
+      } else if (inReviewDoc) {
+        mainPendingReason = {
+          type: 'reminder',
+          label: 'Documentos em conferência',
+          detail: 'Documentos enviados pelo colaborador aguardando validação do RH',
+          priority: 'Baixa'
+        };
+      } else if (adm.status === 'Concluída') {
+        mainPendingReason = {
+          type: 'general_notice',
+          label: 'Admissão concluída',
+          detail: 'Todos os documentos foram aprovados pelo RH',
+          priority: 'Baixa'
+        };
+      } else {
+        mainPendingReason = {
+          type: 'reminder',
+          label: 'Processo em andamento',
+          detail: 'Acompanhamento do processo de admissão digital',
+          priority: 'Baixa'
+        };
+      }
+
+      // Verificação da validade do convite existente (Seção 15)
+      const isExpired = adm.inviteExpiresAt ? new Date(adm.inviteExpiresAt).getTime() < Date.now() : false;
+      const isInviteValid = !adm.inviteRevoked && !isExpired;
+
+      communicationItems.push({
+        id: `comm-item-${adm.id}`,
+        admissionId: adm.id,
+        admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+        employeeId: adm.employeeId,
+        employeeName: adm.employee.name,
+        employeeCpf: maskCPF(adm.employee.cpf),
+        employeePhone: adm.employee.phone || '',
+        role: adm.employee.role,
+        department: adm.employee.department,
+        unit: adm.employee.unit,
+        expectedStartDate: adm.employee.expectedStartDate,
+        admissionStatus: adm.status,
+        mainPendingReason,
+        inviteToken: adm.inviteToken,
+        inviteExpiresAt: adm.inviteExpiresAt,
+        inviteRevoked: adm.inviteRevoked,
+        isInviteValid,
+        lastCommunication: lastComm ? {
+          id: lastComm.id,
+          createdAt: lastComm.createdAt,
+          channel: lastComm.channel,
+          userName: lastComm.userName,
+          actionStatusLabel: lastComm.actionStatusLabel,
+          communicationType: lastComm.communicationType
+        } : undefined
+      });
+    }
+
+    // Filtragem (Seção 9: por padrão prioriza admissões que possam exigir comunicação)
+    let filtered = communicationItems;
+
+    // Filtro por status da admissão:
+    if (options?.status && options.status !== 'TODOS') {
+      filtered = filtered.filter(item => item.admissionStatus === options.status);
+    } else if (!options?.status) {
+      filtered = filtered.filter(item => item.admissionStatus !== 'Concluída' && item.admissionStatus !== 'Cancelada');
+    }
+
+    // Filtro por situação documental:
+    if (options?.documentStatus && options.documentStatus !== 'TODOS') {
+      const docSt = options.documentStatus.toLowerCase();
+      filtered = filtered.filter(item => {
+        const adm = allAdmissions.find(a => a.id === item.admissionId);
+        if (!adm) return false;
+        if (docSt === 'rejeitado') {
+          return (adm.documents || []).some(d => d.status === 'Rejeitado');
+        } else if (docSt === 'nao_enviado') {
+          return (adm.documents || []).some(d => d.status === 'Não enviado');
+        } else if (docSt === 'em_analise') {
+          return (adm.documents || []).some(d => d.status === 'Em análise');
+        } else if (docSt === 'aprovado') {
+          return (adm.documents || []).every(d => d.status === 'Aprovado');
+        }
+        return true;
+      });
+    }
+
+    // Filtro por cargo
+    if (options?.cargo && options.cargo !== 'TODOS') {
+      filtered = filtered.filter(item => item.role === options.cargo);
+    }
+
+    // Filtro por setor
+    if (options?.setor && options.setor !== 'TODOS') {
+      filtered = filtered.filter(item => item.department === options.setor);
+    }
+
+    // Filtro por unidade
+    if (options?.unidade && options.unidade !== 'TODOS') {
+      filtered = filtered.filter(item => item.unit === options.unidade);
+    }
+
+    // Busca textual (nome, CPF, cargo, código da admissão)
+    if (options?.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
+      filtered = filtered.filter(item => {
+        const nameMatch = item.employeeName.toLowerCase().includes(q);
+        const codeMatch = item.admissionCode.toLowerCase().includes(q);
+        const roleMatch = item.role.toLowerCase().includes(q);
+        const cpfMatch = item.employeeCpf.toLowerCase().includes(q);
+        const originalAdm = allAdmissions.find(a => a.id === item.admissionId);
+        const rawCpfMatch = qDigits.length >= 3 && originalAdm?.employee?.cpf?.includes(qDigits);
+        return nameMatch || codeMatch || roleMatch || cpfMatch || rawCpfMatch;
+      });
+    }
+
+    // Ordenação: Alta prioridade primeiro, depois Média, depois Baixa
+    filtered.sort((a, b) => {
+      const scoreMap: Record<string, number> = { 'Alta': 1, 'Média': 2, 'Baixa': 3 };
+      const scoreA = scoreMap[a.mainPendingReason.priority] || 4;
+      const scoreB = scoreMap[b.mainPendingReason.priority] || 4;
+      if (scoreA !== scoreB) return scoreA - scoreB;
+      return a.employeeName.localeCompare(b.employeeName);
+    });
+
+    // Paginação
+    const page = Math.max(1, options?.page || 1);
+    const limit = Math.max(1, options?.limit || 15);
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const startIndex = (page - 1) * limit;
+    const paginated = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      items: paginated,
+      total,
+      page,
+      limit,
+      totalPages,
+      summary: {
+        inProgressCount,
+        waitingDocumentsCount,
+        rejectedDocumentsCount,
+        waitingResponseCount,
+        upcomingWithIssuesCount
+      },
+      filters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        statuses: Array.from(statusesSet).sort()
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 4.4: PRAZOS E ACOMPANHAMENTO OPERACIONAL
+  // =========================================================================
+
+  /**
+   * Helper que calcula a diferença de dias civis entre uma data esperada (YYYY-MM-DD) e hoje,
+   * imune a desvios de fuso horário / DST.
+   */
+  private calculateDayDifference(targetDateStr?: string, refDate: Date = new Date()): number {
+    if (!targetDateStr) return 9999;
+    const clean = targetDateStr.split('T')[0];
+    const parts = clean.split('-').map(Number);
+    if (parts.length < 3 || parts.some(isNaN)) return 9999;
+    const [y, m, d] = parts;
+    const targetUtc = Date.UTC(y, m - 1, d);
+    const todayUtc = Date.UTC(refDate.getFullYear(), refDate.getMonth(), refDate.getDate());
+    const diffMs = targetUtc - todayUtc;
+    return Math.round(diffMs / (1000 * 60 * 60 * 24));
+  }
+
+  /**
+   * Localiza a última movimentação relevante de uma admissão (audit_logs, communications, uploads, updates).
+   */
+  public getAdmissionLastMovement(adm: Admission): { date: string; description: string; daysAgo: number; hoursAgo: number } {
+    let latestTime = new Date(adm.createdAt || Date.now()).getTime();
+    let latestDesc = 'Admissão criada no sistema';
+
+    // Atualização de cadastro
+    if (adm.updatedAt) {
+      const t = new Date(adm.updatedAt).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = 'Cadastro atualizado pelo RH';
+      }
+    }
+
+    // Acesso ao portal pelo colaborador
+    if (adm.inviteLastAccessedAt) {
+      const t = new Date(adm.inviteLastAccessedAt).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = 'Colaborador acessou o portal';
+      }
+    }
+
+    // Termo de consentimento LGPD
+    if (adm.consentDate) {
+      const t = new Date(adm.consentDate).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = 'Consentimento LGPD aceito pelo colaborador';
+      }
+    }
+
+    // Confirmação de dados
+    if (adm.dataConfirmedAt) {
+      const t = new Date(adm.dataConfirmedAt).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = 'Dados cadastrais confirmados pelo colaborador';
+      }
+    }
+
+    // Movimentação documental (uploads e conferências)
+    for (const doc of (adm.documents || [])) {
+      if (doc.uploadedAt) {
+        const t = new Date(doc.uploadedAt).getTime();
+        if (t > latestTime) {
+          latestTime = t;
+          latestDesc = `Upload de documento: ${doc.documentType}`;
+        }
+      }
+      if (doc.reviewedAt) {
+        const t = new Date(doc.reviewedAt).getTime();
+        if (t > latestTime) {
+          latestTime = t;
+          latestDesc = doc.status === 'Aprovado'
+            ? `Conferência RH: ${doc.documentType} aprovado`
+            : `Conferência RH: ${doc.documentType} rejeitado`;
+        }
+      }
+      if (doc.versions) {
+        for (const v of doc.versions) {
+          if (v.uploadedAt) {
+            const t = new Date(v.uploadedAt).getTime();
+            if (t > latestTime) {
+              latestTime = t;
+              latestDesc = `Reenvio de documento (v${v.version}): ${doc.documentType}`;
+            }
+          }
+          if (v.reviewedAt) {
+            const t = new Date(v.reviewedAt).getTime();
+            if (t > latestTime) {
+              latestTime = t;
+              latestDesc = v.status === 'Aprovado'
+                ? `Validação RH (v${v.version}): ${doc.documentType} aprovado`
+                : `Validação RH (v${v.version}): ${doc.documentType} rejeitado`;
+            }
+          }
+        }
+      }
+    }
+
+    // Registros de comunicação com o funcionário (Bloco 4.3)
+    const comms = (this.data.communicationLogs || []).filter(c => c.admissionId === adm.id);
+    for (const c of comms) {
+      const t = new Date(c.createdAt).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = `Comunicação registrada: ${c.actionStatusLabel || c.communicationType}`;
+      }
+    }
+
+    // Conclusão ou cancelamento
+    if (adm.completedAt) {
+      const t = new Date(adm.completedAt).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = 'Admissão concluída pelo RH';
+      }
+    }
+    if (adm.cancelledAt) {
+      const t = new Date(adm.cancelledAt).getTime();
+      if (t > latestTime) {
+        latestTime = t;
+        latestDesc = 'Admissão cancelada';
+      }
+    }
+
+    const now = Date.now();
+    const diffMs = Math.max(0, now - latestTime);
+    const daysAgo = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    const hoursAgo = Math.floor(diffMs / (1000 * 60 * 60));
+
+    return {
+      date: new Date(latestTime).toISOString(),
+      description: latestDesc,
+      daysAgo,
+      hoursAgo
+    };
+  }
+
+  /**
+   * Retorna os dados operacionais consolidados da Central de Prazos e Acompanhamento (Bloco 4.4).
+   */
+  public getTrackingHubData(options?: TrackingFilters): TrackingResponse {
+    const allAdmissions = this.data.admissions || [];
+    const now = new Date();
+
+    // Conjuntos para filtros dinâmicos
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const statusesSet = new Set<string>();
+
+    let upcomingCount = 0;
+    let overdueCount = 0;
+    let waitingEmployeeCount = 0;
+    let waitingRhCount = 0;
+    let noMovementCount = 0;
+    let completedCount = 0;
+    let attentionCount = 0;
+
+    const allTrackingItems: TrackingItem[] = [];
+    const attentionItemsList: TrackingItem[] = [];
+
+    for (const adm of allAdmissions) {
+      if (adm.employee?.role) rolesSet.add(adm.employee.role);
+      if (adm.employee?.department) departmentsSet.add(adm.employee.department);
+      if (adm.employee?.unit) unitsSet.add(adm.employee.unit);
+      if (adm.status) statusesSet.add(adm.status);
+
+      const isCompleted = adm.status === 'Concluída';
+      const isCancelled = adm.status === 'Cancelada';
+
+      // Cálculo de prazos civis
+      const daysToExpectedDate = this.calculateDayDifference(adm.employee.expectedStartDate, now);
+      const isOverdue = daysToExpectedDate < 0 && !isCompleted && !isCancelled;
+      const daysSinceOverdue = isOverdue ? Math.abs(daysToExpectedDate) : 0;
+      const isUpcoming = daysToExpectedDate >= 0 && daysToExpectedDate <= 15 && !isCompleted && !isCancelled;
+
+      // Movimentação recente
+      const lastMove = this.getAdmissionLastMovement(adm);
+      const isNoMovement = lastMove.daysAgo >= 3 && !isCompleted && !isCancelled;
+
+      // Status documental
+      const docs = adm.documents || [];
+      const hasRejected = docs.some(d => d.status === 'Rejeitado');
+      const hasWaitingRh = docs.some(d => d.status === 'Em análise' || d.status === 'Reenviado' || d.status === 'Enviado');
+      const hasWaitingEmployee = docs.some(d => d.status === 'Não enviado' && d.required) || hasRejected;
+
+      // Contadores principais (topo)
+      if (isUpcoming) upcomingCount++;
+      if (isOverdue) overdueCount++;
+      if (hasWaitingEmployee && !isCompleted && !isCancelled) waitingEmployeeCount++;
+      if (hasWaitingRh && !isCompleted && !isCancelled) waitingRhCount++;
+      if (isNoMovement) noMovementCount++;
+      if (isCompleted) completedCount++;
+
+      // Situação Operacional Centralizada (Seção 10)
+      let primarySituation: OperationalSituation = 'em_andamento';
+      let primaryLabel = 'Em andamento';
+
+      if (isCompleted) {
+        primarySituation = 'concluida';
+        primaryLabel = 'Concluída';
+      } else if (isCancelled) {
+        primarySituation = 'cancelada';
+        primaryLabel = 'Cancelada';
+      } else if (isOverdue) {
+        primarySituation = 'data_ultrapassada';
+        primaryLabel = 'Data prevista ultrapassada';
+      } else if (hasRejected) {
+        primarySituation = 'documento_rejeitado';
+        primaryLabel = 'Documento rejeitado';
+      } else if (hasWaitingRh) {
+        primarySituation = 'aguardando_rh';
+        primaryLabel = 'Aguardando conferência do RH';
+      } else if (hasWaitingEmployee) {
+        primarySituation = 'aguardando_funcionario';
+        primaryLabel = 'Aguardando funcionário';
+      } else if (isUpcoming) {
+        primarySituation = 'proxima_admissao';
+        primaryLabel = 'Próxima da admissão';
+      } else if (isNoMovement) {
+        primarySituation = 'sem_movimentacao';
+        primaryLabel = 'Sem movimentação';
+      }
+
+      // Situações secundárias para visão completa e filtros combinados
+      const secondarySituations: Array<{ type: OperationalSituation; label: string }> = [];
+
+      if (isOverdue && primarySituation !== 'data_ultrapassada') {
+        secondarySituations.push({ type: 'data_ultrapassada', label: 'Data prevista ultrapassada' });
+      }
+      if (hasRejected && primarySituation !== 'documento_rejeitado') {
+        secondarySituations.push({ type: 'documento_rejeitado', label: 'Doc. rejeitado' });
+      }
+      if (hasWaitingEmployee && primarySituation !== 'aguardando_funcionario' && primarySituation !== 'documento_rejeitado') {
+        secondarySituations.push({ type: 'aguardando_funcionario', label: 'Aguardando funcionário' });
+      }
+      if (hasWaitingRh && primarySituation !== 'aguardando_rh') {
+        secondarySituations.push({ type: 'aguardando_rh', label: 'Aguardando RH' });
+      }
+      if (isUpcoming && primarySituation !== 'proxima_admissao') {
+        secondarySituations.push({ type: 'proxima_admissao', label: 'Início próximo' });
+      }
+      if (isNoMovement && primarySituation !== 'sem_movimentacao') {
+        secondarySituations.push({ type: 'sem_movimentacao', label: `${lastMove.daysAgo}d sem movimentação` });
+      }
+
+      // Identificação da principal pendência
+      let mainPending = 'Nenhuma pendência crítica';
+      let mainPendingDocId: string | undefined;
+
+      const rejectedDoc = docs.find(d => d.status === 'Rejeitado');
+      const inReviewDoc = docs.find(d => d.status === 'Em análise' || d.status === 'Reenviado' || d.status === 'Enviado');
+      const missingRequiredDoc = docs.find(d => d.status === 'Não enviado' && d.required);
+      const missingOptionalDoc = docs.find(d => d.status === 'Não enviado' && !d.required);
+
+      if (rejectedDoc) {
+        mainPending = `${rejectedDoc.documentType} rejeitado: ${rejectedDoc.rejectionReason || 'Necessita reenvio'}`;
+        mainPendingDocId = rejectedDoc.id;
+      } else if (inReviewDoc) {
+        mainPending = `${inReviewDoc.documentType} aguardando conferência do RH`;
+        mainPendingDocId = inReviewDoc.id;
+      } else if (missingRequiredDoc) {
+        mainPending = `Pendente de envio: ${missingRequiredDoc.documentType}`;
+        mainPendingDocId = missingRequiredDoc.id;
+      } else if (isOverdue) {
+        mainPending = `Data prevista (${adm.employee.expectedStartDate}) ultrapassada há ${daysSinceOverdue} dias`;
+      } else if (missingOptionalDoc) {
+        mainPending = `Documento opcional pendente: ${missingOptionalDoc.documentType}`;
+        mainPendingDocId = missingOptionalDoc.id;
+      } else if (isCompleted) {
+        mainPending = 'Admissão concluída com todos os documentos validados';
+      }
+
+      // Regra da Área "Precisam de Atenção" (Seção 7)
+      // Representa necessidade operacional do processo, sem ranking de pessoas
+      let needsAttention = false;
+      let attentionReason = '';
+
+      if (!isCompleted && !isCancelled) {
+        if (isOverdue && hasWaitingEmployee) {
+          needsAttention = true;
+          attentionReason = `Data prevista ultrapassada há ${daysSinceOverdue} dia(s) com documentos pendentes`;
+        } else if (isOverdue) {
+          needsAttention = true;
+          attentionReason = `Data prevista ultrapassada há ${daysSinceOverdue} dia(s)`;
+        } else if (hasRejected) {
+          needsAttention = true;
+          attentionReason = `Documento rejeitado aguardando correção pelo colaborador`;
+        } else if (isUpcoming && adm.progressPercent < 100) {
+          needsAttention = true;
+          attentionReason = `Admissão prevista para os próximos ${daysToExpectedDate} dia(s) com checklist incompleto (${adm.progressPercent}%)`;
+        } else if (lastMove.daysAgo >= 5) {
+          needsAttention = true;
+          attentionReason = `Sem movimentação operacional há ${lastMove.daysAgo} dias`;
+        }
+      }
+
+      if (needsAttention) {
+        attentionCount++;
+      }
+
+      // Tempo por etapa para esta admissão
+      const uploadTimes = docs.map(d => d.uploadedAt ? new Date(d.uploadedAt).getTime() : null).filter((t): t is number => t !== null);
+      let waitingDocumentsDays: number | null = null;
+      if (uploadTimes.length > 0 && adm.createdAt) {
+        const firstUploadTime = Math.min(...uploadTimes);
+        waitingDocumentsDays = Math.max(0, Math.round((firstUploadTime - new Date(adm.createdAt).getTime()) / (1000 * 60 * 60 * 24)));
+      }
+
+      let waitingRhDays: number | null = null;
+      const reviewDiffs: number[] = [];
+      for (const d of docs) {
+        if (d.uploadedAt && d.reviewedAt) {
+          const up = new Date(d.uploadedAt).getTime();
+          const rev = new Date(d.reviewedAt).getTime();
+          if (rev >= up) reviewDiffs.push(rev - up);
+        }
+      }
+      if (reviewDiffs.length > 0) {
+        waitingRhDays = Math.max(0, Math.round((reviewDiffs.reduce((a, b) => a + b, 0) / reviewDiffs.length) / (1000 * 60 * 60 * 24)));
+      }
+
+      const totalAdmissionDays = adm.createdAt 
+        ? Math.max(0, Math.round(((isCompleted && adm.completedAt ? new Date(adm.completedAt).getTime() : now.getTime()) - new Date(adm.createdAt).getTime()) / (1000 * 60 * 60 * 24)))
+        : null;
+
+      const trackingItem: TrackingItem = {
+        id: `track-${adm.id}`,
+        admissionId: adm.id,
+        admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+        employeeId: adm.employeeId,
+        employeeName: adm.employee.name,
+        employeeCpf: maskCPF(adm.employee.cpf),
+        employeePhone: adm.employee.phone || '',
+        role: adm.employee.role,
+        department: adm.employee.department,
+        unit: adm.employee.unit,
+        admissionStatus: adm.status,
+        expectedStartDate: adm.employee.expectedStartDate || '',
+        daysToExpectedDate,
+        daysSinceOverdue: isOverdue ? daysSinceOverdue : undefined,
+        isOverdue,
+        isUpcoming,
+        operationalSituation: primarySituation,
+        operationalSituationLabel: primaryLabel,
+        secondarySituations,
+        lastMovementDate: lastMove.date,
+        lastMovementDescription: lastMove.description,
+        daysWithoutMovement: lastMove.daysAgo,
+        hoursWithoutMovement: lastMove.hoursAgo,
+        mainPendingReason: mainPending,
+        mainPendingDocumentId: mainPendingDocId,
+        progressPercent: adm.progressPercent || 0,
+        totalDocuments: adm.totalDocuments || docs.length,
+        approvedDocuments: adm.approvedDocuments || docs.filter(d => d.status === 'Aprovado').length,
+        needsAttention,
+        attentionReason: needsAttention ? attentionReason : undefined,
+        timeByStage: {
+          waitingDocumentsDays,
+          waitingRhDays,
+          totalAdmissionDays
+        },
+        inviteToken: adm.inviteToken,
+        isInviteValid: !adm.inviteRevoked && (!adm.inviteExpiresAt || new Date(adm.inviteExpiresAt).getTime() > now.getTime())
+      };
+
+      allTrackingItems.push(trackingItem);
+      if (needsAttention) {
+        attentionItemsList.push(trackingItem);
+      }
+    }
+
+    // Filtragem dos itens para a tabela principal
+    let filtered = allTrackingItems;
+
+    // 1. Filtro de Período
+    if (options?.period && options.period !== 'all') {
+      if (options.period === 'today') {
+        filtered = filtered.filter(item => item.daysToExpectedDate === 0);
+      } else if (options.period === 'next_7') {
+        filtered = filtered.filter(item => item.daysToExpectedDate >= 0 && item.daysToExpectedDate <= 7);
+      } else if (options.period === 'next_15') {
+        filtered = filtered.filter(item => item.daysToExpectedDate >= 0 && item.daysToExpectedDate <= 15);
+      } else if (options.period === 'next_30') {
+        filtered = filtered.filter(item => item.daysToExpectedDate >= 0 && item.daysToExpectedDate <= 30);
+      } else if (options.period === 'overdue') {
+        filtered = filtered.filter(item => item.isOverdue);
+      } else if (options.period === 'custom') {
+        if (options.startDate) {
+          filtered = filtered.filter(item => item.expectedStartDate >= options.startDate!);
+        }
+        if (options.endDate) {
+          filtered = filtered.filter(item => item.expectedStartDate <= options.endDate!);
+        }
+      }
+    }
+
+    // 2. Filtro de Status
+    if (options?.status && options.status !== 'TODOS') {
+      filtered = filtered.filter(item => item.admissionStatus === options.status);
+    }
+
+    // 3. Filtro de Cargo
+    if (options?.cargo && options.cargo !== 'TODOS') {
+      filtered = filtered.filter(item => item.role === options.cargo);
+    }
+
+    // 4. Filtro de Setor
+    if (options?.setor && options.setor !== 'TODOS') {
+      filtered = filtered.filter(item => item.department === options.setor);
+    }
+
+    // 5. Filtro de Unidade
+    if (options?.unidade && options.unidade !== 'TODOS') {
+      filtered = filtered.filter(item => item.unit === options.unidade);
+    }
+
+    // 6. Filtro de Situação Operacional
+    if (options?.situacao && options.situacao !== 'TODOS') {
+      const sit = options.situacao as OperationalSituation;
+      filtered = filtered.filter(item => 
+        item.operationalSituation === sit || 
+        item.secondarySituations.some(s => s.type === sit)
+      );
+    }
+
+    // 7. Filtro de Tempo Sem Movimentação
+    if (options?.tempoSemMovimentacao && options.tempoSemMovimentacao !== 'all') {
+      if (options.tempoSemMovimentacao === 'ate_2') {
+        filtered = filtered.filter(item => item.daysWithoutMovement <= 2);
+      } else if (options.tempoSemMovimentacao === '3_a_5') {
+        filtered = filtered.filter(item => item.daysWithoutMovement >= 3 && item.daysWithoutMovement <= 5);
+      } else if (options.tempoSemMovimentacao === '6_a_10') {
+        filtered = filtered.filter(item => item.daysWithoutMovement >= 6 && item.daysWithoutMovement <= 10);
+      } else if (options.tempoSemMovimentacao === 'mais_10') {
+        filtered = filtered.filter(item => item.daysWithoutMovement > 10);
+      }
+    }
+
+    // 8. Busca Textual
+    if (options?.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
+      filtered = filtered.filter(item => {
+        const nameMatch = item.employeeName.toLowerCase().includes(q);
+        const codeMatch = item.admissionCode.toLowerCase().includes(q);
+        const roleMatch = item.role.toLowerCase().includes(q);
+        const pendingMatch = item.mainPendingReason.toLowerCase().includes(q);
+        const originalAdm = allAdmissions.find(a => a.id === item.admissionId);
+        const rawCpfMatch = qDigits.length >= 3 && originalAdm?.employee?.cpf?.includes(qDigits);
+        return nameMatch || codeMatch || roleMatch || pendingMatch || rawCpfMatch;
+      });
+    }
+
+    // Ordenação padrão operacional:
+    // 1. Precisam de atenção primeiro
+    // 2. Data prevista ultrapassada ou mais próxima
+    // 3. Dias sem movimentação
+    filtered.sort((a, b) => {
+      if (a.needsAttention && !b.needsAttention) return -1;
+      if (!a.needsAttention && b.needsAttention) return 1;
+      if (a.isOverdue && !b.isOverdue) return -1;
+      if (!a.isOverdue && b.isOverdue) return 1;
+      if (a.daysToExpectedDate !== b.daysToExpectedDate) return a.daysToExpectedDate - b.daysToExpectedDate;
+      return b.daysWithoutMovement - a.daysWithoutMovement;
+    });
+
+    // Ordenação da seção "Precisam de Atenção": maior urgência operacional primeiro
+    attentionItemsList.sort((a, b) => {
+      if (a.isOverdue && !b.isOverdue) return -1;
+      if (!a.isOverdue && b.isOverdue) return 1;
+      return b.daysWithoutMovement - a.daysWithoutMovement;
+    });
+
+    // Paginação
+    const page = Math.max(1, options?.page || 1);
+    const limit = Math.max(1, options?.limit || 15);
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const startIndex = (page - 1) * limit;
+    const paginated = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      items: paginated,
+      attentionItems: attentionItemsList.slice(0, 10), // Top 10 que mais precisam de atenção
+      total,
+      page,
+      limit,
+      totalPages,
+      summary: {
+        upcomingCount,
+        overdueCount,
+        waitingEmployeeCount,
+        waitingRhCount,
+        noMovementCount,
+        completedCount,
+        attentionCount,
+        totalCount: allAdmissions.length
+      },
+      filters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        statuses: Array.from(statusesSet).sort()
+      }
+    };
+  }
+
+  /**
+   * Constrói a Linha do Tempo da Admissão e os Tempos por Etapa (Seções 12 e 13).
+   */
+  public getAdmissionTimeline(admissionId: string): { events: AdmissionTimelineEvent[]; stageTimes: AdmissionStageTimes } {
+    const adm = this.getAdmissionById(admissionId);
+    if (!adm) {
+      throw new Error('Admissão não encontrada.');
+    }
+
+    const events: AdmissionTimelineEvent[] = [];
+    const now = new Date();
+
+    // 1. Criação da admissão
+    if (adm.createdAt) {
+      events.push({
+        id: `ev-${adm.id}-criacao`,
+        stage: 'criacao',
+        title: 'Admissão criada no sistema',
+        description: `Cadastro inicial criado para o cargo de ${adm.employee.role}.`,
+        date: adm.createdAt,
+        performedBy: 'RH',
+        status: 'completed'
+      });
+    }
+
+    // 2. Convite disponibilizado ou enviado
+    if (adm.inviteSentAt || adm.inviteLastSentAt || adm.inviteToken) {
+      const inviteDate = adm.inviteLastSentAt || adm.inviteSentAt || adm.createdAt;
+      events.push({
+        id: `ev-${adm.id}-convite`,
+        stage: 'convite_enviado',
+        title: adm.inviteSentViaWhatsApp ? 'Convite enviado via WhatsApp' : 'Convite disponibilizado ao colaborador',
+        description: adm.inviteSentViaWhatsApp
+          ? 'Link de autoatendimento digital disparado para o número do colaborador.'
+          : 'Link de acesso seguro gerado pelo RH.',
+        date: inviteDate,
+        performedBy: 'RH',
+        status: 'completed'
+      });
+    }
+
+    // 3. Acesso do colaborador
+    if (adm.inviteAccessCount && adm.inviteAccessCount > 0 && adm.inviteLastAccessedAt) {
+      events.push({
+        id: `ev-${adm.id}-acesso`,
+        stage: 'funcionario_acessou',
+        title: `Colaborador acessou o portal`,
+        description: `Identificado acesso seguro via link exclusivo (${adm.inviteAccessCount}º acesso registrado).`,
+        date: adm.inviteLastAccessedAt,
+        performedBy: adm.employee.name,
+        status: 'completed'
+      });
+    }
+
+    // 4. Confirmação dos dados cadastrais
+    if (adm.dataConfirmed && adm.dataConfirmedAt) {
+      events.push({
+        id: `ev-${adm.id}-dados`,
+        stage: 'dados_confirmados',
+        title: 'Dados cadastrais confirmados',
+        description: 'Colaborador revisou e confirmou a exatidão das informações cadastrais e termos.',
+        date: adm.dataConfirmedAt,
+        performedBy: adm.employee.name,
+        status: 'completed'
+      });
+    }
+
+    // 5. Documentos enviados
+    const docs = adm.documents || [];
+    const uploadDates = docs.filter(d => d.uploadedAt).map(d => ({ doc: d, date: d.uploadedAt! }));
+    if (uploadDates.length > 0) {
+      uploadDates.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      events.push({
+        id: `ev-${adm.id}-uploads`,
+        stage: 'documentos_enviados',
+        title: 'Documentos enviados pelo colaborador',
+        description: `${uploadDates.length} documento(s) digitalizado(s) e submetido(s) para conferência.`,
+        date: uploadDates[0].date,
+        performedBy: adm.employee.name,
+        status: 'completed'
+      });
+    }
+
+    // 6. Conferência do RH
+    const reviewedDocs = docs.filter(d => d.reviewedAt);
+    if (reviewedDocs.length > 0) {
+      reviewedDocs.sort((a, b) => new Date(a.reviewedAt!).getTime() - new Date(b.reviewedAt!).getTime());
+      const approvedCount = reviewedDocs.filter(d => d.status === 'Aprovado').length;
+      events.push({
+        id: `ev-${adm.id}-conferencia`,
+        stage: 'conferencia_rh',
+        title: 'Conferência de documentos pelo RH',
+        description: `Conferência realizada: ${approvedCount} aprovado(s) de ${reviewedDocs.length} analisado(s).`,
+        date: reviewedDocs[0].reviewedAt!,
+        performedBy: reviewedDocs[0].reviewedBy || 'RH',
+        status: 'completed'
+      });
+    }
+
+    // 7. Pendência de documento
+    const rejectedDocs = docs.filter(d => d.status === 'Rejeitado');
+    if (rejectedDocs.length > 0) {
+      events.push({
+        id: `ev-${adm.id}-pendencia`,
+        stage: 'pendencia',
+        title: 'Pendência identificada em documentação',
+        description: `${rejectedDocs.map(d => `${d.documentType} (${d.rejectionReason || 'Recusado'})`).join(', ')}.`,
+        date: rejectedDocs[0].reviewedAt || adm.updatedAt,
+        performedBy: rejectedDocs[0].reviewedBy || 'RH',
+        status: 'completed'
+      });
+    }
+
+    // 8. Reenvios após rejeição
+    let hasResubmission = false;
+    for (const d of docs) {
+      if (d.versions && d.versions.length > 1) {
+        hasResubmission = true;
+        const v2 = d.versions[1];
+        if (v2.uploadedAt) {
+          events.push({
+            id: `ev-${adm.id}-reenvio-${d.id}`,
+            stage: 'reenvio',
+            title: `Reenvio de documento com correção: ${d.documentType}`,
+            description: `Nova versão (${v2.version}) submetida pelo colaborador após ajuste solicitado.`,
+            date: v2.uploadedAt,
+            performedBy: adm.employee.name,
+            status: 'completed'
+          });
+        }
+      }
+    }
+
+    // 9. Aprovação dos documentos
+    if (adm.approvedDocuments > 0) {
+      const allApproved = adm.approvedDocuments === adm.totalDocuments;
+      events.push({
+        id: `ev-${adm.id}-aprovacao`,
+        stage: 'aprovacao',
+        title: allApproved ? 'Todos os documentos aprovados' : 'Documentos aprovados parcialmente',
+        description: `${adm.approvedDocuments} de ${adm.totalDocuments} documento(s) com conformidade validada pelo RH.`,
+        date: reviewedDocs.length > 0 ? reviewedDocs[reviewedDocs.length - 1].reviewedAt! : adm.updatedAt,
+        performedBy: 'RH',
+        status: allApproved ? 'completed' : 'current'
+      });
+    }
+
+    // 10. Conclusão ou cancelamento
+    if (adm.status === 'Concluída') {
+      events.push({
+        id: `ev-${adm.id}-concluida`,
+        stage: 'concluida',
+        title: 'Admissão concluída com sucesso',
+        description: `Processo admissional finalizado. Todos os requisitos foram cumpridos.`,
+        date: adm.completedAt || adm.updatedAt,
+        performedBy: adm.completedBy || 'RH',
+        status: 'completed'
+      });
+    } else if (adm.status === 'Cancelada') {
+      events.push({
+        id: `ev-${adm.id}-cancelada`,
+        stage: 'cancelada',
+        title: 'Admissão cancelada',
+        description: `Motivo: ${adm.cancellationReason || 'Cancelado pela equipe de RH'}.`,
+        date: adm.cancelledAt || adm.updatedAt,
+        performedBy: adm.cancelledBy || 'RH',
+        status: 'completed'
+      });
+    }
+
+    // Ordenação cronológica garantida
+    events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // =========================================================================
+    // CÁLCULO DE TEMPO POR ETAPA (Seção 13)
+    // Se não houver dados suficientes, retornar estritamente "Não disponível"
+    // =========================================================================
+
+    // 1. Tempo aguardando documentos: da criação/convite até o primeiro envio
+    let waitingDocumentsStr = 'Não disponível';
+    if (adm.createdAt && uploadDates.length > 0) {
+      const startMs = new Date(adm.inviteSentAt || adm.createdAt).getTime();
+      const firstUploadMs = new Date(uploadDates[0].date).getTime();
+      if (firstUploadMs >= startMs) {
+        const diffDays = Math.round((firstUploadMs - startMs) / (1000 * 60 * 60 * 24));
+        const diffHours = Math.round((firstUploadMs - startMs) / (1000 * 60 * 60));
+        waitingDocumentsStr = diffDays >= 1 ? `${diffDays} dia(s)` : `${diffHours} hora(s)`;
+      }
+    } else if (adm.createdAt && adm.status === 'Aguardando documentos') {
+      const startMs = new Date(adm.inviteSentAt || adm.createdAt).getTime();
+      const diffDays = Math.floor((now.getTime() - startMs) / (1000 * 60 * 60 * 24));
+      waitingDocumentsStr = `${diffDays} dia(s) (em andamento)`;
+    }
+
+    // 2. Tempo aguardando RH: do envio do documento até a conferência
+    let waitingRhStr = 'Não disponível';
+    const waitingRhDiffs: number[] = [];
+    for (const d of docs) {
+      if (d.uploadedAt && d.reviewedAt) {
+        const up = new Date(d.uploadedAt).getTime();
+        const rev = new Date(d.reviewedAt).getTime();
+        if (rev >= up) {
+          waitingRhDiffs.push(rev - up);
+        }
+      }
+    }
+    if (waitingRhDiffs.length > 0) {
+      const avgMs = waitingRhDiffs.reduce((a, b) => a + b, 0) / waitingRhDiffs.length;
+      const avgDays = Math.round(avgMs / (1000 * 60 * 60 * 24));
+      const avgHours = Math.round(avgMs / (1000 * 60 * 60));
+      waitingRhStr = avgDays >= 1 ? `${avgDays} dia(s)` : `${avgHours} hora(s)`;
+    } else if (docs.some(d => d.status === 'Em análise' || d.status === 'Reenviado')) {
+      const oldestInReview = docs.filter(d => (d.status === 'Em análise' || d.status === 'Reenviado') && d.uploadedAt);
+      if (oldestInReview.length > 0) {
+        const oldestMs = Math.min(...oldestInReview.map(d => new Date(d.uploadedAt!).getTime()));
+        const diffDays = Math.floor((now.getTime() - oldestMs) / (1000 * 60 * 60 * 24));
+        waitingRhStr = `${diffDays} dia(s) (aguardando conferência)`;
+      }
+    }
+
+    // 3. Tempo em pendência: da identificação da rejeição até o reenvio/resolução
+    let inPendingStr = 'Não disponível';
+    const pendingDiffs: number[] = [];
+    for (const d of docs) {
+      if (d.versions && d.versions.length > 1) {
+        for (let i = 0; i < d.versions.length - 1; i++) {
+          const v = d.versions[i];
+          const nextV = d.versions[i + 1];
+          if (v.status === 'Rejeitado' && v.reviewedAt && nextV.uploadedAt) {
+            const rejTime = new Date(v.reviewedAt).getTime();
+            const reupTime = new Date(nextV.uploadedAt).getTime();
+            if (reupTime >= rejTime) {
+              pendingDiffs.push(reupTime - rejTime);
+            }
+          }
+        }
+      }
+    }
+    if (pendingDiffs.length > 0) {
+      const avgMs = pendingDiffs.reduce((a, b) => a + b, 0) / pendingDiffs.length;
+      const avgDays = Math.round(avgMs / (1000 * 60 * 60 * 24));
+      const avgHours = Math.round(avgMs / (1000 * 60 * 60));
+      inPendingStr = avgDays >= 1 ? `${avgDays} dia(s)` : `${avgHours} hora(s)`;
+    } else if (rejectedDocs.length > 0) {
+      const oldestRejection = rejectedDocs[0].reviewedAt ? new Date(rejectedDocs[0].reviewedAt).getTime() : now.getTime();
+      const diffDays = Math.floor((now.getTime() - oldestRejection) / (1000 * 60 * 60 * 24));
+      inPendingStr = `${diffDays} dia(s) (pendência em aberto)`;
+    }
+
+    // 4. Tempo total da admissão: da criação até a conclusão
+    let totalAdmissionStr = 'Não disponível';
+    if (adm.createdAt) {
+      const startMs = new Date(adm.createdAt).getTime();
+      if (adm.status === 'Concluída' && adm.completedAt) {
+        const endMs = new Date(adm.completedAt).getTime();
+        const diffDays = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24));
+        totalAdmissionStr = `${diffDays} dia(s) (concluída)`;
+      } else if (adm.status === 'Cancelada' && adm.cancelledAt) {
+        const endMs = new Date(adm.cancelledAt).getTime();
+        const diffDays = Math.round((endMs - startMs) / (1000 * 60 * 60 * 24));
+        totalAdmissionStr = `${diffDays} dia(s) (cancelada)`;
+      } else {
+        const diffDays = Math.floor((now.getTime() - startMs) / (1000 * 60 * 60 * 24));
+        totalAdmissionStr = `${diffDays} dia(s) (em andamento)`;
+      }
+    }
+
+    return {
+      events,
+      stageTimes: {
+        waitingDocuments: waitingDocumentsStr,
+        waitingRh: waitingRhStr,
+        inPending: inPendingStr,
+        totalAdmission: totalAdmissionStr
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 4.5 — RELATÓRIOS E INDICADORES DE RH
+  // =========================================================================
+
+  getReportData(options: ReportFilterOptions = {}): ReportDataResponse {
+    const reportType: ReportType = options.reportType || 'admissoes';
+    const allAdmissions = [...(this.data.admissions || [])];
+
+    // Coletores de filtros disponíveis no sistema (sempre sobre a base completa)
+    const availableRoles = Array.from(new Set(allAdmissions.map(a => a.employee?.role).filter(Boolean))).sort();
+    const availableDepartments = Array.from(new Set(allAdmissions.map(a => a.employee?.department).filter(Boolean))).sort();
+    const availableUnits = Array.from(new Set(allAdmissions.map(a => a.employee?.unit).filter(Boolean))).sort();
+    const availableStatuses = [
+      'Rascunho',
+      'Aguardando documentos',
+      'Em conferência',
+      'Pendência',
+      'Concluída',
+      'Cancelada'
+    ];
+
+    // 1. Definição do Período
+    const now = new Date();
+    let periodStart: number | null = null;
+    let periodEnd: number | null = null;
+
+    if (options.period === 'today') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+      periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+    } else if (options.period === '7d') {
+      periodStart = Date.now() - 7 * 86400000;
+      periodEnd = Date.now();
+    } else if (options.period === '30d') {
+      periodStart = Date.now() - 30 * 86400000;
+      periodEnd = Date.now();
+    } else if (options.period === 'this_month') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).getTime();
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+    } else if (options.period === 'next_month') {
+      periodStart = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0).getTime();
+      periodEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59, 999).getTime();
+    } else if (options.startDate || options.endDate) {
+      if (options.startDate) periodStart = new Date(options.startDate + 'T00:00:00').getTime();
+      if (options.endDate) periodEnd = new Date(options.endDate + 'T23:59:59').getTime();
+    }
+
+    // 2. Filtragem de Admissões (Consistência estrita com Dashboard e Central de Pendências)
+    let filteredAdmissions = allAdmissions.filter(a => {
+      // Filtro de período por data de criação
+      if (periodStart !== null || periodEnd !== null) {
+        const createdMs = new Date(a.createdAt).getTime();
+        if (periodStart !== null && createdMs < periodStart) return false;
+        if (periodEnd !== null && createdMs > periodEnd) return false;
+      }
+
+      // Filtro de status
+      if (options.status && options.status !== 'TODOS' && options.status !== 'Todos') {
+        if (a.status !== options.status) return false;
+      }
+
+      // Filtro de cargo
+      if (options.cargo && options.cargo !== 'TODOS' && options.cargo !== 'Todos') {
+        if (a.employee?.role !== options.cargo) return false;
+      }
+
+      // Filtro de departamento
+      if (options.setor && options.setor !== 'TODOS' && options.setor !== 'Todos') {
+        if (a.employee?.department !== options.setor) return false;
+      }
+
+      // Filtro de unidade
+      if (options.unidade && options.unidade !== 'TODOS' && options.unidade !== 'Todos') {
+        if (a.employee?.unit !== options.unidade) return false;
+      }
+
+      // Busca textual
+      if (options.search && options.search.trim()) {
+        const q = options.search.trim().toLowerCase();
+        const cleanDigits = q.replace(/\D/g, '');
+        const emp = a.employee || ({} as any);
+        const code = `adm-${a.id.slice(0, 6)}`.toLowerCase();
+
+        const nameMatch = emp.name?.toLowerCase().includes(q);
+        const emailMatch = emp.email?.toLowerCase().includes(q);
+        const roleMatch = emp.role?.toLowerCase().includes(q);
+        const deptMatch = emp.department?.toLowerCase().includes(q);
+        const idMatch = a.id.toLowerCase().includes(q) || code.includes(q);
+        const cpfMatch = cleanDigits.length >= 3 && emp.cpf ? emp.cpf.replace(/\D/g, '').includes(cleanDigits) : false;
+        const phoneMatch = cleanDigits.length >= 3 && emp.phone ? emp.phone.replace(/\D/g, '').includes(cleanDigits) : false;
+
+        if (!nameMatch && !emailMatch && !roleMatch && !deptMatch && !idMatch && !cpfMatch && !phoneMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Filtros de tipo de relatório de nível superior
+    if (reportType === 'concluidas') {
+      filteredAdmissions = filteredAdmissions.filter(a => a.status === 'Concluída');
+    } else if (reportType === 'canceladas') {
+      filteredAdmissions = filteredAdmissions.filter(a => a.status === 'Cancelada');
+    }
+
+    // 3. Indicadores Gerais Consolidados (KPIs)
+    const totalAdmissions = filteredAdmissions.length;
+    const inProgressAdmissions = filteredAdmissions.filter(a => 
+      a.status === 'Aguardando documentos' || 
+      a.status === 'Em conferência' || 
+      a.status === 'Pendência' || 
+      a.status === 'Rascunho'
+    ).length;
+    const completedAdmissions = filteredAdmissions.filter(a => a.status === 'Concluída').length;
+    const cancelledAdmissions = filteredAdmissions.filter(a => a.status === 'Cancelada').length;
+    const completionRate = totalAdmissions > 0 ? Math.round((completedAdmissions / totalAdmissions) * 100) : 0;
+
+    // Tempo médio de conclusão para admissões concluídas
+    const completedWithDates = filteredAdmissions.filter(a => a.status === 'Concluída' && a.completedAt && a.createdAt);
+    let avgDaysToCompletion: number | null = null;
+    if (completedWithDates.length > 0) {
+      const totalDays = completedWithDates.reduce((acc, a) => {
+        const start = new Date(a.createdAt).getTime();
+        const end = new Date(a.completedAt!).getTime();
+        const days = Math.max(0, (end - start) / (1000 * 60 * 60 * 24));
+        return acc + days;
+      }, 0);
+      avgDaysToCompletion = Math.round((totalDays / completedWithDates.length) * 10) / 10;
+    }
+
+    // Métricas documentais agregadas
+    let totalDocuments = 0;
+    let approvedDocuments = 0;
+    let pendingDocuments = 0; // Não enviado + Rejeitado
+    let reviewingDocuments = 0; // Em análise + Reenviado
+
+    filteredAdmissions.forEach(adm => {
+      (adm.documents || []).forEach(doc => {
+        totalDocuments++;
+        if (doc.status === 'Aprovado') {
+          approvedDocuments++;
+        } else if (doc.status === 'Em análise' || doc.status === 'Reenviado') {
+          reviewingDocuments++;
+        } else if (doc.status === 'Rejeitado' || doc.status === 'Não enviado') {
+          pendingDocuments++;
+        }
+      });
+    });
+
+    const documentApprovalRate = totalDocuments > 0 ? Math.round((approvedDocuments / totalDocuments) * 100) : 0;
+
+    const indicators: ReportIndicators = {
+      totalAdmissions,
+      inProgressAdmissions,
+      completedAdmissions,
+      cancelledAdmissions,
+      completionRate,
+      avgDaysToCompletion,
+      totalDocuments,
+      approvedDocuments,
+      pendingDocuments,
+      reviewingDocuments,
+      documentApprovalRate
+    };
+
+    // 4. Dados para Gráficos Analíticos
+    // Distribuição por status
+    const statusColorMap: Record<string, string> = {
+      'Rascunho': '#94a3b8',
+      'Aguardando documentos': '#f59e0b',
+      'Em conferência': '#3b82f6',
+      'Pendência': '#ef4444',
+      'Concluída': '#10b981',
+      'Cancelada': '#64748b'
+    };
+
+    const byStatus: ReportChartItem[] = availableStatuses.map(st => {
+      const count = filteredAdmissions.filter(a => a.status === st).length;
+      return {
+        name: st,
+        count,
+        percentage: totalAdmissions > 0 ? Math.round((count / totalAdmissions) * 100) : 0,
+        color: statusColorMap[st] || '#3b82f6'
+      };
+    });
+
+    // Distribuição por departamento
+    const deptCountMap = new Map<string, number>();
+    filteredAdmissions.forEach(a => {
+      const d = a.employee?.department || 'Outros';
+      deptCountMap.set(d, (deptCountMap.get(d) || 0) + 1);
+    });
+    const byDepartment: ReportChartItem[] = Array.from(deptCountMap.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalAdmissions > 0 ? Math.round((count / totalAdmissions) * 100) : 0
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Distribuição por cargo (Top 8)
+    const roleCountMap = new Map<string, number>();
+    filteredAdmissions.forEach(a => {
+      const r = a.employee?.role || 'Outros';
+      roleCountMap.set(r, (roleCountMap.get(r) || 0) + 1);
+    });
+    const byRole: ReportChartItem[] = Array.from(roleCountMap.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalAdmissions > 0 ? Math.round((count / totalAdmissions) * 100) : 0
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+
+    // Distribuição por unidade
+    const unitCountMap = new Map<string, number>();
+    filteredAdmissions.forEach(a => {
+      const u = a.employee?.unit || 'Matriz';
+      unitCountMap.set(u, (unitCountMap.get(u) || 0) + 1);
+    });
+    const byUnit: ReportChartItem[] = Array.from(unitCountMap.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: totalAdmissions > 0 ? Math.round((count / totalAdmissions) * 100) : 0
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Distribuição por status de documentos
+    const docStatusMap = new Map<string, number>();
+    filteredAdmissions.forEach(a => {
+      (a.documents || []).forEach(d => {
+        docStatusMap.set(d.status, (docStatusMap.get(d.status) || 0) + 1);
+      });
+    });
+    const byDocumentStatus: ReportChartItem[] = [
+      { name: 'Aprovado', count: docStatusMap.get('Aprovado') || 0, color: '#10b981', percentage: totalDocuments > 0 ? Math.round(((docStatusMap.get('Aprovado') || 0) / totalDocuments) * 100) : 0 },
+      { name: 'Em análise', count: (docStatusMap.get('Em análise') || 0) + (docStatusMap.get('Reenviado') || 0), color: '#3b82f6', percentage: totalDocuments > 0 ? Math.round((((docStatusMap.get('Em análise') || 0) + (docStatusMap.get('Reenviado') || 0)) / totalDocuments) * 100) : 0 },
+      { name: 'Não enviado', count: docStatusMap.get('Não enviado') || 0, color: '#f59e0b', percentage: totalDocuments > 0 ? Math.round(((docStatusMap.get('Não enviado') || 0) / totalDocuments) * 100) : 0 },
+      { name: 'Rejeitado', count: docStatusMap.get('Rejeitado') || 0, color: '#ef4444', percentage: totalDocuments > 0 ? Math.round(((docStatusMap.get('Rejeitado') || 0) / totalDocuments) * 100) : 0 },
+    ];
+
+    // Evolução temporal de admissões (por data de criação)
+    const evolutionMap = new Map<string, number>();
+    filteredAdmissions.forEach(a => {
+      const dt = a.createdAt ? a.createdAt.split('T')[0] : '';
+      if (dt) {
+        evolutionMap.set(dt, (evolutionMap.get(dt) || 0) + 1);
+      }
+    });
+    const evolution: ReportTimelineEvolution[] = Array.from(evolutionMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, count]) => {
+        const parts = date.split('-');
+        const d = parts[2] || '';
+        const m = parts[1] || '';
+        return {
+          date,
+          label: `${d}/${m}`,
+          count
+        };
+      });
+
+    const charts: ReportCharts = {
+      byStatus,
+      byDepartment,
+      byRole,
+      byUnit,
+      byDocumentStatus,
+      evolution
+    };
+
+    // 5. Geração de Linhas da Tabela de acordo com o tipo de relatório selecionado
+    let rows: any[] = [];
+
+    if (reportType === 'admissoes') {
+      rows = filteredAdmissions.map(adm => {
+        const createdMs = new Date(adm.createdAt).getTime();
+        const endMs = adm.completedAt 
+          ? new Date(adm.completedAt).getTime() 
+          : adm.cancelledAt 
+          ? new Date(adm.cancelledAt).getTime() 
+          : Date.now();
+        const durationDays = Math.max(0, Math.round((endMs - createdMs) / (1000 * 60 * 60 * 24)));
+
+        const row: ReportRowAdmission = {
+          id: adm.id,
+          admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+          employeeName: adm.employee.name,
+          employeeCpfMasked: maskCPF(adm.employee.cpf),
+          employeeEmail: adm.employee.email,
+          employeePhone: adm.employee.phone,
+          role: adm.employee.role,
+          department: adm.employee.department,
+          unit: adm.employee.unit,
+          status: adm.status,
+          expectedStartDate: adm.employee.expectedStartDate,
+          createdAt: adm.createdAt,
+          completedAt: adm.completedAt,
+          progressPercent: adm.progressPercent || 0,
+          approvedDocuments: adm.approvedDocuments || 0,
+          totalDocuments: adm.totalDocuments || (adm.documents ? adm.documents.filter(d => d.required).length : 0),
+          durationDays
+        };
+        return row;
+      });
+    } else if (reportType === 'documentos') {
+      const docRows: ReportRowDocument[] = [];
+      filteredAdmissions.forEach(adm => {
+        (adm.documents || []).forEach(doc => {
+          if (options.documentStatus && options.documentStatus !== 'TODOS' && options.documentStatus !== 'Todos') {
+            if (doc.status !== options.documentStatus) return;
+          }
+          docRows.push({
+            id: doc.id,
+            admissionId: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            documentName: doc.document_type_name || (typeof doc.documentType === 'string' ? doc.documentType : 'Documento'),
+            category: doc.category || 'Pessoal',
+            required: Boolean(doc.required),
+            status: doc.status,
+            currentVersion: doc.currentVersion || (doc.versions ? doc.versions.length : 0),
+            uploadedAt: doc.uploadedAt,
+            reviewedAt: doc.reviewedAt,
+            reviewedBy: doc.reviewedBy,
+            rejectionReason: doc.rejectionReason
+          });
+        });
+      });
+      rows = docRows;
+    } else if (reportType === 'pendencias') {
+      const pendingRows: ReportRowPending[] = [];
+      filteredAdmissions.forEach(adm => {
+        if (adm.status === 'Concluída' || adm.status === 'Cancelada') return;
+
+        (adm.documents || []).forEach(doc => {
+          const docName = doc.document_type_name || (typeof doc.documentType === 'string' ? doc.documentType : 'Documento');
+          const isDocPending = doc.status === 'Não enviado' || doc.status === 'Em análise' || doc.status === 'Reenviado' || doc.status === 'Rejeitado';
+
+          if (!isDocPending) return;
+
+          let pendingType = 'documento_nao_enviado';
+          let pendingTypeLabel = 'Documento não enviado';
+          let priority: 'Alta' | 'Média' | 'Baixa' = doc.required ? 'Alta' : 'Média';
+
+          if (doc.status === 'Rejeitado') {
+            pendingType = 'documento_rejeitado';
+            pendingTypeLabel = 'Documento rejeitado';
+            priority = 'Alta';
+          } else if (doc.status === 'Em análise' || doc.status === 'Reenviado') {
+            pendingType = 'aguardando_conferencia';
+            pendingTypeLabel = 'Aguardando conferência do RH';
+            priority = 'Média';
+          }
+
+          const refDate = doc.uploadedAt || doc.reviewedAt || adm.createdAt;
+          const daysPending = Math.max(0, Math.round((Date.now() - new Date(refDate).getTime()) / (1000 * 60 * 60 * 24)));
+
+          pendingRows.push({
+            id: `pend-row-${doc.id}`,
+            admissionId: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            documentName: docName,
+            pendingType,
+            pendingTypeLabel,
+            priority,
+            daysPending,
+            status: doc.status,
+            rejectionReason: doc.rejectionReason,
+            date: refDate
+          });
+        });
+      });
+      rows = pendingRows;
+    } else if (reportType === 'concluidas') {
+      rows = filteredAdmissions
+        .filter(adm => adm.status === 'Concluída')
+        .map(adm => {
+          const startMs = new Date(adm.createdAt).getTime();
+          const endMs = adm.completedAt ? new Date(adm.completedAt).getTime() : Date.now();
+          const durationDays = Math.max(0, Math.round((endMs - startMs) / (1000 * 60 * 60 * 24)));
+
+          const row: ReportRowCompleted = {
+            id: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            createdAt: adm.createdAt,
+            completedAt: adm.completedAt || adm.updatedAt,
+            completedBy: adm.completedBy || 'Equipe de RH',
+            durationDays,
+            approvedDocuments: adm.approvedDocuments || (adm.documents ? adm.documents.filter(d => d.status === 'Aprovado').length : 0),
+            totalDocuments: adm.totalDocuments || (adm.documents ? adm.documents.filter(d => d.required).length : 0)
+          };
+          return row;
+        });
+    } else if (reportType === 'canceladas') {
+      rows = filteredAdmissions
+        .filter(adm => adm.status === 'Cancelada')
+        .map(adm => {
+          const row: ReportRowCancelled = {
+            id: adm.id,
+            admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeName: adm.employee.name,
+            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            role: adm.employee.role,
+            department: adm.employee.department,
+            unit: adm.employee.unit,
+            createdAt: adm.createdAt,
+            cancelledAt: adm.cancelledAt || adm.updatedAt,
+            cancelledBy: adm.cancelledBy || 'Equipe de RH',
+            cancellationReason: adm.cancellationReason || 'Cancelado pela equipe de RH'
+          };
+          return row;
+        });
+    }
+
+    // 6. Ordenação
+    rows.sort((a, b) => {
+      const order = options.sortOrder === 'asc' ? 1 : -1;
+      if (options.sortBy === 'name') {
+        return (a.employeeName || '').localeCompare(b.employeeName || '') * order;
+      }
+      if (options.sortBy === 'role') {
+        return (a.role || '').localeCompare(b.role || '') * order;
+      }
+      if (options.sortBy === 'department') {
+        return (a.department || '').localeCompare(b.department || '') * order;
+      }
+      if (options.sortBy === 'status') {
+        return (a.status || '').localeCompare(b.status || '') * order;
+      }
+      if (options.sortBy === 'progress') {
+        return ((a.progressPercent || 0) - (b.progressPercent || 0)) * order;
+      }
+      if (options.sortBy === 'duration') {
+        return ((a.durationDays || 0) - (b.durationDays || 0)) * order;
+      }
+      // Padrão: mais recentes primeiro
+      const dateA = new Date(a.createdAt || a.date || a.uploadedAt || 0).getTime();
+      const dateB = new Date(b.createdAt || b.date || b.uploadedAt || 0).getTime();
+      return (dateB - dateA) * (options.sortOrder === 'asc' ? -1 : 1);
+    });
+
+    // 7. Paginação
+    const total = rows.length;
+    const page = Math.max(1, Number(options.page) || 1);
+    const limit = Math.max(1, Number(options.limit) || 15);
+    const totalPages = Math.ceil(total / limit) || 1;
+    const offset = (page - 1) * limit;
+    const paginatedRows = rows.slice(offset, offset + limit);
+
+    return {
+      reportType,
+      indicators,
+      charts,
+      rows: paginatedRows,
+      total,
+      page,
+      limit,
+      totalPages,
+      availableFilters: {
+        roles: availableRoles,
+        departments: availableDepartments,
+        units: availableUnits,
+        statuses: availableStatuses
+      }
+    };
+  }
+
+  generateReportCsv(options: ReportFilterOptions = {}): { csv: string; fileName: string; totalRows: number } {
+    // Busca todos os registros sem paginação
+    const reportData = this.getReportData({ ...options, page: 1, limit: 100000 });
+    const { reportType, rows } = reportData;
+
+    const escapeCsv = (val: any): string => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const formatDate = (isoStr?: string): string => {
+      if (!isoStr) return '-';
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        return d.toLocaleDateString('pt-BR');
+      } catch {
+        return isoStr;
+      }
+    };
+
+    let headers: string[] = [];
+    const lines: string[] = [];
+
+    if (reportType === 'admissoes') {
+      headers = [
+        'Código Admissão',
+        'Colaborador',
+        'CPF',
+        'E-mail',
+        'Telefone',
+        'Cargo',
+        'Departamento',
+        'Unidade',
+        'Status',
+        'Previsão de Início',
+        'Data de Criação',
+        'Data de Conclusão',
+        'Progresso (%)',
+        'Docs Aprovados',
+        'Total Docs',
+        'Tempo Decorrido (Dias)'
+      ];
+
+      (rows as ReportRowAdmission[]).forEach(r => {
+        lines.push([
+          escapeCsv(r.admissionCode),
+          escapeCsv(r.employeeName),
+          escapeCsv(r.employeeCpfMasked),
+          escapeCsv(r.employeeEmail),
+          escapeCsv(r.employeePhone),
+          escapeCsv(r.role),
+          escapeCsv(r.department),
+          escapeCsv(r.unit),
+          escapeCsv(r.status),
+          escapeCsv(formatDate(r.expectedStartDate)),
+          escapeCsv(formatDate(r.createdAt)),
+          escapeCsv(formatDate(r.completedAt)),
+          escapeCsv(`${r.progressPercent}%`),
+          escapeCsv(r.approvedDocuments),
+          escapeCsv(r.totalDocuments),
+          escapeCsv(r.durationDays ?? '-')
+        ].join(';'));
+      });
+    } else if (reportType === 'documentos') {
+      headers = [
+        'Código Admissão',
+        'Colaborador',
+        'CPF',
+        'Cargo',
+        'Departamento',
+        'Unidade',
+        'Documento',
+        'Categoria',
+        'Obrigatório',
+        'Status do Documento',
+        'Versão',
+        'Data de Envio',
+        'Data de Conferência',
+        'Conferido Por',
+        'Motivo de Rejeição'
+      ];
+
+      (rows as ReportRowDocument[]).forEach(r => {
+        lines.push([
+          escapeCsv(r.admissionCode),
+          escapeCsv(r.employeeName),
+          escapeCsv(r.employeeCpfMasked),
+          escapeCsv(r.role),
+          escapeCsv(r.department),
+          escapeCsv(r.unit),
+          escapeCsv(r.documentName),
+          escapeCsv(r.category),
+          escapeCsv(r.required ? 'Sim' : 'Não'),
+          escapeCsv(r.status),
+          escapeCsv(`V${r.currentVersion}`),
+          escapeCsv(formatDate(r.uploadedAt)),
+          escapeCsv(formatDate(r.reviewedAt)),
+          escapeCsv(r.reviewedBy || '-'),
+          escapeCsv(r.rejectionReason || '-')
+        ].join(';'));
+      });
+    } else if (reportType === 'pendencias') {
+      headers = [
+        'Código Admissão',
+        'Colaborador',
+        'CPF',
+        'Cargo',
+        'Departamento',
+        'Unidade',
+        'Documento / Item',
+        'Tipo de Pendência',
+        'Prioridade',
+        'Dias Pendente',
+        'Status Atual',
+        'Motivo de Rejeição'
+      ];
+
+      (rows as ReportRowPending[]).forEach(r => {
+        lines.push([
+          escapeCsv(r.admissionCode),
+          escapeCsv(r.employeeName),
+          escapeCsv(r.employeeCpfMasked),
+          escapeCsv(r.role),
+          escapeCsv(r.department),
+          escapeCsv(r.unit),
+          escapeCsv(r.documentName || '-'),
+          escapeCsv(r.pendingTypeLabel),
+          escapeCsv(r.priority),
+          escapeCsv(r.daysPending),
+          escapeCsv(r.status),
+          escapeCsv(r.rejectionReason || '-')
+        ].join(';'));
+      });
+    } else if (reportType === 'concluidas') {
+      headers = [
+        'Código Admissão',
+        'Colaborador',
+        'CPF',
+        'Cargo',
+        'Departamento',
+        'Unidade',
+        'Data de Criação',
+        'Data de Conclusão',
+        'Concluído Por',
+        'Tempo de Conclusão (Dias)',
+        'Docs Aprovados',
+        'Total Docs'
+      ];
+
+      (rows as ReportRowCompleted[]).forEach(r => {
+        lines.push([
+          escapeCsv(r.admissionCode),
+          escapeCsv(r.employeeName),
+          escapeCsv(r.employeeCpfMasked),
+          escapeCsv(r.role),
+          escapeCsv(r.department),
+          escapeCsv(r.unit),
+          escapeCsv(formatDate(r.createdAt)),
+          escapeCsv(formatDate(r.completedAt)),
+          escapeCsv(r.completedBy),
+          escapeCsv(r.durationDays),
+          escapeCsv(r.approvedDocuments),
+          escapeCsv(r.totalDocuments)
+        ].join(';'));
+      });
+    } else if (reportType === 'canceladas') {
+      headers = [
+        'Código Admissão',
+        'Colaborador',
+        'CPF',
+        'Cargo',
+        'Departamento',
+        'Unidade',
+        'Data de Criação',
+        'Data de Cancelamento',
+        'Cancelado Por',
+        'Motivo do Cancelamento'
+      ];
+
+      (rows as ReportRowCancelled[]).forEach(r => {
+        lines.push([
+          escapeCsv(r.admissionCode),
+          escapeCsv(r.employeeName),
+          escapeCsv(r.employeeCpfMasked),
+          escapeCsv(r.role),
+          escapeCsv(r.department),
+          escapeCsv(r.unit),
+          escapeCsv(formatDate(r.createdAt)),
+          escapeCsv(formatDate(r.cancelledAt)),
+          escapeCsv(r.cancelledBy),
+          escapeCsv(r.cancellationReason)
+        ].join(';'));
+      });
+    }
+
+    // UTF-8 BOM para garantir que o Microsoft Excel abra caracteres latinos/acentuados corretamente
+    const BOM = '\uFEFF';
+    const csvContent = BOM + [headers.map(escapeCsv).join(';'), ...lines].join('\r\n');
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    const fileName = `relatorio_${reportType}_${dateStr}.csv`;
+
+    return {
+      csv: csvContent,
+      fileName,
+      totalRows: rows.length
+    };
+  }
 }
 
 export const db = new Database();
 export { STORAGE_DIR };
+

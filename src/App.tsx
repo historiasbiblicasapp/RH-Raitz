@@ -20,6 +20,8 @@ import { JobPositionsPage } from './pages/JobPositionsPage.tsx';
 import { DocumentTypesPage } from './pages/DocumentTypesPage.tsx';
 import { JobPositionChecklistPage } from './pages/JobPositionChecklistPage.tsx';
 import { PendingHubPage } from './pages/PendingHubPage.tsx';
+import { CommunicationHubPage } from './pages/CommunicationHubPage.tsx';
+import { PrazosPage } from './pages/PrazosPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -40,7 +42,10 @@ export function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admissoes" element={<AdmissionsList />} />
+            <Route path="/prazos" element={<PrazosPage />} />
+            <Route path="/acompanhamento" element={<PrazosPage />} />
             <Route path="/pendencias" element={<PendingHubPage />} />
+            <Route path="/comunicacao" element={<CommunicationHubPage />} />
             <Route path="/admissoes/nova" element={<NewAdmission />} />
             <Route path="/nova-admissao" element={<NewAdmission />} />
             <Route path="/admissoes/:id" element={<AdmissionDetails />} />
@@ -49,6 +54,7 @@ export function App() {
             <Route path="/historico" element={<AuditLogPage />} />
             <Route path="/notificacoes" element={<NotificationsPage />} />
             <Route path="/relatorios" element={<ReportsPage />} />
+            <Route path="/reports" element={<ReportsPage />} />
             <Route path="/usuarios-rh" element={<UsersManagementPage />} />
             <Route path="/usuarios" element={<UsersManagementPage />} />
             <Route path="/cadastros/cargos" element={<JobPositionsPage />} />

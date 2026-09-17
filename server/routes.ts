@@ -764,6 +764,187 @@ router.get('/pendencias', (req: Request, res: Response) => {
   });
 });
 
+// =========================================================================
+// BLOCO 4.3 — COMUNICAÇÃO COM O FUNCIONÁRIO (API RH)
+// =========================================================================
+
+/**
+ * GET /api/communications
+ * Retorna lista prioritária de admissões para comunicação, com resumo operacional e filtros.
+ */
+router.get('/communications', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
+  }
+
+  const {
+    search,
+    status,
+    documentStatus,
+    cargo,
+    setor,
+    unidade,
+    page,
+    limit
+  } = req.query;
+
+  const result = db.getCommunicationHubData({
+    search: search as string | undefined,
+    status: status as string | undefined,
+    documentStatus: documentStatus as string | undefined,
+    cargo: cargo as string | undefined,
+    setor: setor as string | undefined,
+    unidade: unidade as string | undefined,
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined
+  });
+
+  return res.json(result);
+});
+
+/**
+ * POST /api/communications/log
+ * Registra uma ação de comunicação (abertura de WhatsApp, cópia de mensagem, cópia de link)
+ * de forma imutável e com auditoria integrada.
+ */
+router.post('/communications/log', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
+  }
+
+  const {
+    admissionId,
+    employeeId,
+    communicationType,
+    channel,
+    templateId,
+    documentId,
+    documentName,
+    rejectionReason,
+    messagePreview,
+    actionStatus,
+    actionStatusLabel
+  } = req.body;
+
+  if (!admissionId || !communicationType || !channel || !actionStatus) {
+    return res.status(400).json({ error: 'Dados obrigatórios de comunicação ausentes.' });
+  }
+
+  const admission = db.getAdmissionById(admissionId);
+  if (!admission) {
+    return res.status(404).json({ error: 'Admissão não encontrada.' });
+  }
+
+  const log = db.addCommunicationLog({
+    admissionId,
+    employeeId: employeeId || admission.employeeId,
+    userId: user.id,
+    userName: user.name,
+    communicationType,
+    channel,
+    templateId: templateId || communicationType,
+    documentId,
+    documentName,
+    rejectionReason,
+    messagePreview: messagePreview || '',
+    actionStatus,
+    actionStatusLabel
+  });
+
+  return res.status(201).json({ success: true, log });
+});
+
+/**
+ * GET /api/admissions/:id/communications
+ * Retorna o histórico de comunicações realizadas para uma admissão específica.
+ */
+router.get('/admissions/:id/communications', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
+  }
+
+  const admission = db.getAdmissionById(req.params.id);
+  if (!admission) {
+    return res.status(404).json({ error: 'Admissão não encontrada.' });
+  }
+
+  const logs = db.getCommunicationLogs(req.params.id);
+  return res.json({ logs });
+});
+
+// =========================================================================
+// BLOCO 4.4 — PRAZOS E ACOMPANHAMENTO OPERACIONAL (RH)
+// =========================================================================
+
+/**
+ * GET /api/tracking ou /api/prazos
+ * Retorna lista operacional de prazos e acompanhamento, resumo operacional,
+ * contadores de situação, itens prioritários e filtros dinâmicos.
+ */
+router.get(['/tracking', '/prazos'], (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
+  }
+
+  const {
+    period,
+    startDate,
+    endDate,
+    status,
+    cargo,
+    setor,
+    unidade,
+    situacao,
+    tempoSemMovimentacao,
+    search,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  const result = db.getTrackingHubData({
+    period: period as string | undefined,
+    startDate: startDate as string | undefined,
+    endDate: endDate as string | undefined,
+    status: status as string | undefined,
+    cargo: cargo as string | undefined,
+    setor: setor as string | undefined,
+    unidade: unidade as string | undefined,
+    situacao: situacao as string | undefined,
+    tempoSemMovimentacao: tempoSemMovimentacao as string | undefined,
+    search: search as string | undefined,
+    page: page ? Number(page) : undefined,
+    limit: limit ? Number(limit) : undefined,
+    sortBy: sortBy as string | undefined,
+    sortOrder: sortOrder as 'asc' | 'desc' | undefined
+  });
+
+  return res.json(result);
+});
+
+/**
+ * GET /api/admissions/:id/timeline
+ * Retorna linha do tempo de eventos reais e cálculos de tempo por etapa (Seções 12 e 13).
+ */
+router.get('/admissions/:id/timeline', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  if (!user || user.role === 'FUNCIONARIO') {
+    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
+  }
+
+  try {
+    const timeline = db.getAdmissionTimeline(req.params.id);
+    return res.json(timeline);
+  } catch (err: any) {
+    return res.status(404).json({ error: err.message || 'Admissão não encontrada.' });
+  }
+});
+
 // ------------------------------------------------------------------
 // GESTÃO DE ADMISSÕES (RH)
 // ------------------------------------------------------------------
@@ -1451,4 +1632,115 @@ router.all('/notifications/read-all', (_req: Request, res: Response) => {
   return res.json({ success: true });
 });
 
+// ------------------------------------------------------------------
+// BLOCO 4.5 — RELATÓRIOS E INDICADORES DE RH
+// ------------------------------------------------------------------
+router.get(['/reports', '/relatorios'], (req: Request, res: Response) => {
+  try {
+    const reportType = (req.query.reportType as any) || 'admissoes';
+    const period = req.query.period as string | undefined;
+    const startDate = req.query.startDate as string | undefined;
+    const endDate = req.query.endDate as string | undefined;
+    const status = req.query.status as string | undefined;
+    const cargo = req.query.cargo as string | undefined;
+    const setor = req.query.setor as string | undefined;
+    const unidade = req.query.unidade as string | undefined;
+    const documentStatus = req.query.documentStatus as string | undefined;
+    const search = req.query.search as string | undefined;
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 15;
+    const sortBy = req.query.sortBy as string | undefined;
+    const sortOrder = (req.query.sortOrder as 'asc' | 'desc') || 'desc';
+
+    const data = db.getReportData({
+      reportType,
+      period,
+      startDate,
+      endDate,
+      status,
+      cargo,
+      setor,
+      unidade,
+      documentStatus,
+      search,
+      page,
+      limit,
+      sortBy,
+      sortOrder
+    });
+
+    return res.json(data);
+  } catch (error: any) {
+    console.error('Erro ao gerar relatório:', error);
+    return res.status(500).json({ error: 'Erro ao gerar relatório: ' + (error?.message || 'desconhecido') });
+  }
+});
+
+router.post(['/reports/export', '/relatorios/export'], (req: Request, res: Response) => {
+  try {
+    const user = getAuthenticatedUser(req);
+    const body = req.body || {};
+
+    const reportType = body.reportType || 'admissoes';
+    const period = body.period;
+    const startDate = body.startDate;
+    const endDate = body.endDate;
+    const status = body.status;
+    const cargo = body.cargo;
+    const setor = body.setor;
+    const unidade = body.unidade;
+    const documentStatus = body.documentStatus;
+    const search = body.search;
+    const sortBy = body.sortBy;
+    const sortOrder = body.sortOrder;
+
+    const result = db.generateReportCsv({
+      reportType,
+      period,
+      startDate,
+      endDate,
+      status,
+      cargo,
+      setor,
+      unidade,
+      documentStatus,
+      search,
+      sortBy,
+      sortOrder
+    });
+
+    // Registra auditoria da exportação em conformidade com RLS e LGPD
+    const filterDescParts = [];
+    if (period && period !== 'all') filterDescParts.push(`período=${period}`);
+    if (cargo && cargo !== 'TODOS') filterDescParts.push(`cargo=${cargo}`);
+    if (setor && setor !== 'TODOS') filterDescParts.push(`setor=${setor}`);
+    if (status && status !== 'TODOS') filterDescParts.push(`status=${status}`);
+    const filterDesc = filterDescParts.length > 0 ? filterDescParts.join(', ') : 'sem filtros adicionais';
+
+    db.addAuditLog({
+      userName: user.name,
+      action: 'report_exported',
+      details: `Relatório "${reportType}" exportado em formato CSV contendo ${result.totalRows} registros. Filtros aplicados: ${filterDesc}.`
+    });
+
+    // Se solicitado via download direto HTTP
+    if (req.query.download === 'true') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${result.fileName}"`);
+      return res.send(result.csv);
+    }
+
+    return res.json({
+      success: true,
+      fileName: result.fileName,
+      totalRows: result.totalRows,
+      csv: result.csv
+    });
+  } catch (error: any) {
+    console.error('Erro ao exportar relatório:', error);
+    return res.status(500).json({ error: 'Erro ao exportar relatório: ' + (error?.message || 'desconhecido') });
+  }
+});
+
 export default router;
+

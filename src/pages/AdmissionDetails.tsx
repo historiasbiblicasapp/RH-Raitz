@@ -37,9 +37,11 @@ import {
   Search,
   Filter,
   Info,
-  ArrowRight
+  ArrowRight,
+  MessageSquare,
+  CalendarClock
 } from 'lucide-react';
-import { Admission, AdmissionDocument, AuditLog } from '../types/index.ts';
+import { Admission, AdmissionDocument, AuditLog, CommunicationLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { DocumentReviewModal } from '../components/DocumentReviewModal.tsx';
 import { InviteModal } from '../components/InviteModal.tsx';
@@ -47,9 +49,11 @@ import { MobileSimulatorModal } from '../components/MobileSimulatorModal.tsx';
 import { EditAdmissionModal } from '../components/EditAdmissionModal.tsx';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
 import { ManageInviteModal } from '../components/ManageInviteModal.tsx';
+import { CommunicationModal } from '../components/CommunicationModal.tsx';
+import { AdmissionTimeline } from '../components/AdmissionTimeline.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
-type ActiveTab = 'resumo' | 'dados' | 'documentos' | 'pendencias' | 'historico' | 'convite';
+type ActiveTab = 'resumo' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
 
 export const AdmissionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -64,11 +68,11 @@ export const AdmissionDetails: React.FC = () => {
 
   // Lê parâmetros de URL vindos da Central de Pendências ou links diretos
   useEffect(() => {
-    const tabParam = searchParams.get('tab') as ActiveTab | null;
+    const tabParam = searchParams.get('tab');
     const docIdParam = searchParams.get('docId');
 
-    if (tabParam && ['resumo', 'dados', 'documentos', 'pendencias', 'historico', 'convite'].includes(tabParam)) {
-      setActiveTab(tabParam);
+    if (tabParam && ['resumo', 'dados', 'documentos', 'pendencias', 'prazos', 'acompanhamento', 'historico', 'convite'].includes(tabParam)) {
+      setActiveTab(tabParam === 'acompanhamento' ? 'prazos' : (tabParam as ActiveTab));
     }
     if (docIdParam) {
       setHighlightedDocId(docIdParam);
@@ -110,6 +114,11 @@ export const AdmissionDetails: React.FC = () => {
   // Menu "Mais ações"
   const [showMoreActions, setShowMoreActions] = useState(false);
 
+  // Bloco 4.3: Modal de Comunicação com Funcionário
+  const [isCommunicationModalOpen, setIsCommunicationModalOpen] = useState(false);
+  const [communicationReason, setCommunicationReason] = useState<any>(undefined);
+  const [communicationLogs, setCommunicationLogs] = useState<CommunicationLog[]>([]);
+
   // Feedback de link copiado
   const [copiedLink, setCopiedLink] = useState(false);
   const [showSimulator, setShowSimulator] = useState(false);
@@ -123,9 +132,13 @@ export const AdmissionDetails: React.FC = () => {
     if (!id) return;
     try {
       setLoading(true);
-      const [resAdm, resLogs] = await Promise.all([
+      const userEmail = localStorage.getItem('user_email') || 'rh@empresa.com';
+      const [resAdm, resLogs, resComms] = await Promise.all([
         fetch(`/api/admissions/${id}`),
-        fetch(`/api/audit-logs?admissionId=${id}`)
+        fetch(`/api/audit-logs?admissionId=${id}`),
+        fetch(`/api/admissions/${id}/communications`, {
+          headers: { 'x-user-email': userEmail }
+        })
       ]);
 
       if (resAdm.ok) {
@@ -135,6 +148,10 @@ export const AdmissionDetails: React.FC = () => {
       if (resLogs.ok) {
         const logsData = await resLogs.json();
         setAuditLogs(logsData);
+      }
+      if (resComms.ok) {
+        const commsData = await resComms.json();
+        setCommunicationLogs(commsData.logs || []);
       }
     } catch (err) {
       console.error('Erro ao buscar admissão:', err);
@@ -420,13 +437,28 @@ export const AdmissionDetails: React.FC = () => {
             <span>Gerenciar Convite</span>
           </button>
 
+          {/* Ação Bloco 4.3: Comunicar com Funcionário */}
+          <button
+            id="btn-comunicar-funcionario"
+            onClick={() => {
+              setCommunicationReason(undefined);
+              setIsCommunicationModalOpen(true);
+            }}
+            disabled={isCancelled}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+            title="Abrir Central de Notificações e Comunicação com o Funcionário"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Comunicar</span>
+          </button>
+
           {/* Ação 1: Enviar convite novamente */}
           <button
             onClick={() => setShowResendModal(true)}
             disabled={isCancelled}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <Send className="w-3.5 h-3.5" />
+            <Send className="w-3.5 h-3.5 text-emerald-600" />
             <span>Reenviar WhatsApp</span>
           </button>
 
@@ -683,6 +715,18 @@ export const AdmissionDetails: React.FC = () => {
             ) : (
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('prazos')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'prazos'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <CalendarClock className="w-3.5 h-3.5" />
+            <span>Prazos & Linha do Tempo</span>
           </button>
 
           <button
@@ -1609,18 +1653,47 @@ export const AdmissionDetails: React.FC = () => {
                     </div>
                   </div>
 
-                  {item.doc && item.doc.currentVersion > 0 && (
+                  <div className="flex items-center gap-2 self-end sm:self-center">
                     <button
-                      onClick={() => setSelectedDocForReview(item.doc!)}
-                      className="self-end sm:self-center text-xs font-semibold bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                      type="button"
+                      onClick={() => {
+                        setCommunicationReason({
+                          type: item.type === 'doc_rejected' ? 'document_rejected' : 'documents_pending',
+                          label: item.title,
+                          documentId: item.doc?.id,
+                          documentName: item.doc?.documentType,
+                          rejectionReason: item.reason,
+                          priority: item.type === 'doc_rejected' ? 'Alta' : 'Média'
+                        });
+                        setIsCommunicationModalOpen(true);
+                      }}
+                      className="text-xs font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                      title="Comunicar funcionário sobre esta pendência"
                     >
-                      Ver documento
+                      <Send className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Notificar</span>
                     </button>
-                  )}
+
+                    {item.doc && item.doc.currentVersion > 0 && (
+                      <button
+                        onClick={() => setSelectedDocForReview(item.doc!)}
+                        className="text-xs font-semibold bg-white border border-rose-300 text-rose-700 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                      >
+                        Ver documento
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ABA: PRAZOS & LINHA DO TEMPO (Bloco 4.4) */}
+      {activeTab === 'prazos' && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
+          <AdmissionTimeline admissionId={admission.id} />
         </div>
       )}
 
@@ -1841,6 +1914,75 @@ export const AdmissionDetails: React.FC = () => {
               O link contém um token de segurança de alta entropia exclusivo para {admission.employee.name}.
             </p>
           </div>
+
+          {/* Histórico de Comunicações (Bloco 4.3) */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                  <MessageSquare className="w-4 h-4 text-emerald-600" />
+                  <span>Histórico de Comunicações Enviadas</span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Registros auditáveis de notificações, lembretes e avisos enviados para este candidato.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCommunicationReason(undefined);
+                  setIsCommunicationModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Nova Notificação</span>
+              </button>
+            </div>
+
+            {communicationLogs.length === 0 ? (
+              <div className="py-6 text-center text-slate-400">
+                <MessageSquare className="w-8 h-8 text-slate-300 mx-auto mb-1.5" />
+                <p className="text-xs font-medium text-slate-600">Nenhuma comunicação registrada ainda</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Envie lembretes ou avisos sobre pendências para manter o candidato informado.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {communicationLogs.map((log) => (
+                  <div key={log.id} className="py-3 flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900 capitalize">
+                          {log.communicationType.replace('_', ' ')}
+                        </span>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          {log.channel === 'whatsapp' ? 'WhatsApp' : 'Link/Texto copiado'}
+                        </span>
+                        <span className="text-slate-400 text-[10px]">
+                          por {log.userName}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 text-xs font-mono bg-slate-50 p-2.5 rounded-lg border border-slate-100 whitespace-pre-wrap max-w-2xl">
+                        {log.messagePreview}
+                      </p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span className="text-[11px] font-mono text-slate-400 block">
+                        {new Date(log.createdAt).toLocaleString('pt-BR')}
+                      </span>
+                      <span className="text-[10px] font-medium text-emerald-600 mt-0.5 block">
+                        {log.actionStatusLabel}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -2055,6 +2197,26 @@ export const AdmissionDetails: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Comunicação com Funcionário (Bloco 4.3) */}
+      {admission && (
+        <CommunicationModal
+          isOpen={isCommunicationModalOpen}
+          onClose={() => setIsCommunicationModalOpen(false)}
+          admissionId={admission.id}
+          admissionCode={admission.id.slice(0, 8).toUpperCase()}
+          employeeId={admission.employeeId}
+          employeeName={admission.employee.name}
+          employeePhone={admission.employee.phone}
+          expectedStartDate={admission.employee.expectedStartDate}
+          inviteToken={admission.inviteToken}
+          isInviteValid={!admission.inviteRevoked}
+          initialReason={communicationReason}
+          onSuccess={() => {
+            fetchAdmission();
+          }}
+        />
       )}
     </div>
   );
