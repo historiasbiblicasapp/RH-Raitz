@@ -65,6 +65,7 @@ import {
   SystemSecuritySettings
 } from '../src/types/index.ts';
 import { maskCPF } from '../src/lib/cpf.ts';
+import { initialDbData } from '../src/data/initialDb.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const STORAGE_DIR = path.join(DATA_DIR, 'storage');
@@ -978,21 +979,33 @@ export class Database {
           this.save();
         }
       } catch (e) {
-        console.error('Error reading db.json, generating initial data:', e);
-        this.data = generateInitialData();
+        console.warn('Falha ao ler db.json, inicializando com dados mestres estruturados:', e);
+        this.data = JSON.parse(JSON.stringify(initialDbData));
         this.save();
       }
     } else {
-      this.data = generateInitialData();
+      this.data = JSON.parse(JSON.stringify(initialDbData));
       this.save();
     }
   }
 
   private save() {
     try {
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
       fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Error saving db.json:', e);
+      // Ambientes serverless com sistema de arquivos somente leitura (ex: Vercel Lambda / AWS)
+      try {
+        const tmpDir = '/tmp/admissao_data';
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        fs.writeFileSync(path.join(tmpDir, 'db.json'), JSON.stringify(this.data, null, 2), 'utf-8');
+      } catch {
+        // Modo somente leitura: dados permanecem em memória sem quebrar a execução
+      }
     }
   }
 

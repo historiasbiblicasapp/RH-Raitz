@@ -1,3 +1,5 @@
+import { handleFallbackApiRoute } from './fallbackClient.ts';
+
 // Utilitário central de requisições à API com proteção contra respostas HTML,
 // erros de cold-start do servidor, problemas de cookies no iframe e tratamento seguro de JSON.
 
@@ -71,6 +73,11 @@ export async function safeFetchJson<T = any>(
               continue;
             }
 
+            const fallback = handleFallbackApiRoute(url, mergedInit);
+            if (fallback !== undefined) {
+              return fallback as T;
+            }
+
             const cleanSnippet = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
             let userMsg = `O servidor respondeu com status ${res.status}.`;
             if (cleanSnippet.length > 5 && !cleanSnippet.toLowerCase().includes('the page') && !cleanSnippet.toLowerCase().includes('action required')) {
@@ -85,6 +92,13 @@ export async function safeFetchJson<T = any>(
       }
 
       if (!res.ok) {
+        // Se a rota der 404 (ex: deploy estático na Vercel)
+        if (res.status === 404) {
+          const fallback = handleFallbackApiRoute(url, mergedInit);
+          if (fallback !== undefined) {
+            return fallback as T;
+          }
+        }
         const errMsg = data?.error || data?.message || `Erro no servidor (${res.status}).`;
         throw new Error(errMsg);
       }
@@ -103,8 +117,20 @@ export async function safeFetchJson<T = any>(
         await new Promise((r) => setTimeout(r, 700 * attempt));
         continue;
       }
+
+      // Se falhar a conexão após todas as tentativas (ex: offline ou Vercel sem backend)
+      const fallback = handleFallbackApiRoute(url, mergedInit);
+      if (fallback !== undefined) {
+        return fallback as T;
+      }
+
       throw err;
     }
+  }
+
+  const fallback = handleFallbackApiRoute(url, mergedInit);
+  if (fallback !== undefined) {
+    return fallback as T;
   }
 
   throw new Error('Não foi possível conectar ao servidor no momento. Por favor, tente novamente.');

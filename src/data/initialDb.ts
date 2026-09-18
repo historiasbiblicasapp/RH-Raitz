@@ -1,4 +1,4 @@
-{
+export const initialDbData: any = {
   "users": [
     {
       "id": "user-rh-01",
@@ -401,21 +401,6 @@
       "expectedStartDate": "2026-10-01",
       "createdAt": "2026-09-18T11:58:11.953Z",
       "updatedAt": "2026-09-18T11:58:11.953Z"
-    },
-    {
-      "id": "emp-8c53b02f-628f-4068-b270-7b35a588a94b",
-      "name": "Candidato Auditoria 4.7",
-      "cpf": "57508821440",
-      "birthDate": "1995-05-15",
-      "phone": "(11) 98765-4321",
-      "email": "candidato.teste@raitz.com.br",
-      "role": "Analista de Auditoria TST-2221",
-      "jobPositionId": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-      "department": "Tecnologia da Informação",
-      "unit": "Matriz - Curitiba",
-      "expectedStartDate": "2026-10-01",
-      "createdAt": "2026-09-18T12:05:02.248Z",
-      "updatedAt": "2026-09-18T12:05:02.248Z"
     }
   ],
   "admissions": [
@@ -5608,350 +5593,9 @@
       "dataConfirmedAt": "2026-09-18T11:58:11.988Z",
       "completedAt": "2026-09-18T11:58:12.036Z",
       "completedBy": "Rh"
-    },
-    {
-      "id": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeId": "emp-8c53b02f-628f-4068-b270-7b35a588a94b",
-      "employee": {
-        "id": "emp-8c53b02f-628f-4068-b270-7b35a588a94b",
-        "name": "Candidato Auditoria 4.7",
-        "cpf": "57508821440",
-        "birthDate": "1995-05-15",
-        "phone": "(11) 98765-4321",
-        "email": "candidato.teste@raitz.com.br",
-        "role": "Analista de Auditoria TST-2221",
-        "jobPositionId": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-        "department": "Tecnologia da Informação",
-        "unit": "Matriz - Curitiba",
-        "expectedStartDate": "2026-10-01",
-        "createdAt": "2026-09-18T12:05:02.248Z",
-        "updatedAt": "2026-09-18T12:05:02.248Z"
-      },
-      "status": "Concluída",
-      "inviteToken": "tok_a784b9f31af9efa05bbb8459012d2a2499f3d86078521914",
-      "inviteExpiresAt": "2026-10-18T12:05:02.248Z",
-      "inviteSentViaWhatsApp": false,
-      "consentGiven": true,
-      "dataConfirmed": true,
-      "documents": [
-        {
-          "id": "doc-fb50187c-0114-4aff-b4dc-b7dd33a4031e",
-          "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-          "documentType": "RG",
-          "document_type_id": "doc-type-02",
-          "document_type_name": "RG",
-          "category": "Pessoal",
-          "required": true,
-          "sort_order": 1,
-          "instructions": "Digitalize frente e verso legível.",
-          "requires_expiration_date": false,
-          "allowed_file_types": [
-            "PDF",
-            "JPG",
-            "JPEG",
-            "PNG"
-          ],
-          "max_file_size_mb": 10,
-          "source_job_position_document_id": "jpd-69f580c6-ebc0-4a66-85a8-5f66d5b46323",
-          "source_config_version": "1.0",
-          "status": "Aprovado",
-          "currentVersion": 2,
-          "versions": [
-            {
-              "version": 1,
-              "fileName": "rg_candidato_teste.pdf",
-              "fileSize": 43,
-              "mimeType": "application/pdf",
-              "storagePath": "21075e7b-0e93-4c0a-883c-53d1157f47e1.pdf",
-              "uploadedAt": "2026-09-18T12:05:02.297Z",
-              "status": "Rejeitado",
-              "reviewedAt": "2026-09-18T12:05:02.313Z",
-              "reviewedBy": "Rh",
-              "rejectionReason": "Documento ilegível",
-              "rejectionNotes": "Documento cortado ou com iluminação inadequada no verso."
-            },
-            {
-              "version": 2,
-              "fileName": "rg_candidato_teste_legivel.pdf",
-              "fileSize": 30,
-              "mimeType": "application/pdf",
-              "storagePath": "268fd3d1-b516-45e5-a0fc-4c3d82ae2f3d.pdf",
-              "uploadedAt": "2026-09-18T12:05:02.321Z",
-              "status": "Aprovado",
-              "reviewedAt": "2026-09-18T12:05:02.327Z",
-              "reviewedBy": "Rh"
-            }
-          ],
-          "createdAt": "2026-09-18T12:05:02.248Z",
-          "updatedAt": "2026-09-18T12:05:02.327Z",
-          "created_by": "Rh",
-          "updated_by": "Rh",
-          "fileName": "rg_candidato_teste_legivel.pdf",
-          "fileSize": 30,
-          "mimeType": "application/pdf",
-          "storagePath": "268fd3d1-b516-45e5-a0fc-4c3d82ae2f3d.pdf",
-          "uploadedAt": "2026-09-18T12:05:02.321Z",
-          "reviewedAt": "2026-09-18T12:05:02.327Z",
-          "reviewedBy": "Rh"
-        },
-        {
-          "id": "doc-e11d43e4-f793-4101-980a-1ac1b760c804",
-          "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-          "documentType": "Comprovante de Residência",
-          "document_type_id": "doc-type-04",
-          "document_type_name": "Comprovante de Residência",
-          "category": "Residencial",
-          "required": false,
-          "sort_order": 2,
-          "instructions": "Comprovante recente dos últimos 90 dias.",
-          "requires_expiration_date": false,
-          "allowed_file_types": [
-            "PDF",
-            "JPG",
-            "JPEG",
-            "PNG"
-          ],
-          "max_file_size_mb": 10,
-          "source_job_position_document_id": "jpd-092b3ab0-a289-42a6-b862-0a4eb63ee8e1",
-          "source_config_version": "1.0",
-          "status": "Não enviado",
-          "currentVersion": 0,
-          "versions": [],
-          "createdAt": "2026-09-18T12:05:02.248Z",
-          "updatedAt": "2026-09-18T12:05:02.248Z",
-          "created_by": "Rh",
-          "updated_by": "Rh"
-        }
-      ],
-      "progressPercent": 100,
-      "totalDocuments": 1,
-      "approvedDocuments": 1,
-      "createdAt": "2026-09-18T12:05:02.248Z",
-      "updatedAt": "2026-09-18T12:05:02.333Z",
-      "inviteAccessCount": 2,
-      "inviteLastAccessedAt": "2026-09-18T12:05:02.303Z",
-      "consentDate": "2026-09-18T12:05:02.276Z",
-      "consentTextVersion": "1.2-LGPD-2026",
-      "dataConfirmedAt": "2026-09-18T12:05:02.283Z",
-      "completedAt": "2026-09-18T12:05:02.333Z",
-      "completedBy": "Rh"
     }
   ],
   "auditLogs": [
-    {
-      "id": "audit-53c50c45-485a-4997-850c-9a32bc4922c3",
-      "timestamp": "2026-09-18T12:05:02.343Z",
-      "userName": "Rh",
-      "performedBy": "Rh",
-      "userId": "user-rh-ce16be13",
-      "action": "communication_message_copied",
-      "entityType": "admission",
-      "entityId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Comunicação (Abriu WhatsApp) via WHATSAPP - Tipo: lembrete_geral."
-    },
-    {
-      "id": "audit-d35ea845-a61c-43dc-858f-2f06c0e34847",
-      "timestamp": "2026-09-18T12:05:02.333Z",
-      "userName": "Rh",
-      "action": "RH concluiu a admissão",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Processo admissional concluído com sucesso. Todos os documentos obrigatórios foram conferidos e aprovados."
-    },
-    {
-      "id": "audit-1e9d1af9-a9a7-4dce-9c15-a1808bf3bdb5",
-      "timestamp": "2026-09-18T12:05:02.327Z",
-      "userName": "Rh",
-      "action": "RH aprovou RG",
-      "entityType": "admission_document",
-      "entityId": "doc-fb50187c-0114-4aff-b4dc-b7dd33a4031e",
-      "entityName": "RG",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "documentType": "RG",
-      "fieldChanged": "status de aprovação",
-      "previousValue": "Reenviado",
-      "newValue": "Aprovado",
-      "details": "Documento aprovado na versão 2 por Rh. Status anterior: Reenviado ➔ Novo: Aprovado."
-    },
-    {
-      "id": "audit-4dd4b70f-f647-4b4e-a727-df993ee795ad",
-      "timestamp": "2026-09-18T12:05:02.327Z",
-      "userName": "Sistema",
-      "action": "Admissão concluída",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Todos os documentos obrigatórios foram aprovados pela equipe de RH."
-    },
-    {
-      "id": "audit-bafdcea0-3bc9-499d-8484-c1c326695de5",
-      "timestamp": "2026-09-18T12:05:02.321Z",
-      "userName": "Candidato Auditoria 4.7",
-      "action": "Funcionário reenviou RG",
-      "entityType": "admission_document",
-      "entityId": "doc-fb50187c-0114-4aff-b4dc-b7dd33a4031e",
-      "entityName": "RG",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "documentType": "RG",
-      "fieldChanged": "versão do documento",
-      "previousValue": "V1 (Rejeitado)",
-      "newValue": "V2 (Reenviado)",
-      "details": "Arquivo rg_candidato_teste_legivel.pdf (0.0 KB) - Versão 2 enviado por Candidato Auditoria 4.7."
-    },
-    {
-      "id": "audit-830069cc-f069-4b28-b505-2bd0418707e2",
-      "timestamp": "2026-09-18T12:05:02.313Z",
-      "userName": "Rh",
-      "action": "RH rejeitou RG",
-      "entityType": "admission_document",
-      "entityId": "doc-fb50187c-0114-4aff-b4dc-b7dd33a4031e",
-      "entityName": "RG",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "documentType": "RG",
-      "fieldChanged": "status de aprovação",
-      "previousValue": "Em análise",
-      "newValue": "Rejeitado",
-      "details": "Documento rejeitado na versão 1 por Rh. Motivo: Documento ilegível. Orientação: \"Documento cortado ou com iluminação inadequada no verso.\". Status anterior: Em análise ➔ Novo: Rejeitado."
-    },
-    {
-      "id": "audit-64356aef-80bf-4048-85a1-ce3e3a4c4f19",
-      "timestamp": "2026-09-18T12:05:02.303Z",
-      "userName": "Candidato Auditoria 4.7",
-      "action": "Funcionário acessou o convite",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Acesso nº 2 realizado pelo portal do colaborador."
-    },
-    {
-      "id": "audit-99470699-2397-48e7-a334-1f0fa613098a",
-      "timestamp": "2026-09-18T12:05:02.297Z",
-      "userName": "Candidato Auditoria 4.7",
-      "action": "Funcionário enviou RG",
-      "entityType": "admission_document",
-      "entityId": "doc-fb50187c-0114-4aff-b4dc-b7dd33a4031e",
-      "entityName": "RG",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "documentType": "RG",
-      "fieldChanged": "versão do documento",
-      "previousValue": "Não enviado",
-      "newValue": "V1 (Em análise)",
-      "details": "Arquivo rg_candidato_teste.pdf (0.0 KB) - Versão 1 enviado por Candidato Auditoria 4.7."
-    },
-    {
-      "id": "audit-c9244d30-08c0-4b8c-9862-16c03a55b3f6",
-      "timestamp": "2026-09-18T12:05:02.283Z",
-      "userName": "Candidato Auditoria 4.7",
-      "action": "Funcionário confirmou seus dados",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Colaborador verificou e validou todos os seus dados cadastrais pré-preenchidos."
-    },
-    {
-      "id": "audit-a66fd53c-b3e1-428b-a17b-2b2b57117a55",
-      "timestamp": "2026-09-18T12:05:02.276Z",
-      "userName": "Candidato Auditoria 4.7",
-      "action": "Funcionário aceitou o termo de consentimento LGPD",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Consentimento formal registrado sob a versão 1.2-LGPD-2026. IP: 127.0.0.1",
-      "ipAddress": "127.0.0.1"
-    },
-    {
-      "id": "audit-4abd9e84-318e-435b-8536-4508e19e9547",
-      "timestamp": "2026-09-18T12:05:02.270Z",
-      "userName": "Candidato Auditoria 4.7",
-      "action": "Funcionário acessou o convite",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Acesso nº 1 realizado pelo portal do colaborador."
-    },
-    {
-      "id": "audit-bdd5cc27-1b31-4c0a-afd1-7d46efa223b3",
-      "timestamp": "2026-09-18T12:05:02.263Z",
-      "userName": "Rh",
-      "action": "job_position_document_added",
-      "entityType": "job_position_document",
-      "entityId": "jpd-5a3661ad-0acd-431b-bf8a-48dcdef20932",
-      "entityName": "CPF (Analista de Auditoria TST-2221)",
-      "fieldChanged": "inclusão no checklist",
-      "newValue": "Obrigatório",
-      "details": "Documento \"CPF\" adicionado ao checklist do cargo \"Analista de Auditoria TST-2221\" (Obrigatório, Ordem: 3) por Rh."
-    },
-    {
-      "id": "audit-4df077a5-0a5f-4ec3-92c9-5a0dba20c461",
-      "timestamp": "2026-09-18T12:05:02.256Z",
-      "userName": "Sistema",
-      "action": "Convite gerado",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Token de acesso criptografado gerado com validade até 18/10/2026"
-    },
-    {
-      "id": "audit-8d9f7ade-f172-40ce-bd0e-2b0d7378ed96",
-      "timestamp": "2026-09-18T12:05:02.248Z",
-      "userName": "Rh",
-      "action": "admission_document_checklist_created",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Checklist da admissão gerado para o cargo \"Analista de Auditoria TST-2221\": 2 documentos (1 obrigatórios, 1 opcionais)."
-    },
-    {
-      "id": "audit-d6e1fb43-1ef8-4340-b70b-e636d6e12fa5",
-      "timestamp": "2026-09-18T12:05:02.248Z",
-      "userName": "Rh",
-      "action": "RH criou uma nova admissão",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeName": "Candidato Auditoria 4.7",
-      "details": "Admissão cadastrada para o cargo Analista de Auditoria TST-2221 (Tecnologia da Informação - Matriz - Curitiba)"
-    },
-    {
-      "id": "audit-165fee70-5215-4d4f-860f-a5d7d06cbe27",
-      "timestamp": "2026-09-18T12:05:02.240Z",
-      "userName": "Rh",
-      "action": "job_position_document_added",
-      "entityType": "job_position_document",
-      "entityId": "jpd-092b3ab0-a289-42a6-b862-0a4eb63ee8e1",
-      "entityName": "Comprovante de Residência (Analista de Auditoria TST-2221)",
-      "fieldChanged": "inclusão no checklist",
-      "newValue": "Opcional",
-      "details": "Documento \"Comprovante de Residência\" adicionado ao checklist do cargo \"Analista de Auditoria TST-2221\" (Opcional, Ordem: 2) por Rh."
-    },
-    {
-      "id": "audit-156d1c80-042f-44f4-bcc6-8c9de211adf6",
-      "timestamp": "2026-09-18T12:05:02.234Z",
-      "userName": "Rh",
-      "action": "job_position_document_added",
-      "entityType": "job_position_document",
-      "entityId": "jpd-69f580c6-ebc0-4a66-85a8-5f66d5b46323",
-      "entityName": "RG (Analista de Auditoria TST-2221)",
-      "fieldChanged": "inclusão no checklist",
-      "newValue": "Obrigatório",
-      "details": "Documento \"RG\" adicionado ao checklist do cargo \"Analista de Auditoria TST-2221\" (Obrigatório, Ordem: 1) por Rh."
-    },
-    {
-      "id": "audit-f4d935d2-c392-4a07-9546-5a531cbea6bf",
-      "timestamp": "2026-09-18T12:05:02.223Z",
-      "userName": "Rh",
-      "action": "job_position_created",
-      "entityType": "job_position",
-      "entityId": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-      "entityName": "Analista de Auditoria TST-2221",
-      "fieldChanged": "criação",
-      "newValue": "Analista de Auditoria TST-2221",
-      "details": "Cargo \"Analista de Auditoria TST-2221\" (TST-2221) cadastrado com sucesso por Rh."
-    },
-    {
-      "id": "audit-11d4925c-8532-46b6-8390-87a28376ce33",
-      "timestamp": "2026-09-18T12:05:02.211Z",
-      "userName": "Rh",
-      "action": "RH efetuou login no sistema",
-      "details": "Login bem-sucedido via perfil RH (rh@raitz.com.br)"
-    },
     {
       "id": "audit-66a78609-3c3f-45f9-a085-8f1f3bb9630c",
       "timestamp": "2026-09-18T11:58:12.046Z",
@@ -10273,76 +9917,6 @@
   ],
   "notifications": [
     {
-      "id": "notif-352406ef-3bdd-4875-aacb-4bc77197369d",
-      "timestamp": "2026-09-18T12:05:02.333Z",
-      "read": false,
-      "title": "Admissão concluída com sucesso",
-      "message": "A admissão de Candidato Auditoria 4.7 foi formalmente concluída por Rh.",
-      "type": "completed",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
-      "id": "notif-a2aacbf2-8214-4b6b-83fb-f8a11eca9b2c",
-      "timestamp": "2026-09-18T12:05:02.327Z",
-      "read": false,
-      "title": "Documento aprovado",
-      "message": "O documento RG de Candidato Auditoria 4.7 foi aprovado com sucesso.",
-      "type": "document_uploaded",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
-      "id": "notif-293bd1b2-bcfd-45d9-87ba-fbfcb1510561",
-      "timestamp": "2026-09-18T12:05:02.327Z",
-      "read": false,
-      "title": "Admissão concluída!",
-      "message": "O processo admissional de Candidato Auditoria 4.7 foi concluído com 100% dos documentos aprovados.",
-      "type": "completed",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
-      "id": "notif-c58f5ce6-a7d5-4189-9aa6-0ffc3232b9c4",
-      "timestamp": "2026-09-18T12:05:02.321Z",
-      "read": false,
-      "title": "Documento recebido para conferência",
-      "message": "Candidato Auditoria 4.7 enviou o documento: RG",
-      "type": "document_uploaded",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
-      "id": "notif-fcc74855-f033-4945-9bb6-b725f51febbe",
-      "timestamp": "2026-09-18T12:05:02.313Z",
-      "read": false,
-      "title": "Documento pendente de reenvio",
-      "message": "Seu documento RG precisa ser reenviado. Motivo: Documento ilegível",
-      "type": "pending",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
-      "id": "notif-e7ce4988-80dd-4791-a9d6-f102cf278fbd",
-      "timestamp": "2026-09-18T12:05:02.297Z",
-      "read": false,
-      "title": "Documento recebido para conferência",
-      "message": "Candidato Auditoria 4.7 enviou o documento: RG",
-      "type": "document_uploaded",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
-      "id": "notif-b5b34df9-adf9-4656-a3e5-cd5ed1ef986f",
-      "timestamp": "2026-09-18T12:05:02.256Z",
-      "read": false,
-      "title": "Nova admissão criada",
-      "message": "Admissão de Candidato Auditoria 4.7 (Analista de Auditoria TST-2221) foi criada com sucesso com 2 documentos no checklist.",
-      "type": "admission_created",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "link": "/admissoes/adm-7b812661-bf81-430a-b2df-39de2f93de6c"
-    },
-    {
       "id": "notif-a50f133c-b671-481c-9a70-8c218cd1bdbf",
       "timestamp": "2026-09-18T11:58:12.036Z",
       "read": false,
@@ -11271,6 +10845,76 @@
       "type": "document_uploaded",
       "admissionId": "adm-657814ba-ddad-4113-a31a-c3a07abc24da",
       "link": "/admissoes/adm-657814ba-ddad-4113-a31a-c3a07abc24da"
+    },
+    {
+      "id": "notif-297daae6-212a-4ed2-a04a-9caf5e060fa5",
+      "timestamp": "2026-09-16T17:32:26.355Z",
+      "read": false,
+      "title": "Documento pendente de reenvio",
+      "message": "Seu documento RG precisa ser reenviado. Motivo: Documento ilegível",
+      "type": "pending",
+      "admissionId": "adm-657814ba-ddad-4113-a31a-c3a07abc24da",
+      "link": "/admissoes/adm-657814ba-ddad-4113-a31a-c3a07abc24da"
+    },
+    {
+      "id": "notif-1696a886-ce67-497f-9f3d-cfd8cd134448",
+      "timestamp": "2026-09-16T17:32:26.351Z",
+      "read": false,
+      "title": "Documento recebido para conferência",
+      "message": "Funcionário Teste Eletricista enviou o documento: RG",
+      "type": "document_uploaded",
+      "admissionId": "adm-657814ba-ddad-4113-a31a-c3a07abc24da",
+      "link": "/admissoes/adm-657814ba-ddad-4113-a31a-c3a07abc24da"
+    },
+    {
+      "id": "notif-308ebdfd-1f8b-4904-976f-b8c5a39a134d",
+      "timestamp": "2026-09-16T17:32:26.343Z",
+      "read": false,
+      "title": "Documento recebido para conferência",
+      "message": "Funcionário Teste Eletricista enviou o documento: CPF",
+      "type": "document_uploaded",
+      "admissionId": "adm-657814ba-ddad-4113-a31a-c3a07abc24da",
+      "link": "/admissoes/adm-657814ba-ddad-4113-a31a-c3a07abc24da"
+    },
+    {
+      "id": "notif-2f5301dd-33bc-44f7-b749-0ae3a0d6027e",
+      "timestamp": "2026-09-16T17:32:26.319Z",
+      "read": false,
+      "title": "Nova admissão criada",
+      "message": "Admissão de Funcionário Teste Auxiliar (Auxiliar Administrativo) foi criada com sucesso com 5 documentos no checklist.",
+      "type": "admission_created",
+      "admissionId": "adm-57030ef3-218c-48ee-b1cf-497fd1c438d6",
+      "link": "/admissoes/adm-57030ef3-218c-48ee-b1cf-497fd1c438d6"
+    },
+    {
+      "id": "notif-2b5725db-9c1e-493c-82ac-70fb665b35b3",
+      "timestamp": "2026-09-16T17:32:26.297Z",
+      "read": false,
+      "title": "Nova admissão criada",
+      "message": "Admissão de Funcionário Teste Eletricista (Eletricista) foi criada com sucesso com 7 documentos no checklist.",
+      "type": "admission_created",
+      "admissionId": "adm-657814ba-ddad-4113-a31a-c3a07abc24da",
+      "link": "/admissoes/adm-657814ba-ddad-4113-a31a-c3a07abc24da"
+    },
+    {
+      "id": "notif-5d863106-c2ff-4e10-9f34-828fdaeea6df",
+      "timestamp": "2026-09-16T17:32:12.312Z",
+      "read": false,
+      "title": "Documento aprovado",
+      "message": "O documento RG de Funcionário Teste Eletricista foi aprovado com sucesso.",
+      "type": "document_uploaded",
+      "admissionId": "adm-8134d2ae-ef90-4988-82bf-da223409586a",
+      "link": "/admissoes/adm-8134d2ae-ef90-4988-82bf-da223409586a"
+    },
+    {
+      "id": "notif-65554190-0fbb-4d91-8439-4a6d785bf498",
+      "timestamp": "2026-09-16T17:32:12.309Z",
+      "read": false,
+      "title": "Documento aprovado",
+      "message": "O documento RG de Funcionário Teste Eletricista foi aprovado com sucesso.",
+      "type": "document_uploaded",
+      "admissionId": "adm-8134d2ae-ef90-4988-82bf-da223409586a",
+      "link": "/admissoes/adm-8134d2ae-ef90-4988-82bf-da223409586a"
     }
   ],
   "consentRecords": [
@@ -11392,16 +11036,6 @@
       "employeeId": "emp-569b3509-a5d8-4452-9986-0626edce39f5",
       "employeeCpf": "38522332240",
       "timestamp": "2026-09-18T11:58:11.982Z",
-      "termVersion": "1.2-LGPD-2026",
-      "termSummary": "Ciência do tratamento de dados pessoais e documentos estritamente para o processo de admissão (LGPD Art. 7º, V e IX)",
-      "ipAddress": "127.0.0.1"
-    },
-    {
-      "id": "consent-2fe77af7-f066-400e-8d00-a44b35032dd5",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeId": "emp-8c53b02f-628f-4068-b270-7b35a588a94b",
-      "employeeCpf": "57508821440",
-      "timestamp": "2026-09-18T12:05:02.276Z",
       "termVersion": "1.2-LGPD-2026",
       "termSummary": "Ciência do tratamento de dados pessoais e documentos estritamente para o processo de admissão (LGPD Art. 7º, V e IX)",
       "ipAddress": "127.0.0.1"
@@ -11636,17 +11270,6 @@
       "active": true,
       "createdAt": "2026-09-18T11:58:11.929Z",
       "updatedAt": "2026-09-18T11:58:11.929Z",
-      "createdBy": "Rh",
-      "updatedBy": "Rh"
-    },
-    {
-      "id": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-      "name": "Analista de Auditoria TST-2221",
-      "code": "TST-2221",
-      "description": "Cargo criado para auditoria automatizada do Bloco 4.7",
-      "active": true,
-      "createdAt": "2026-09-18T12:05:02.223Z",
-      "updatedAt": "2026-09-18T12:05:02.223Z",
       "createdBy": "Rh",
       "updatedBy": "Rh"
     }
@@ -12391,61 +12014,9 @@
       "updated_at": "2026-09-18T11:58:11.969Z",
       "created_by": "Rh",
       "updated_by": "Rh"
-    },
-    {
-      "id": "jpd-69f580c6-ebc0-4a66-85a8-5f66d5b46323",
-      "job_position_id": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-      "document_type_id": "doc-type-02",
-      "required": true,
-      "sort_order": 1,
-      "instructions": "Digitalize frente e verso legível.",
-      "active": true,
-      "created_at": "2026-09-18T12:05:02.234Z",
-      "updated_at": "2026-09-18T12:05:02.234Z",
-      "created_by": "Rh",
-      "updated_by": "Rh"
-    },
-    {
-      "id": "jpd-092b3ab0-a289-42a6-b862-0a4eb63ee8e1",
-      "job_position_id": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-      "document_type_id": "doc-type-04",
-      "required": false,
-      "sort_order": 2,
-      "instructions": "Comprovante recente dos últimos 90 dias.",
-      "active": true,
-      "created_at": "2026-09-18T12:05:02.240Z",
-      "updated_at": "2026-09-18T12:05:02.240Z",
-      "created_by": "Rh",
-      "updated_by": "Rh"
-    },
-    {
-      "id": "jpd-5a3661ad-0acd-431b-bf8a-48dcdef20932",
-      "job_position_id": "job-b40cf9d6-e860-4196-89a3-7572f2bd12c5",
-      "document_type_id": "doc-type-01",
-      "required": true,
-      "sort_order": 3,
-      "active": true,
-      "created_at": "2026-09-18T12:05:02.263Z",
-      "updated_at": "2026-09-18T12:05:02.263Z",
-      "created_by": "Rh",
-      "updated_by": "Rh"
     }
   ],
   "communicationLogs": [
-    {
-      "id": "comm-85c5c648-1cff-4c9e-a7d7-6e1f2d8773c8",
-      "admissionId": "adm-7b812661-bf81-430a-b2df-39de2f93de6c",
-      "employeeId": "emp-8c53b02f-628f-4068-b270-7b35a588a94b",
-      "userId": "user-rh-ce16be13",
-      "userName": "Rh",
-      "communicationType": "lembrete_geral",
-      "channel": "whatsapp",
-      "templateId": "lembrete_geral",
-      "messagePreview": "Olá Candidato, sua admissão foi concluída com sucesso!",
-      "actionStatus": "abriu_whatsapp",
-      "actionStatusLabel": "Abriu WhatsApp",
-      "createdAt": "2026-09-18T12:05:02.343Z"
-    },
     {
       "id": "comm-5705e910-9f07-45e7-9879-89529ca6b939",
       "admissionId": "adm-9beecec7-b716-40a1-8ff7-420b7c4cea71",
@@ -12604,4 +12175,4 @@
     "updatedAt": "2026-09-18T11:09:38.373Z",
     "updatedBy": "Sistema"
   }
-}
+};
