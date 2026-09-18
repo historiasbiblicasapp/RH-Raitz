@@ -280,7 +280,7 @@ export interface AuditLog {
   userName: string;
   performedBy?: string;
   action: string;
-  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system';
+  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template';
   entityId?: string;
   entityName?: string;
   admissionId?: string;
@@ -858,4 +858,120 @@ export interface ReportDataResponse {
     statuses: string[];
   };
 }
+
+// =========================================================================
+// BLOCO 4.6 — CONFIGURAÇÕES OPERACIONAIS (TIPOS)
+// =========================================================================
+
+export interface SystemGeneralSettings {
+  companyName: string;
+  companyLogoUrl?: string;
+  defaultUnit?: string;
+  timezone?: string;
+  cnpj?: string;
+  systemName?: string;
+  termVersion?: string;
+  supportEmail?: string;
+  supportPhone?: string;
+  businessHours?: string;
+}
+
+export interface SystemAdmissionSettings {
+  allowCancelAdmission: boolean;
+  requireCancellationReason: boolean;
+  allowEditDataAfterCreation: boolean;
+  allowEditRoleAfterCreation: boolean;
+  allowManualCompletion: boolean;
+  upcomingDaysThreshold?: number;
+  inactivityThresholdDays?: number;
+  blockRetroactiveStartDate?: boolean;
+  maxFutureDaysStartDate?: number;
+}
+
+export type DocumentExpirationHandling = 'only_inform' | 'alert_near_expiration' | 'alert_expired';
+
+export interface SystemDocumentSettings {
+  defaultMaxFileSizeMb: number;
+  defaultAllowedFileTypes: string[];
+  requireRhReview?: boolean;
+  allowResubmissionAfterRejection?: boolean;
+  allowMultipleVersions?: boolean;
+  requireRejectionReason: boolean;
+  expirationHandling?: DocumentExpirationHandling;
+  alertExpiringDocumentsDays?: number;
+  notifyEmployeeOnRejection?: boolean;
+  allowUnlimitedResubmission?: boolean;
+  maxResubmissionAttempts?: number;
+}
+
+export interface CommunicationTemplateItem {
+  id: string;
+  key: string; // 'documents_pending' | 'document_rejected' | 'reminder' | 'admission_upcoming' | 'general_notice'
+  name: string;
+  description: string;
+  content: string;
+  active: boolean;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type CommunicationTemplate = CommunicationTemplateItem;
+
+export interface SystemCommunicationSettings {
+  defaultChannel: 'whatsapp' | 'email' | 'manual';
+  sendWelcomeMessageOnCreate: boolean;
+  workingHoursOnly: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+}
+
+export interface SystemNotificationSettings {
+  notifyNewDocumentUploaded?: boolean;
+  notifyDocumentRejected?: boolean;
+  notifyNewPending?: boolean;
+  notifyAdmissionUpcoming?: boolean;
+  notifyAdmissionCompleted?: boolean;
+  recipientsRole?: 'RH' | 'RH_CONFERENCIA' | 'ADMIN';
+  notifyRhOnAllDocumentsSubmitted?: boolean;
+  notifyRhOnDocumentResubmitted?: boolean;
+  alertInactivityDaily?: boolean;
+  digestEmailAddress?: string;
+  digestNotificationHour?: string;
+}
+
+export interface SystemTrackingSettings {
+  upcomingDaysThreshold: number; // Antecedência para destacar próximas admissões (padrão: 7)
+  inactivityDaysThreshold: number; // Considerar sem movimentação após (padrão: 5)
+}
+
+export interface SystemReportSettings {
+  showFullCpf: boolean; // Padrão: false (mascarar por padrão em conformidade com LGPD)
+  allowExportCsv: boolean; // Padrão: true
+  allowExportXlsx?: boolean; // Padrão: false
+  allowPrint?: boolean; // Padrão: true
+  auditExports: boolean; // Padrão: true
+  retentionAuditDays?: number;
+}
+
+export interface SystemSecuritySettings {
+  sessionTimeoutMinutes: number; // Padrão: 480 (8 horas)
+  restrictAccessToRhAndAdmin: boolean; // Padrão: true
+  enforceAuditLogging: boolean; // Padrão: true
+}
+
+export interface SystemSettings {
+  id: string;
+  general: SystemGeneralSettings;
+  admission: SystemAdmissionSettings;
+  documents: SystemDocumentSettings;
+  communication?: SystemCommunicationSettings;
+  communicationTemplates: CommunicationTemplateItem[];
+  notifications: SystemNotificationSettings;
+  tracking: SystemTrackingSettings;
+  reports: SystemReportSettings;
+  security: SystemSecuritySettings;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 

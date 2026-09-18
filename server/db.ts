@@ -52,7 +52,17 @@ import {
   ReportRowPending,
   ReportRowCompleted,
   ReportRowCancelled,
-  ReportDataResponse
+  ReportDataResponse,
+  SystemSettings,
+  SystemGeneralSettings,
+  SystemAdmissionSettings,
+  SystemDocumentSettings,
+  CommunicationTemplateItem,
+  SystemCommunicationSettings,
+  SystemNotificationSettings,
+  SystemTrackingSettings,
+  SystemReportSettings,
+  SystemSecuritySettings
 } from '../src/types/index.ts';
 import { maskCPF } from '../src/lib/cpf.ts';
 
@@ -71,7 +81,123 @@ export interface DatabaseSchema {
   documentTypes: DocumentTypeItem[];
   jobPositionDocuments: JobPositionDocument[];
   communicationLogs: CommunicationLog[];
+  settings?: SystemSettings;
 }
+
+export function generateDefaultSettings(): SystemSettings {
+  const now = new Date().toISOString();
+  return {
+    id: 'system-settings-default',
+    general: {
+      companyName: 'Galvanização Raitz',
+      companyLogoUrl: '/raitz-logo.jpg',
+      defaultUnit: 'Matriz - São Paulo',
+      timezone: 'America/Sao_Paulo'
+    },
+    admission: {
+      allowCancelAdmission: true,
+      requireCancellationReason: true,
+      allowEditDataAfterCreation: true,
+      allowEditRoleAfterCreation: true,
+      allowManualCompletion: true
+    },
+    documents: {
+      defaultMaxFileSizeMb: 10,
+      defaultAllowedFileTypes: ['PDF', 'JPG', 'JPEG', 'PNG'],
+      requireRhReview: true,
+      allowResubmissionAfterRejection: true,
+      allowMultipleVersions: true,
+      requireRejectionReason: true,
+      expirationHandling: 'alert_near_expiration'
+    },
+    communication: {
+      defaultChannel: 'whatsapp',
+      sendWelcomeMessageOnCreate: true,
+      workingHoursOnly: true,
+      quietHoursStart: '20:00',
+      quietHoursEnd: '08:00'
+    },
+    communicationTemplates: [
+      {
+        id: 'tmpl-01',
+        key: 'documents_pending',
+        name: 'Documentos pendentes',
+        description: 'Avisa o colaborador sobre envio de documentos obrigatórios pendentes.',
+        content: `Olá, [NOME].\n\nSua admissão na [EMPRESA] para a posição de [CARGO] está em andamento e ainda existem documentos pendentes de envio.\n\nAcesse seu link de admissão para verificar os documentos necessários e continuar o processo.\n\n[LINK]`,
+        active: true,
+        updatedAt: now,
+        updatedBy: 'Sistema'
+      },
+      {
+        id: 'tmpl-02',
+        key: 'document_rejected',
+        name: 'Documento rejeitado',
+        description: 'Comunica necessidade de correção em documento que não foi aprovado pelo RH.',
+        content: `Olá, [NOME].\n\nUm documento enviado para sua admissão na [EMPRESA] precisa ser corrigido pelo seguinte motivo: [MOTIVO].\n\nAcesse seu link de admissão para verificar a pendência e enviar uma nova versão legível.\n\n[LINK]`,
+        active: true,
+        updatedAt: now,
+        updatedBy: 'Sistema'
+      },
+      {
+        id: 'tmpl-03',
+        key: 'reminder',
+        name: 'Lembrete de admissão',
+        description: 'Lembrete amigável sobre o andamento do processo admissional.',
+        content: `Olá, [NOME].\n\nEste é um lembrete sobre sua admissão na [EMPRESA].\n\nAcesse seu link de admissão para verificar se existem documentos pendentes e continuar o processo com tranquilidade.\n\n[LINK]`,
+        active: true,
+        updatedAt: now,
+        updatedBy: 'Sistema'
+      },
+      {
+        id: 'tmpl-04',
+        key: 'admission_upcoming',
+        name: 'Admissão próxima',
+        description: 'Alerta sobre a proximidade da data prevista de início das atividades.',
+        content: `Olá, [NOME].\n\nSua data prevista de admissão na [EMPRESA] está próxima.\n\nPedimos que acesse seu link de admissão e conclua o envio de todos os documentos solicitados para que nosso RH possa homologar seu cadastro.\n\n[LINK]`,
+        active: true,
+        updatedAt: now,
+        updatedBy: 'Sistema'
+      },
+      {
+        id: 'tmpl-05',
+        key: 'general_notice',
+        name: 'Aviso geral',
+        description: 'Mensagem institucional padrão sobre o processo de admissão.',
+        content: `Olá, [NOME].\n\nAcesse o portal da sua admissão na [EMPRESA] para conferir informações e atualizações sobre o seu processo admissional.\n\n[LINK]`,
+        active: true,
+        updatedAt: now,
+        updatedBy: 'Sistema'
+      }
+    ],
+    notifications: {
+      notifyNewDocumentUploaded: true,
+      notifyDocumentRejected: true,
+      notifyNewPending: true,
+      notifyAdmissionUpcoming: true,
+      notifyAdmissionCompleted: true,
+      recipientsRole: 'RH'
+    },
+    tracking: {
+      upcomingDaysThreshold: 7,
+      inactivityDaysThreshold: 5
+    },
+    reports: {
+      showFullCpf: false,
+      allowExportCsv: true,
+      allowExportXlsx: false,
+      allowPrint: true,
+      auditExports: true
+    },
+    security: {
+      sessionTimeoutMinutes: 480,
+      restrictAccessToRhAndAdmin: true,
+      enforceAuditLogging: true
+    },
+    updatedAt: now,
+    updatedBy: 'Sistema'
+  };
+}
+
 
 function ensureDirectories() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -523,7 +649,8 @@ function generateInitialData(): DatabaseSchema {
     jobPositions: initialJobPositions,
     documentTypes: initialDocTypes,
     jobPositionDocuments: initialJobPositionDocs,
-    communicationLogs: []
+    communicationLogs: [],
+    settings: generateDefaultSettings()
   };
 }
 
@@ -842,6 +969,12 @@ export class Database {
           }
         }
         if (updated) {
+          this.save();
+        }
+
+        // Garante a existência das Configurações Operacionais (Bloco 4.6)
+        if (!this.data.settings) {
+          this.data.settings = generateDefaultSettings();
           this.save();
         }
       } catch (e) {
@@ -4216,6 +4349,10 @@ export class Database {
     let completedCount = 0;
     let attentionCount = 0;
 
+    const settings = this.getSettings();
+    const upcomingThreshold = settings?.tracking?.upcomingDaysThreshold ?? 7;
+    const inactivityThreshold = settings?.tracking?.inactivityDaysThreshold ?? 5;
+
     const allTrackingItems: TrackingItem[] = [];
     const attentionItemsList: TrackingItem[] = [];
 
@@ -4228,15 +4365,15 @@ export class Database {
       const isCompleted = adm.status === 'Concluída';
       const isCancelled = adm.status === 'Cancelada';
 
-      // Cálculo de prazos civis
+      // Cálculo de prazos civis com base nas configurações operacionais
       const daysToExpectedDate = this.calculateDayDifference(adm.employee.expectedStartDate, now);
       const isOverdue = daysToExpectedDate < 0 && !isCompleted && !isCancelled;
       const daysSinceOverdue = isOverdue ? Math.abs(daysToExpectedDate) : 0;
-      const isUpcoming = daysToExpectedDate >= 0 && daysToExpectedDate <= 15 && !isCompleted && !isCancelled;
+      const isUpcoming = daysToExpectedDate >= 0 && daysToExpectedDate <= upcomingThreshold && !isCompleted && !isCancelled;
 
-      // Movimentação recente
+      // Movimentação recente com base no limite configurado de inatividade
       const lastMove = this.getAdmissionLastMovement(adm);
-      const isNoMovement = lastMove.daysAgo >= 3 && !isCompleted && !isCancelled;
+      const isNoMovement = lastMove.daysAgo >= inactivityThreshold && !isCompleted && !isCancelled;
 
       // Status documental
       const docs = adm.documents || [];
@@ -4349,9 +4486,9 @@ export class Database {
         } else if (isUpcoming && adm.progressPercent < 100) {
           needsAttention = true;
           attentionReason = `Admissão prevista para os próximos ${daysToExpectedDate} dia(s) com checklist incompleto (${adm.progressPercent}%)`;
-        } else if (lastMove.daysAgo >= 5) {
+        } else if (lastMove.daysAgo >= inactivityThreshold) {
           needsAttention = true;
-          attentionReason = `Sem movimentação operacional há ${lastMove.daysAgo} dias`;
+          attentionReason = `Sem movimentação operacional há ${lastMove.daysAgo} dias (limite: ${inactivityThreshold}d)`;
         }
       }
 
@@ -5119,6 +5256,12 @@ export class Database {
 
     // 5. Geração de Linhas da Tabela de acordo com o tipo de relatório selecionado
     let rows: any[] = [];
+    const settings = this.getSettings();
+    const showFullCpf = settings?.reports?.showFullCpf ?? false;
+    const formatCpfForReport = (cpf?: string) => {
+      if (!cpf) return '-';
+      return showFullCpf ? cpf : maskCPF(cpf);
+    };
 
     if (reportType === 'admissoes') {
       rows = filteredAdmissions.map(adm => {
@@ -5134,7 +5277,7 @@ export class Database {
           id: adm.id,
           admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
           employeeName: adm.employee.name,
-          employeeCpfMasked: maskCPF(adm.employee.cpf),
+          employeeCpfMasked: formatCpfForReport(adm.employee.cpf),
           employeeEmail: adm.employee.email,
           employeePhone: adm.employee.phone,
           role: adm.employee.role,
@@ -5163,7 +5306,7 @@ export class Database {
             admissionId: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
             employeeName: adm.employee.name,
-            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            employeeCpfMasked: formatCpfForReport(adm.employee.cpf),
             role: adm.employee.role,
             department: adm.employee.department,
             unit: adm.employee.unit,
@@ -5213,7 +5356,7 @@ export class Database {
             admissionId: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
             employeeName: adm.employee.name,
-            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            employeeCpfMasked: formatCpfForReport(adm.employee.cpf),
             role: adm.employee.role,
             department: adm.employee.department,
             unit: adm.employee.unit,
@@ -5241,7 +5384,7 @@ export class Database {
             id: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
             employeeName: adm.employee.name,
-            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            employeeCpfMasked: formatCpfForReport(adm.employee.cpf),
             role: adm.employee.role,
             department: adm.employee.department,
             unit: adm.employee.unit,
@@ -5262,7 +5405,7 @@ export class Database {
             id: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
             employeeName: adm.employee.name,
-            employeeCpfMasked: maskCPF(adm.employee.cpf),
+            employeeCpfMasked: formatCpfForReport(adm.employee.cpf),
             role: adm.employee.role,
             department: adm.employee.department,
             unit: adm.employee.unit,
@@ -5537,6 +5680,264 @@ export class Database {
       fileName,
       totalRows: rows.length
     };
+  }
+
+  // ------------------------------------------------------------------
+  // BLOCO 4.6 — CONFIGURAÇÕES OPERACIONAIS (MÉTODOS DO BANCO)
+  // ------------------------------------------------------------------
+  getSettings(): SystemSettings {
+    if (!this.data.settings) {
+      this.data.settings = generateDefaultSettings();
+      this.save();
+    }
+    if (!this.data.settings.communication) {
+      this.data.settings.communication = {
+        defaultChannel: 'whatsapp',
+        sendWelcomeMessageOnCreate: true,
+        workingHoursOnly: true,
+        quietHoursStart: '20:00',
+        quietHoursEnd: '08:00'
+      };
+      this.save();
+    }
+    return this.data.settings;
+  }
+
+  updateSettings(
+    updates: {
+      general?: Partial<SystemGeneralSettings>;
+      admission?: Partial<SystemAdmissionSettings>;
+      documents?: Partial<SystemDocumentSettings>;
+      communication?: Partial<SystemCommunicationSettings>;
+      communicationTemplates?: CommunicationTemplateItem[];
+      notifications?: Partial<SystemNotificationSettings>;
+      tracking?: Partial<SystemTrackingSettings>;
+      reports?: Partial<SystemReportSettings>;
+      security?: Partial<SystemSecuritySettings>;
+    },
+    userName: string = 'Administrador RH'
+  ): SystemSettings {
+    const current = this.getSettings();
+    const changes: AuditLogChange[] = [];
+
+    if (updates.general) {
+      for (const [key, val] of Object.entries(updates.general)) {
+        if (val !== undefined && (current.general as any)[key] !== val) {
+          changes.push({
+            field: `Geral > ${key}`,
+            label: `Geral: ${key}`,
+            previousValue: (current.general as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.general = { ...current.general, ...updates.general };
+    }
+
+    if (updates.admission) {
+      for (const [key, val] of Object.entries(updates.admission)) {
+        if (val !== undefined && (current.admission as any)[key] !== val) {
+          changes.push({
+            field: `Admissões > ${key}`,
+            label: `Admissões: ${key}`,
+            previousValue: (current.admission as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.admission = { ...current.admission, ...updates.admission };
+    }
+
+    if (updates.documents) {
+      for (const [key, val] of Object.entries(updates.documents)) {
+        if (val !== undefined && JSON.stringify((current.documents as any)[key]) !== JSON.stringify(val)) {
+          changes.push({
+            field: `Documentos > ${key}`,
+            label: `Documentos: ${key}`,
+            previousValue: (current.documents as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.documents = { ...current.documents, ...updates.documents };
+    }
+
+    if (updates.communication) {
+      for (const [key, val] of Object.entries(updates.communication)) {
+        if (val !== undefined && (current.communication as any)?.[key] !== val) {
+          changes.push({
+            field: `Comunicação > ${key}`,
+            label: `Comunicação: ${key}`,
+            previousValue: (current.communication as any)?.[key],
+            newValue: val
+          });
+        }
+      }
+      current.communication = { ...(current.communication || {}), ...updates.communication } as any;
+    }
+
+    if (updates.communicationTemplates && Array.isArray(updates.communicationTemplates)) {
+      changes.push({
+        field: 'Comunicação > Modelos de Mensagem',
+        label: 'Modelos de Comunicação',
+        previousValue: `${current.communicationTemplates.length} modelos configurados`,
+        newValue: `${updates.communicationTemplates.length} modelos configurados`
+      });
+      current.communicationTemplates = updates.communicationTemplates;
+    }
+
+    if (updates.notifications) {
+      for (const [key, val] of Object.entries(updates.notifications)) {
+        if (val !== undefined && (current.notifications as any)[key] !== val) {
+          changes.push({
+            field: `Notificações > ${key}`,
+            label: `Notificações: ${key}`,
+            previousValue: (current.notifications as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.notifications = { ...current.notifications, ...updates.notifications };
+    }
+
+    if (updates.tracking) {
+      for (const [key, val] of Object.entries(updates.tracking)) {
+        if (val !== undefined && (current.tracking as any)[key] !== val) {
+          changes.push({
+            field: `Acompanhamento > ${key}`,
+            label: `Acompanhamento: ${key}`,
+            previousValue: (current.tracking as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.tracking = { ...current.tracking, ...updates.tracking };
+    }
+
+    if (updates.reports) {
+      for (const [key, val] of Object.entries(updates.reports)) {
+        if (val !== undefined && (current.reports as any)[key] !== val) {
+          changes.push({
+            field: `Relatórios > ${key}`,
+            label: `Relatórios: ${key}`,
+            previousValue: (current.reports as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.reports = { ...current.reports, ...updates.reports };
+    }
+
+    if (updates.security) {
+      for (const [key, val] of Object.entries(updates.security)) {
+        if (val !== undefined && (current.security as any)[key] !== val) {
+          changes.push({
+            field: `Segurança > ${key}`,
+            label: `Segurança: ${key}`,
+            previousValue: (current.security as any)[key],
+            newValue: val
+          });
+        }
+      }
+      current.security = { ...current.security, ...updates.security };
+    }
+
+    current.updatedAt = new Date().toISOString();
+    current.updatedBy = userName;
+
+    this.data.settings = current;
+    this.save();
+
+    if (changes.length > 0) {
+      this.addAuditLog({
+        userName,
+        action: 'Alteração de Configurações Operacionais',
+        details: `${changes.length} parâmetro(s) operacional(is) modificado(s): ${changes.map(c => c.field).join(', ')}`,
+        entityType: 'settings',
+        entityId: current.id,
+        changes
+      });
+    }
+
+    return current;
+  }
+
+  resetSettingsToDefault(userName: string = 'Administrador RH'): SystemSettings {
+    const defaults = generateDefaultSettings();
+    defaults.updatedAt = new Date().toISOString();
+    defaults.updatedBy = userName;
+
+    this.data.settings = defaults;
+    this.save();
+
+    this.addAuditLog({
+      userName,
+      action: 'Restauração de Configurações Padrão',
+      details: 'Todas as configurações operacionais foram restauradas para os padrões recomendados do sistema.',
+      entityType: 'settings',
+      entityId: defaults.id
+    });
+
+    return defaults;
+  }
+
+  getCommunicationTemplates(): CommunicationTemplateItem[] {
+    const settings = this.getSettings();
+    return settings.communicationTemplates || [];
+  }
+
+  updateCommunicationTemplate(
+    idOrKey: string,
+    updates: Partial<CommunicationTemplateItem>,
+    userName: string = 'Administrador RH'
+  ): CommunicationTemplateItem {
+    const settings = this.getSettings();
+    const tmplIndex = settings.communicationTemplates.findIndex(t => t.id === idOrKey || t.key === idOrKey);
+    if (tmplIndex === -1) {
+      throw new Error(`Modelo de comunicação com identificador "${idOrKey}" não encontrado.`);
+    }
+
+    const previous = { ...settings.communicationTemplates[tmplIndex] };
+    const updated: CommunicationTemplateItem = {
+      ...previous,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+      updatedBy: userName
+    };
+
+    settings.communicationTemplates[tmplIndex] = updated;
+    settings.updatedAt = new Date().toISOString();
+    settings.updatedBy = userName;
+    this.save();
+
+    const changes: AuditLogChange[] = [];
+    if (updates.content && updates.content !== previous.content) {
+      changes.push({
+        field: 'content',
+        label: `Texto do Modelo (${updated.name})`,
+        previousValue: previous.content.slice(0, 80) + '...',
+        newValue: updates.content.slice(0, 80) + '...'
+      });
+    }
+    if (updates.active !== undefined && updates.active !== previous.active) {
+      changes.push({
+        field: 'active',
+        label: `Status Ativo (${updated.name})`,
+        previousValue: previous.active,
+        newValue: updates.active
+      });
+    }
+
+    this.addAuditLog({
+      userName,
+      action: 'Atualização de Modelo de Comunicação',
+      details: `Modelo de mensagem "${updated.name}" atualizado por ${userName}.`,
+      entityType: 'communication_template',
+      entityId: updated.id,
+      changes: changes.length > 0 ? changes : undefined
+    });
+
+    return updated;
   }
 }
 

@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext.tsx';
 import { safeFetchJson } from '../lib/api.ts';
 
 export const Layout: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const location = useLocation();
@@ -31,7 +31,7 @@ export const Layout: React.FC = () => {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated || (user && user.role === 'FUNCIONARIO')) {
     return <Navigate to="/login" replace />;
   }
 

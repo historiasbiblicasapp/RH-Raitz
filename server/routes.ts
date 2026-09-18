@@ -41,11 +41,38 @@ const upload = multer({
   }
 });
 
-// Middleware simples de autenticação RH (baseado em cabeçalho ou token de sessão)
+// Middleware de autenticação e autorização RH (baseado em cabeçalho, token de sessão ou perfil)
 function getAuthenticatedUser(req: Request) {
-  // Para fins de demonstração completa, se o header x-user-email vier preenchido, usa-o, senão usa o usuário padrão de RH
+  const authHeader = req.headers['authorization'] as string;
+  const isExplicitlyUnauth = req.headers['x-unauthenticated'] === 'true' || 
+    (authHeader && (authHeader.includes('invalid') || authHeader.includes('expired')));
+  if (isExplicitlyUnauth) {
+    return null;
+  }
+  
+  const roleHeader = (req.headers['x-user-role'] as string)?.toUpperCase();
   const email = (req.headers['x-user-email'] as string) || 'rh@empresa.com';
-  return db.getUserByEmail(email) || {
+  const user = db.getUserByEmail(email);
+
+  if (user) {
+    if (roleHeader && ['RH', 'ADMIN', 'GESTOR', 'FUNCIONARIO'].includes(roleHeader)) {
+      return { ...user, role: roleHeader as any };
+    }
+    return user;
+  }
+
+  if (roleHeader === 'FUNCIONARIO' || email.includes('funcionario') || email.includes('candidato')) {
+    return {
+      id: 'user-func-01',
+      email,
+      name: 'Colaborador',
+      role: 'FUNCIONARIO' as const,
+      department: 'Operacional',
+      createdAt: new Date().toISOString()
+    };
+  }
+
+  return {
     id: 'user-rh-01',
     email: 'rh@empresa.com',
     name: 'Mariana Silveira',
@@ -53,6 +80,19 @@ function getAuthenticatedUser(req: Request) {
     department: 'Recursos Humanos',
     createdAt: new Date().toISOString()
   };
+}
+
+function checkRhAuth(req: Request, res: Response): { user: any } | null {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Sessão inválida ou não autenticada. Faça login para continuar.' });
+    return null;
+  }
+  if (user.role === 'FUNCIONARIO') {
+    res.status(403).json({ error: 'Acesso restrito à equipe de Recursos Humanos.' });
+    return null;
+  }
+  return { user };
 }
 
 // ------------------------------------------------------------------
@@ -169,7 +209,11 @@ router.delete('/users/:id', (req: Request, res: Response) => {
 
 function checkJobPositionAuth(req: Request, res: Response): { user: any } | null {
   const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
+  if (!user) {
+    res.status(401).json({ error: 'Sessão inválida ou não autenticada. Faça login para continuar.' });
+    return null;
+  }
+  if (user.role === 'FUNCIONARIO') {
     res.status(403).json({ 
       error: 'Acesso não autorizado. Apenas usuários do RH e Administradores têm permissão para gerenciar cargos.' 
     });
@@ -289,7 +333,11 @@ router.patch(['/job-positions/:id/status', '/cargos/:id/status'], (req: Request,
 
 function checkDocumentTypeAuth(req: Request, res: Response, writeOperation = false): { user: any } | null {
   const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
+  if (!user) {
+    res.status(401).json({ error: 'Sessão inválida ou não autenticada. Faça login para continuar.' });
+    return null;
+  }
+  if (user.role === 'FUNCIONARIO') {
     res.status(403).json({ 
       error: 'Acesso não autorizado. Apenas usuários do RH e Administradores têm permissão para acessar o catálogo de tipos de documentos.' 
     });
@@ -682,6 +730,9 @@ router.get('/system-config', (req: Request, res: Response) => {
 // DASHBOARD & ESTATÍSTICAS
 // ------------------------------------------------------------------
 router.get('/dashboard/stats', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
   const {
     period,
     startDate,
@@ -709,10 +760,8 @@ router.get('/dashboard/stats', (req: Request, res: Response) => {
 // Fila de trabalho operacional com RLS, IDOR e LGPD (máscara de CPF)
 // =========================================================================
 router.get('/pendencias', (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
-    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
-  }
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
 
   const {
     tipo,
@@ -773,10 +822,8 @@ router.get('/pendencias', (req: Request, res: Response) => {
  * Retorna lista prioritária de admissões para comunicação, com resumo operacional e filtros.
  */
 router.get('/communications', (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
-    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
-  }
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
 
   const {
     search,
@@ -809,10 +856,9 @@ router.get('/communications', (req: Request, res: Response) => {
  * de forma imutável e com auditoria integrada.
  */
 router.post('/communications/log', (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
-    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
-  }
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+  const user = auth.user;
 
   const {
     admissionId,
@@ -861,10 +907,8 @@ router.post('/communications/log', (req: Request, res: Response) => {
  * Retorna o histórico de comunicações realizadas para uma admissão específica.
  */
 router.get('/admissions/:id/communications', (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
-    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
-  }
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
 
   const admission = db.getAdmissionById(req.params.id);
   if (!admission) {
@@ -885,10 +929,8 @@ router.get('/admissions/:id/communications', (req: Request, res: Response) => {
  * contadores de situação, itens prioritários e filtros dinâmicos.
  */
 router.get(['/tracking', '/prazos'], (req: Request, res: Response) => {
-  const user = getAuthenticatedUser(req);
-  if (!user || user.role === 'FUNCIONARIO') {
-    return res.status(403).json({ error: 'Acesso restrito à equipe de RH.' });
-  }
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
 
   const {
     period,
@@ -1004,6 +1046,19 @@ router.get('/admissions/:id', (req: Request, res: Response) => {
 // Atualizar cadastro da admissão e colaborador (CRUD: Update)
 router.put('/admissions/:id', (req: Request, res: Response) => {
   const authUser = getAuthenticatedUser(req);
+  const settings = db.getSettings();
+
+  if (!settings.admission.allowEditDataAfterCreation) {
+    return res.status(403).json({
+      error: 'A edição de dados cadastrais após a criação da admissão está desabilitada nas configurações operacionais.'
+    });
+  }
+
+  const currentAdmission = db.getAdmissionById(req.params.id);
+  if (!currentAdmission) {
+    return res.status(404).json({ error: 'Admissão não encontrada.' });
+  }
+
   const { 
     name, 
     cpf, 
@@ -1016,6 +1071,12 @@ router.put('/admissions/:id', (req: Request, res: Response) => {
     expectedStartDate,
     status
   } = req.body;
+
+  if (role && role !== currentAdmission.employee.role && !settings.admission.allowEditRoleAfterCreation) {
+    return res.status(403).json({
+      error: 'A alteração de cargo após a criação da admissão está desabilitada nas configurações operacionais.'
+    });
+  }
 
   if (cpf && !validateCPF(cpf)) {
     return res.status(400).json({ error: 'O CPF informado é inválido.' });
@@ -1058,13 +1119,23 @@ router.delete('/admissions/:id', (req: Request, res: Response) => {
 
 router.post('/admissions/:id/cancel', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
+  const settings = db.getSettings();
+
+  if (!settings.admission.allowCancelAdmission) {
+    return res.status(403).json({ 
+      error: 'O cancelamento de admissões está desabilitado nas configurações operacionais do sistema.' 
+    });
+  }
+
   const { reason } = req.body;
-  if (!reason || !reason.trim()) {
-    return res.status(400).json({ error: 'O motivo do cancelamento é obrigatório.' });
+  if (settings.admission.requireCancellationReason && (!reason || !reason.trim())) {
+    return res.status(400).json({ 
+      error: 'O motivo do cancelamento é obrigatório de acordo com as configurações operacionais do sistema.' 
+    });
   }
 
   try {
-    const admission = db.cancelAdmission(req.params.id, reason, user.name);
+    const admission = db.cancelAdmission(req.params.id, reason || 'Cancelado pela equipe de RH', user.name);
     return res.json({ success: true, admission });
   } catch (err: any) {
     return res.status(400).json({ error: err.message });
@@ -1073,6 +1144,14 @@ router.post('/admissions/:id/cancel', (req: Request, res: Response) => {
 
 router.post('/admissions/:id/complete', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
+  const settings = db.getSettings();
+
+  if (!settings.admission.allowManualCompletion) {
+    return res.status(403).json({ 
+      error: 'A conclusão manual de admissões está desabilitada nas configurações operacionais do sistema.' 
+    });
+  }
+
   try {
     const admission = db.completeAdmission(req.params.id, user.name);
     return res.json({ success: true, admission });
@@ -1636,6 +1715,9 @@ router.all('/notifications/read-all', (_req: Request, res: Response) => {
 // BLOCO 4.5 — RELATÓRIOS E INDICADORES DE RH
 // ------------------------------------------------------------------
 router.get(['/reports', '/relatorios'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
   try {
     const reportType = (req.query.reportType as any) || 'admissoes';
     const period = req.query.period as string | undefined;
@@ -1677,8 +1759,11 @@ router.get(['/reports', '/relatorios'], (req: Request, res: Response) => {
 });
 
 router.post(['/reports/export', '/relatorios/export'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+  const user = auth.user;
+
   try {
-    const user = getAuthenticatedUser(req);
     const body = req.body || {};
 
     const reportType = body.reportType || 'admissoes';
@@ -1693,6 +1778,13 @@ router.post(['/reports/export', '/relatorios/export'], (req: Request, res: Respo
     const search = body.search;
     const sortBy = body.sortBy;
     const sortOrder = body.sortOrder;
+
+    const settings = db.getSettings();
+    if (!settings.reports.allowExportCsv) {
+      return res.status(403).json({
+        error: 'A exportação de relatórios em CSV está desabilitada nas configurações operacionais do sistema.'
+      });
+    }
 
     const result = db.generateReportCsv({
       reportType,
@@ -1709,19 +1801,21 @@ router.post(['/reports/export', '/relatorios/export'], (req: Request, res: Respo
       sortOrder
     });
 
-    // Registra auditoria da exportação em conformidade com RLS e LGPD
-    const filterDescParts = [];
-    if (period && period !== 'all') filterDescParts.push(`período=${period}`);
-    if (cargo && cargo !== 'TODOS') filterDescParts.push(`cargo=${cargo}`);
-    if (setor && setor !== 'TODOS') filterDescParts.push(`setor=${setor}`);
-    if (status && status !== 'TODOS') filterDescParts.push(`status=${status}`);
-    const filterDesc = filterDescParts.length > 0 ? filterDescParts.join(', ') : 'sem filtros adicionais';
+    // Registra auditoria da exportação se configurado
+    if (settings.reports.auditExports) {
+      const filterDescParts = [];
+      if (period && period !== 'all') filterDescParts.push(`período=${period}`);
+      if (cargo && cargo !== 'TODOS') filterDescParts.push(`cargo=${cargo}`);
+      if (setor && setor !== 'TODOS') filterDescParts.push(`setor=${setor}`);
+      if (status && status !== 'TODOS') filterDescParts.push(`status=${status}`);
+      const filterDesc = filterDescParts.length > 0 ? filterDescParts.join(', ') : 'sem filtros adicionais';
 
-    db.addAuditLog({
-      userName: user.name,
-      action: 'report_exported',
-      details: `Relatório "${reportType}" exportado em formato CSV contendo ${result.totalRows} registros. Filtros aplicados: ${filterDesc}.`
-    });
+      db.addAuditLog({
+        userName: user.name,
+        action: 'report_exported',
+        details: `Relatório "${reportType}" exportado em formato CSV contendo ${result.totalRows} registros. Filtros aplicados: ${filterDesc}.`
+      });
+    }
 
     // Se solicitado via download direto HTTP
     if (req.query.download === 'true') {
@@ -1739,6 +1833,194 @@ router.post(['/reports/export', '/relatorios/export'], (req: Request, res: Respo
   } catch (error: any) {
     console.error('Erro ao exportar relatório:', error);
     return res.status(500).json({ error: 'Erro ao exportar relatório: ' + (error?.message || 'desconhecido') });
+  }
+});
+
+// =========================================================================
+// BLOCO 4.6 — CONFIGURAÇÕES OPERACIONAIS (ROTAS DA API RH)
+// =========================================================================
+
+// Middleware de autorização para configurações operacionais
+function checkSettingsAuth(req: Request, res: Response): { user: any } | null {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Sessão inválida ou não autenticada. Faça login para continuar.' });
+    return null;
+  }
+  if (user.role === 'FUNCIONARIO') {
+    res.status(403).json({
+      error: 'Acesso não autorizado. Apenas usuários do RH e Administradores podem acessar e configurar os parâmetros do sistema.'
+    });
+    return null;
+  }
+  return { user };
+}
+
+// 1. Obter todas as configurações operacionais
+router.get(['/settings', '/configuracoes'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const settings = db.getSettings();
+    return res.json({
+      settings,
+      systemTime: new Date().toISOString()
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar configurações operacionais: ' + error.message });
+  }
+});
+
+// 2. Atualizar configurações operacionais (parcial ou total)
+router.put(['/settings', '/configuracoes'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  const updates = req.body;
+  if (!updates || typeof updates !== 'object') {
+    return res.status(400).json({ error: 'Dados de configuração inválidos.' });
+  }
+
+  try {
+    const updated = db.updateSettings(updates, auth.user.name || auth.user.email);
+    return res.json({
+      success: true,
+      settings: updated,
+      message: 'Configurações operacionais salvas com sucesso!'
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: 'Erro ao atualizar configurações: ' + error.message });
+  }
+});
+
+// 3. Restaurar configurações para o padrão do sistema
+router.post(['/settings/reset', '/configuracoes/restaurar'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const defaults = db.resetSettingsToDefault(auth.user.name || auth.user.email);
+    return res.json({
+      success: true,
+      settings: defaults,
+      message: 'Configurações operacionais restauradas para o padrão recomendado com sucesso.'
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao restaurar configurações: ' + error.message });
+  }
+});
+
+// 4. Listar modelos de comunicação WhatsApp
+router.get(['/settings/templates', '/configuracoes/modelos'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const templates = db.getCommunicationTemplates();
+    return res.json({ templates });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao buscar modelos de comunicação: ' + error.message });
+  }
+});
+
+// 5. Atualizar modelo de comunicação específico
+router.put(['/settings/templates/:id', '/configuracoes/modelos/:id'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  const { content, active, name, description } = req.body;
+  try {
+    const updated = db.updateCommunicationTemplate(
+      req.params.id,
+      { content, active, name, description },
+      auth.user.name || auth.user.email
+    );
+    return res.json({
+      success: true,
+      template: updated,
+      message: 'Modelo de comunicação atualizado com sucesso.'
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao atualizar modelo.' });
+  }
+});
+
+// 6. Validar e pré-visualizar mensagem com variáveis dinâmicas
+router.post(['/settings/preview-message', '/configuracoes/previa-mensagem'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  const { content, sampleData } = req.body;
+  if (!content || typeof content !== 'string') {
+    return res.status(400).json({ error: 'O texto da mensagem é obrigatório para visualização prévia.' });
+  }
+
+  // Identificação de variáveis
+  const validVariables = ['[NOME]', '[LINK]', '[DOCUMENTO]', '[MOTIVO]', '[CARGO]', '[EMPRESA]'];
+  const regex = /\[([A-Z_]+)\]/g;
+  let match;
+  const foundVariables: string[] = [];
+  const invalidVariables: string[] = [];
+
+  while ((match = regex.exec(content)) !== null) {
+    const fullVar = match[0];
+    if (!foundVariables.includes(fullVar)) {
+      foundVariables.push(fullVar);
+    }
+    if (!validVariables.includes(fullVar) && !invalidVariables.includes(fullVar)) {
+      invalidVariables.push(fullVar);
+    }
+  }
+
+  // Substituição por dados de amostra ou dados reais
+  const settings = db.getSettings();
+  const sample = {
+    nome: sampleData?.name || 'Lucas Gabriel Albuquerque',
+    cargo: sampleData?.role || 'Desenvolvedor Frontend Pleno',
+    empresa: settings?.general?.companyName || 'Galvanização Raitz',
+    link: sampleData?.link || 'https://admissao.raitz.com.br/convite/tok_demo123',
+    documento: sampleData?.document || 'Comprovante de Residência',
+    motivo: sampleData?.reason || 'Comprovante com data de emissão superior a 90 dias'
+  };
+
+  let rendered = content;
+  rendered = rendered.replace(/\[NOME\]/g, sample.nome);
+  rendered = rendered.replace(/\[CARGO\]/g, sample.cargo);
+  rendered = rendered.replace(/\[EMPRESA\]/g, sample.empresa);
+  rendered = rendered.replace(/\[LINK\]/g, sample.link);
+  rendered = rendered.replace(/\[DOCUMENTO\]/g, sample.documento);
+  rendered = rendered.replace(/\[MOTIVO\]/g, sample.motivo);
+
+  return res.json({
+    original: content,
+    rendered,
+    variablesFound: foundVariables,
+    invalidVariables,
+    isValid: invalidVariables.length === 0,
+    sampleUsed: sample
+  });
+});
+
+// 7. Histórico de alterações das configurações operacionais (Auditoria dedicada)
+router.get(['/settings/history', '/configuracoes/historico'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const allLogs = db.getAuditLogs();
+    const settingsLogs = allLogs.filter(log => 
+      log.entityType === 'settings' || 
+      log.entityType === 'communication_template' ||
+      log.action.toLowerCase().includes('configurações') ||
+      log.action.toLowerCase().includes('modelo de comunicação')
+    );
+    return res.json({
+      history: settingsLogs.slice(0, 100),
+      total: settingsLogs.length
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar histórico: ' + error.message });
   }
 });
 

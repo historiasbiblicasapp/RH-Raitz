@@ -1,45 +1,77 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
-  ShieldCheck, 
-  Database, 
-  FileCheck, 
-  Check, 
-  Save, 
-  Users, 
-  UserPlus, 
-  Mail, 
   Building2, 
-  Lock, 
-  X,
-  User,
-  Edit2,
-  Trash2
+  UserCheck, 
+  Files, 
+  MessageSquare, 
+  Bell, 
+  BarChart3, 
+  Users, 
+  History, 
+  Save, 
+  RotateCcw, 
+  Check, 
+  AlertCircle,
+  ShieldCheck,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
-import { User as UserType } from '../types/index.ts';
-import { EditUserModal } from '../components/EditUserModal.tsx';
-import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
+import { SystemSettings, User as UserType } from '../types/index.ts';
+import { GeneralSettingsTab } from '../components/settings/GeneralSettingsTab.tsx';
+import { AdmissionSettingsTab } from '../components/settings/AdmissionSettingsTab.tsx';
+import { DocumentSettingsTab } from '../components/settings/DocumentSettingsTab.tsx';
+import { CommunicationSettingsTab } from '../components/settings/CommunicationSettingsTab.tsx';
+import { NotificationSettingsTab } from '../components/settings/NotificationSettingsTab.tsx';
+import { ReportsSettingsTab } from '../components/settings/ReportsSettingsTab.tsx';
+import { UsersSettingsTab } from '../components/settings/UsersSettingsTab.tsx';
+import { AuditHistoryTab } from '../components/settings/AuditHistoryTab.tsx';
+
+type TabKey = 
+  | 'general' 
+  | 'admission' 
+  | 'documents' 
+  | 'communication' 
+  | 'notifications' 
+  | 'reports' 
+  | 'users' 
+  | 'history';
 
 export const SettingsPage: React.FC = () => {
-  const [termVersion, setTermVersion] = useState('1.0-2025');
-  const [companyName, setCompanyName] = useState('Raitz Comércio e Serviços');
-  const [saved, setSaved] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabKey>('general');
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  // Modal de confirmação para restaurar padrões
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Usuários do RH
   const [users, setUsers] = useState<UserType[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
-  const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newDepartment, setNewDepartment] = useState('Recursos Humanos');
-  const [newRole, setNewRole] = useState<'RH' | 'ADMIN' | 'FUNCIONARIO'>('RH');
-  const [userSuccessMessage, setUserSuccessMessage] = useState<string | null>(null);
-  const [userErrorMessage, setUserErrorMessage] = useState<string | null>(null);
 
-  // Edição e Exclusão
-  const [editingUser, setEditingUser] = useState<UserType | null>(null);
-  const [userToDelete, setUserToDelete] = useState<UserType | null>(null);
-  const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const fetchSettings = async () => {
+    try {
+      setLoading(true);
+      setErrorMessage(null);
+      const res = await fetch('/api/settings');
+      if (!res.ok) {
+        throw new Error('Falha ao carregar configurações operacionais.');
+      }
+      const data = await res.json();
+      setSettings(data.settings);
+      setHasChanges(false);
+    } catch (err: any) {
+      console.error('Erro ao buscar configurações:', err);
+      setErrorMessage(err.message || 'Não foi possível carregar as configurações operacionais.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -57,391 +89,329 @@ export const SettingsPage: React.FC = () => {
   };
 
   useEffect(() => {
+    fetchSettings();
     fetchUsers();
   }, []);
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-  };
-
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setUserErrorMessage(null);
-    setUserSuccessMessage(null);
-
-    if (!newName.trim() || !newEmail.trim()) {
-      setUserErrorMessage('Nome e e-mail são obrigatórios.');
-      return;
-    }
+  const handleSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!settings) return;
 
     try {
-      const res = await fetch('/api/users', {
-        method: 'POST',
+      setSaving(true);
+      setErrorMessage(null);
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newName.trim(),
-          email: newEmail.trim().toLowerCase(),
-          department: newDepartment.trim() || 'Recursos Humanos',
-          role: 'RH'
-        })
+        body: JSON.stringify(settings)
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Erro ao cadastrar usuário.');
+        throw new Error(data.error || 'Falha ao salvar configurações operacionais.');
       }
 
-      setUserSuccessMessage(`Usuário ${newName} cadastrado com sucesso!`);
-      setNewName('');
-      setNewEmail('');
-      setNewDepartment('Recursos Humanos');
-      setNewRole('RH');
-      setShowAddUserModal(false);
-      fetchUsers();
-      setTimeout(() => setUserSuccessMessage(null), 4000);
+      setSettings(data.settings);
+      setHasChanges(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err: any) {
-      setUserErrorMessage(err.message || 'Erro ao criar usuário.');
-    }
-  };
-
-  const handleDeleteUser = async () => {
-    if (!userToDelete) return;
-
-    try {
-      setIsDeletingUser(true);
-      const res = await fetch(`/api/users/${userToDelete.id}`, {
-        method: 'DELETE'
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Erro ao excluir usuário.');
-      }
-
-      setUserSuccessMessage(`Usuário ${userToDelete.name} removido com sucesso.`);
-      setUserToDelete(null);
-      fetchUsers();
-      setTimeout(() => setUserSuccessMessage(null), 4000);
-    } catch (err: any) {
-      setUserErrorMessage(err.message || 'Falha ao remover usuário.');
+      console.error('Erro ao salvar:', err);
+      setErrorMessage(err.message || 'Erro ao persistir configurações.');
     } finally {
-      setIsDeletingUser(false);
+      setSaving(false);
     }
   };
+
+  const handleResetToDefault = async () => {
+    try {
+      setIsResetting(true);
+      setErrorMessage(null);
+      const res = await fetch('/api/settings/reset', {
+        method: 'POST'
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha ao restaurar configurações padrão.');
+      }
+
+      setSettings(data.settings);
+      setHasChanges(false);
+      setShowResetConfirm(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
+    } catch (err: any) {
+      console.error('Erro ao restaurar:', err);
+      setErrorMessage(err.message || 'Erro ao restaurar configurações padrão.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const updateSubSettings = <K extends keyof SystemSettings>(section: K, updates: Partial<SystemSettings[K]>) => {
+    if (!settings) return;
+    setSettings(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        [section]: {
+          ...(prev[section] as any),
+          ...updates
+        }
+      };
+    });
+    setHasChanges(true);
+  };
+
+  const tabs: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+    { key: 'general', label: 'Empresa & Geral', icon: Building2 },
+    { key: 'admission', label: 'Fluxo de Admissão', icon: UserCheck },
+    { key: 'documents', label: 'Documentos', icon: Files },
+    { key: 'communication', label: 'Comunicação WhatsApp', icon: MessageSquare },
+    { key: 'notifications', label: 'Alertas Operacionais', icon: Bell },
+    { key: 'reports', label: 'Relatórios & LGPD', icon: BarChart3 },
+    { key: 'users', label: 'Equipe de RH', icon: Users },
+    { key: 'history', label: 'Histórico & Auditoria', icon: History }
+  ];
+
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto py-16 text-center space-y-3">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+        <p className="text-xs font-semibold text-slate-600">Carregando configurações operacionais do sistema...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center gap-3">
-        <img
-          src="/raitz-logo.jpg"
-          alt="Logo Raitz"
-          referrerPolicy="no-referrer"
-          className="w-10 h-10 rounded-xl object-cover shadow-xs border border-slate-200 shrink-0"
-        />
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Configurações do Sistema</h1>
-          <p className="text-xs text-slate-500">
-            Gerenciamento de parâmetros operacionais, segurança da informação e termos LGPD.
-          </p>
+    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      {/* Cabeçalho da Página */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <img
+            src="/raitz-logo.jpg"
+            alt="Logo Raitz"
+            referrerPolicy="no-referrer"
+            className="w-11 h-11 rounded-2xl object-cover shadow-xs border border-slate-200 shrink-0"
+          />
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-slate-900">Configurações Operacionais</h1>
+              <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full">
+                Bloco 4.6
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Painel centralizado de regras operacionais, prazos internos, modelos de WhatsApp e segurança.
+            </p>
+          </div>
+        </div>
+
+        {/* Ações Globais */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowResetConfirm(true)}
+            className="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-semibold px-3 py-2 rounded-xl transition-colors cursor-pointer shadow-xs"
+            title="Restaurar parâmetros recomendados padrão"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+            <span className="hidden sm:inline">Restaurar Padrões</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSave()}
+            disabled={saving}
+            className={`flex items-center gap-2 text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-xs transition-colors cursor-pointer ${
+              hasChanges 
+                ? 'bg-blue-600 hover:bg-blue-700 ring-2 ring-blue-400/30' 
+                : 'bg-slate-800 hover:bg-slate-900'
+            }`}
+          >
+            {saving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            <span>{saving ? 'Salvando...' : 'Salvar Alterações'}</span>
+          </button>
         </div>
       </div>
 
-      {saved && (
-        <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2">
-          <Check className="w-4 h-4 text-emerald-600" />
-          <span>Configurações salvas com sucesso!</span>
+      {/* Alerta de Sucesso */}
+      {saveSuccess && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>Configurações operacionais salvas e auditadas com sucesso!</span>
+          </div>
+          <span className="text-[11px] text-emerald-600 font-normal">
+            Atualizado em: {new Date().toLocaleTimeString('pt-BR')}
+          </span>
         </div>
       )}
 
-      <form onSubmit={handleSave} className="space-y-6">
-        {/* Bloco Empresa */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <Settings className="w-4 h-4 text-blue-600" />
-            <span>Dados da Empresa Empregadora</span>
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1.5">Razão Social / Nome de Exibição</label>
-              <input
-                type="text"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-700 mb-1.5">Versão Atual do Termo LGPD</label>
-              <input
-                type="text"
-                value={termVersion}
-                onChange={(e) => setTermVersion(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-600"
-              />
-            </div>
-          </div>
+      {/* Alerta de Erro */}
+      {errorMessage && (
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-xs">
+          <AlertCircle className="w-4 h-4 text-rose-600" />
+          <span>{errorMessage}</span>
         </div>
+      )}
 
-        {/* Bloco LGPD e Segurança */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>Políticas de Segurança e LGPD</span>
-          </h2>
-
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 text-xs space-y-2 text-slate-600">
-            <p className="font-semibold text-slate-800">Diretrizes Implementadas:</p>
-            <ul className="list-disc pl-5 space-y-1 text-slate-600">
-              <li>Mascaramento visual de CPF em todas as listagens de tela para proteção contra visualizações indevidas.</li>
-              <li>Links de acesso com token criptográfico seguro e único por admissão (sem uso de CPF como senha).</li>
-              <li>Armazenamento privativo em disco isolado ou bucket restrito com validação de tipos MIME (PDF, JPG, PNG).</li>
-              <li>Histórico de auditoria com data, hora, IP/agente e detalhe de cada aprovação ou recusa.</li>
-            </ul>
-          </div>
+      {/* Barra de Abas de Navegação */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-1.5 shadow-xs overflow-x-auto">
+        <div className="flex space-x-1 min-w-max">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-slate-500'}`} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
+      </div>
 
-        {/* Bloco Gestão de Usuários do RH */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Users className="w-4 h-4 text-blue-600" />
-              <span>Equipe e Usuários de Acesso ao RH</span>
-            </h2>
-            <button
-              type="button"
-              onClick={() => setShowAddUserModal(true)}
-              className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-semibold px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Novo Usuário de RH</span>
-            </button>
-          </div>
-
-          {userSuccessMessage && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-medium flex items-center gap-2">
-              <Check className="w-4 h-4 text-emerald-600" />
-              <span>{userSuccessMessage}</span>
-            </div>
+      {/* Conteúdo da Aba Ativa */}
+      {settings && (
+        <div>
+          {activeTab === 'general' && (
+            <GeneralSettingsTab
+              settings={settings.general}
+              onChange={(updates) => updateSubSettings('general', updates)}
+            />
           )}
 
-          {userErrorMessage && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-medium">
-              {userErrorMessage}
-            </div>
+          {activeTab === 'admission' && (
+            <AdmissionSettingsTab
+              settings={settings.admission}
+              onChange={(updates) => updateSubSettings('admission', updates)}
+            />
           )}
 
-          <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-            {loadingUsers ? (
-              <div className="p-4 text-center text-xs text-slate-400">Carregando usuários...</div>
-            ) : users.length === 0 ? (
-              <div className="p-4 text-center text-xs text-slate-400">Nenhum usuário cadastrado.</div>
-            ) : (
-              users.map((u) => (
-                <div key={u.id} className="p-3.5 bg-slate-50/50 hover:bg-slate-50 flex items-center justify-between transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center">
-                      {u.name ? u.name.charAt(0).toUpperCase() : 'U'}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-900">{u.name}</span>
-                        <span className="text-[10px] bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded-full">
-                          {u.role || 'RH'}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
-                        <span>{u.email}</span>
-                        <span>•</span>
-                        <span>{u.department || 'Recursos Humanos'}</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-slate-400 bg-white px-2 py-1 rounded-md border border-slate-200 hidden sm:inline-block">
-                      Senha: senha123
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setEditingUser(u)}
-                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                      title="Editar usuário"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUserToDelete(u)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                      title="Excluir usuário"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          {activeTab === 'documents' && (
+            <DocumentSettingsTab
+              settings={settings.documents}
+              onChange={(updates) => updateSubSettings('documents', updates)}
+            />
+          )}
+
+          {activeTab === 'communication' && (
+            <CommunicationSettingsTab
+              settings={settings.communication}
+              companyName={settings.general?.companyName || 'Galvanização Raitz'}
+              onChange={(updates) => updateSubSettings('communication', updates)}
+            />
+          )}
+
+          {activeTab === 'notifications' && (
+            <NotificationSettingsTab
+              settings={settings.notifications}
+              onChange={(updates) => updateSubSettings('notifications', updates)}
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <ReportsSettingsTab
+              settings={settings.reports}
+              onChange={(updates) => updateSubSettings('reports', updates)}
+            />
+          )}
+
+          {activeTab === 'users' && (
+            <UsersSettingsTab
+              users={users}
+              loadingUsers={loadingUsers}
+              onRefreshUsers={fetchUsers}
+            />
+          )}
+
+          {activeTab === 'history' && (
+            <AuditHistoryTab />
+          )}
         </div>
+      )}
 
-        {/* Bloco Checklist de Documentos Padrão */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-            <FileCheck className="w-4 h-4 text-blue-600" />
-            <span>Documentos Obrigatórios da Admissão</span>
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            {['CPF', 'RG', 'Carteira de Trabalho (CTPS)', 'Comprovante de residência', 'Diploma ou Comprovante de escolaridade'].map((doc) => (
-              <div key={doc} className="flex items-center gap-2 p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-800 font-medium">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{doc}</span>
-              </div>
-            ))}
+      {/* Barra Flutuante de Salvamento se houver alterações pendentes */}
+      {hasChanges && (
+        <div className="fixed bottom-6 right-6 z-40 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-bottom-3 duration-200">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span className="font-semibold">Existem alterações operacionais não salvas.</span>
           </div>
-        </div>
-
-        <div className="flex justify-end">
           <button
-            type="submit"
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs py-2.5 px-5 rounded-xl shadow-xs transition-colors"
+            type="button"
+            onClick={() => handleSave()}
+            disabled={saving}
+            className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-3.5 py-1.5 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
-            <Save className="w-4 h-4" />
-            <span>Salvar Configurações</span>
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            <span>Salvar Agora</span>
           </button>
         </div>
-      </form>
+      )}
 
-      {/* Modal para adicionar novo usuário */}
-      {showAddUserModal && (
+      {/* Modal de Confirmação: Restaurar Padrões */}
+      {showResetConfirm && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-2xl animate-in fade-in duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
-                  <UserPlus className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Novo Usuário de RH</h3>
-                  <p className="text-xs text-slate-500">Cadastre um novo membro para gerenciar admissões</p>
-                </div>
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 border border-slate-200 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                <RotateCcw className="w-5 h-5" />
               </div>
-              <button 
-                type="button"
-                onClick={() => setShowAddUserModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Restaurar Configurações Padrão?</h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Esta ação redefinirá todos os prazos de inatividade (3 dias), alertas de início próximo (5 dias), 
+                  tamanho máximo de arquivos (15MB) e formatos padrão para as recomendações de fábrica do sistema.
+                </p>
+              </div>
             </div>
 
-            <form onSubmit={handleAddUser} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Nome Completo</label>
-                <div className="relative">
-                  <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Ana Beatriz Lima"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-blue-600"
-                  />
-                </div>
-              </div>
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-1">
+              <p className="font-semibold text-slate-800">Esta ação:</p>
+              <ul className="list-disc pl-4 space-y-0.5 text-[11px]">
+                <li>NÃO apagará admissões ou cadastros existentes.</li>
+                <li>NÃO excluirá usuários cadastrados no RH.</li>
+                <li>Será auditada no histórico de conformidade com seu usuário.</li>
+              </ul>
+            </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">E-mail Corporativo</label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    placeholder="ana.lima@empresa.com"
-                    value={newEmail}
-                    onChange={(e) => setNewEmail(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-blue-600"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Departamento / Setor</label>
-                <div className="relative">
-                  <Building2 className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Recursos Humanos / Departamento Pessoal"
-                    value={newDepartment}
-                    onChange={(e) => setNewDepartment(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-blue-600"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Perfil de Permissão</label>
-                <select
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as any)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-blue-600"
-                >
-                  <option value="RH">RH (Operacional & Análise)</option>
-                  <option value="ADMIN">ADMIN (Administrador Completo)</option>
-                  <option value="FUNCIONARIO">FUNCIONARIO (Colaborador)</option>
-                </select>
-              </div>
-
-              <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowAddUserModal(false)}
-                  className="px-3.5 py-2 text-slate-600 hover:text-slate-800 font-semibold"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5"
-                >
-                  <span>Cadastrar Usuário</span>
-                </button>
-              </div>
-            </form>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={handleResetToDefault}
+                className="px-4 py-2 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                {isResetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                <span>Confirmar e Restaurar</span>
+              </button>
+            </div>
           </div>
         </div>
-      )}
-
-      {/* Modal de Edição de Usuário */}
-      {editingUser && (
-        <EditUserModal
-          user={editingUser}
-          isOpen={!!editingUser}
-          onClose={() => setEditingUser(null)}
-          onSuccess={(updated) => {
-            setUserSuccessMessage(`Usuário ${updated.name} atualizado com sucesso!`);
-            fetchUsers();
-            setTimeout(() => setUserSuccessMessage(null), 4000);
-          }}
-        />
-      )}
-
-      {/* Modal de Confirmação de Exclusão de Usuário */}
-      {userToDelete && (
-        <DeleteConfirmModal
-          isOpen={!!userToDelete}
-          title="Excluir Usuário do RH"
-          description={`Tem certeza que deseja remover permanentemente o acesso do usuário "${userToDelete.name}" (${userToDelete.email})? Ele não poderá mais acessar o painel de RH.`}
-          itemName={userToDelete.email}
-          confirmLabel="Sim, Excluir Usuário"
-          isDeleting={isDeletingUser}
-          onClose={() => setUserToDelete(null)}
-          onConfirm={handleDeleteUser}
-        />
       )}
     </div>
   );
