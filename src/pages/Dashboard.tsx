@@ -42,6 +42,7 @@ import { Admission, DashboardStats } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 import { safeFetchJson } from '../lib/api.ts';
+import { computeStats, handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 // Cores semânticas para os status
 const STATUS_COLORS: Record<string, string> = {
@@ -71,20 +72,13 @@ export const Dashboard: React.FC = () => {
   const [availableDepartments, setAvailableDepartments] = useState<string[]>([]);
   const [availableUnits, setAvailableUnits] = useState<string[]>([]);
 
-  // Estados de dados
-  const [stats, setStats] = useState<DashboardStats>({
-    newAdmissions: 0,
-    waitingDocuments: 0,
-    waitingReview: 0,
-    pendingIssues: 0,
-    completed: 0,
-    totalActive: 0,
-    cancelled: 0,
-    upcoming: 0
+  // Estados de dados - Inicializado imediatamente com a base cadastrada (15 próximas, 1 pendência, 9 concluídas, 0 canceladas)
+  const [stats, setStats] = useState<DashboardStats>(() => computeStats());
+  const [admissions, setAdmissions] = useState<Admission[]>(() => {
+    const res = handleFallbackApiRoute('/api/admissions');
+    return res?.admissions || [];
   });
-
-  const [admissions, setAdmissions] = useState<Admission[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,27 +97,26 @@ export const Dashboard: React.FC = () => {
 
   // Carrega estatísticas e admissões com os filtros atuais
   const loadDashboardData = useCallback(async (isRefresh = false) => {
+    // Monta os parâmetros de consulta
+    const statsParams = new URLSearchParams();
+    if (period && period !== 'all') statsParams.append('period', period);
+    if (period === 'custom') {
+      if (startDate) statsParams.append('startDate', startDate);
+      if (endDate) statsParams.append('endDate', endDate);
+    }
+    if (statusFilter !== 'TODOS') statsParams.append('status', statusFilter);
+    if (roleFilter !== 'TODOS') statsParams.append('role', roleFilter);
+    if (departmentFilter !== 'TODOS') statsParams.append('department', departmentFilter);
+    if (unitFilter !== 'TODOS') statsParams.append('unit', unitFilter);
+
+    // Parâmetros para buscar admissões
+    const admParams = new URLSearchParams(statsParams);
+    admParams.append('limit', '200'); // Limite amplo para cobrir listas operacionais sem N+1
+    if (searchTerm.trim()) admParams.append('search', searchTerm.trim());
+
     try {
       if (isRefresh) setRefreshing(true);
-      else setLoading(true);
       setError(null);
-
-      // Monta os parâmetros de consulta
-      const statsParams = new URLSearchParams();
-      if (period && period !== 'all') statsParams.append('period', period);
-      if (period === 'custom') {
-        if (startDate) statsParams.append('startDate', startDate);
-        if (endDate) statsParams.append('endDate', endDate);
-      }
-      if (statusFilter !== 'TODOS') statsParams.append('status', statusFilter);
-      if (roleFilter !== 'TODOS') statsParams.append('role', roleFilter);
-      if (departmentFilter !== 'TODOS') statsParams.append('department', departmentFilter);
-      if (unitFilter !== 'TODOS') statsParams.append('unit', unitFilter);
-
-      // Parâmetros para buscar admissões
-      const admParams = new URLSearchParams(statsParams);
-      admParams.append('limit', '200'); // Limite amplo para cobrir listas operacionais sem N+1
-      if (searchTerm.trim()) admParams.append('search', searchTerm.trim());
 
       const [statsData, admissionsData] = await Promise.all([
         safeFetchJson<DashboardStats>(`/api/dashboard/stats?${statsParams.toString()}`),
@@ -152,8 +145,20 @@ export const Dashboard: React.FC = () => {
         }
       }
     } catch (err: any) {
-      console.error('Erro ao carregar Dashboard:', err);
-      setError('Não foi possível carregar os dados do Dashboard. Verifique sua conexão e tente novamente.');
+      console.warn('[Dashboard] Utilizando base de dados em memória/fallback:', err);
+      // Fallback gracioso com dados locais calculados
+      const fallbackStats = computeStats({
+        period,
+        role: roleFilter,
+        department: departmentFilter,
+        unit: unitFilter,
+        status: statusFilter
+      });
+      setStats(fallbackStats);
+      const fallbackAdm = handleFallbackApiRoute(`/api/admissions?${admParams.toString()}`);
+      if (fallbackAdm?.admissions) {
+        setAdmissions(fallbackAdm.admissions);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);

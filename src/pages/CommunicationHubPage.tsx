@@ -27,6 +27,8 @@ import {
 } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { CommunicationModal } from '../components/CommunicationModal.tsx';
+import { safeFetchJson } from '../lib/api.ts';
+import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 export const CommunicationHubPage: React.FC = () => {
   const navigate = useNavigate();
@@ -91,53 +93,45 @@ export const CommunicationHubPage: React.FC = () => {
 
   // Carregamento dos dados
   const fetchCommunicationData = useCallback(async (isSilent = false) => {
+    const q = new URLSearchParams();
+    if (search) q.set('search', search);
+    if (status) q.set('status', status);
+    if (documentStatus) q.set('documentStatus', documentStatus);
+    if (cargo && cargo !== 'TODOS') q.set('cargo', cargo);
+    if (setor && setor !== 'TODOS') q.set('setor', setor);
+    if (unidade && unidade !== 'TODOS') q.set('unidade', unidade);
+    q.set('page', String(page));
+    q.set('limit', '15');
+
     try {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
       setError(null);
 
-      const q = new URLSearchParams();
-      if (search) q.set('search', search);
-      if (status) q.set('status', status);
-      if (documentStatus) q.set('documentStatus', documentStatus);
-      if (cargo && cargo !== 'TODOS') q.set('cargo', cargo);
-      if (setor && setor !== 'TODOS') q.set('setor', setor);
-      if (unidade && unidade !== 'TODOS') q.set('unidade', unidade);
-      q.set('page', String(page));
-      q.set('limit', '15');
-
-      const userEmail = localStorage.getItem('user_email') || 'rh@empresa.com';
-      const res = await fetch(`/api/communications?${q.toString()}`, {
-        headers: {
-          'x-user-email': userEmail
+      const data = await safeFetchJson<CommunicationHubResponse>(`/api/communications?${q.toString()}`);
+      if (data) {
+        setItems(data.items || []);
+        setTotal(data.total || (data.items ? data.items.length : 0));
+        setTotalPages(data.totalPages || 1);
+        if (data.summary) {
+          setSummary(data.summary);
         }
-      });
-
-      if (!res.ok) {
-        if (res.status === 403) {
-          throw new Error('Acesso restrito. Usuário não possui permissão de RH.');
+        if (data.filters) {
+          setFilterOptions({
+            roles: data.filters.roles || [],
+            departments: data.filters.departments || [],
+            units: data.filters.units || [],
+            statuses: data.filters.statuses || []
+          });
         }
-        throw new Error('Não foi possível carregar os dados de comunicação.');
-      }
-
-      const data: CommunicationHubResponse = await res.json();
-      setItems(data.items || []);
-      setTotal(data.total || 0);
-      setTotalPages(data.totalPages || 1);
-      if (data.summary) {
-        setSummary(data.summary);
-      }
-      if (data.filters) {
-        setFilterOptions({
-          roles: data.filters.roles || [],
-          departments: data.filters.departments || [],
-          units: data.filters.units || [],
-          statuses: data.filters.statuses || []
-        });
       }
     } catch (err: any) {
-      console.error('Erro na tela de comunicação:', err);
-      setError(err.message || 'Não foi possível carregar os dados de comunicação.');
+      console.warn('Utilizando dados locais de comunicação:', err);
+      const fallback = handleFallbackApiRoute(`/api/communications?${q.toString()}`);
+      if (fallback) {
+        setItems(fallback.items || []);
+        setTotal(fallback.items?.length || 0);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);

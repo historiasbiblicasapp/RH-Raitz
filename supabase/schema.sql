@@ -31,9 +31,66 @@ CREATE TABLE IF NOT EXISTS public.employees (
     department VARCHAR(100) NOT NULL,
     unit VARCHAR(100) NOT NULL,
     expected_start_date DATE NOT NULL,
+    admission_date DATE,
+    registration_number VARCHAR(50),
+    secondary_phone VARCHAR(20),
+    active BOOLEAN DEFAULT TRUE NOT NULL,
+    status VARCHAR(20) DEFAULT 'Ativo' NOT NULL,
+    cep VARCHAR(10),
+    street VARCHAR(255),
+    number VARCHAR(50),
+    complement VARCHAR(100),
+    neighborhood VARCHAR(100),
+    city VARCHAR(100),
+    state VARCHAR(2),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Índices e migrações incrementais do Cadastro de Funcionários (Parte 5 - Bloco 5.1)
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE NOT NULL;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Ativo' NOT NULL;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS registration_number VARCHAR(50);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS secondary_phone VARCHAR(20);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS admission_date DATE;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS cep VARCHAR(10);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS street VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS number VARCHAR(50);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS complement VARCHAR(100);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS neighborhood VARCHAR(100);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS city VARCHAR(100);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS state VARCHAR(2);
+
+-- Migrações incrementais da Ficha Cadastral Completa do Funcionário (Parte 5 - Bloco 5.2)
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS social_name VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS rg VARCHAR(30);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS rg_issuer VARCHAR(30);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS rg_issue_date DATE;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS gender VARCHAR(30);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS marital_status VARCHAR(50);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS mother_name VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS father_name VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS nationality VARCHAR(100);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS birthplace VARCHAR(100);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(20);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS personal_email VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS corporate_email VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS emergency_contact_relationship VARCHAR(100);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR(20);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS emergency_contact_notes TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS manager VARCHAR(255);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS contract_type VARCHAR(50);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS work_shift VARCHAR(50);
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS professional_notes TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS administrative_notes TEXT;
+ALTER TABLE public.employees ADD COLUMN IF NOT EXISTS internal_id VARCHAR(50);
+
+CREATE INDEX IF NOT EXISTS idx_employees_status ON public.employees(status);
+CREATE INDEX IF NOT EXISTS idx_employees_active ON public.employees(active);
+CREATE INDEX IF NOT EXISTS idx_employees_cpf ON public.employees(cpf);
+CREATE INDEX IF NOT EXISTS idx_employees_registration_number ON public.employees(registration_number);
+
 
 -- 3. TABELA DE TIPOS DE DOCUMENTOS PERMITIDOS
 CREATE TABLE IF NOT EXISTS public.document_types (

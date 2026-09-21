@@ -4,6 +4,10 @@ import crypto from 'crypto';
 import { 
   Admission, 
   Employee, 
+  EmployeeStatus,
+  EmployeeFilters,
+  EmployeeResponse,
+  EmployeeDetailResponse,
   AdmissionDocument, 
   AuditLog, 
   NotificationItem, 
@@ -62,10 +66,38 @@ import {
   SystemNotificationSettings,
   SystemTrackingSettings,
   SystemReportSettings,
-  SystemSecuritySettings
+  SystemSecuritySettings,
+  EmployeeDocument,
+  EmployeeDocumentCategory,
+  EmployeeDocumentStatus,
+  EmployeeDocumentVersion,
+  EmployeeDocumentStats,
+  EmployeeDocumentFilterOptions,
+  EmployeeDocumentsResponse,
+  ProcessStepKey,
+  ProcessStepStatus,
+  ProcessStepCompletionRule,
+  ConfigurableProcessStep,
+  AdmissionProcessVersion,
+  AdmissionProcessConfig,
+  AdmissionProcessStepHistoryItem,
+  AdmissionProcessStepSnapshot,
+  AdmissionProcessResponse,
+  OperationalPriority,
+  OperationalChecklistSituation,
+  OperationalResponsible,
+  OperationalPendingSummary,
+  OperationalTaskItem,
+  OperationalChecklistItem,
+  OperationalChecklistFilters,
+  OperationalChecklistResponse
 } from '../src/types/index.ts';
-import { maskCPF } from '../src/lib/cpf.ts';
+import { maskCPF, validateCPF, validateEmail } from '../src/lib/cpf.ts';
 import { initialDbData } from '../src/data/initialDb.ts';
+import { 
+  buildOperationalChecklistItem, 
+  filterAndPaginateChecklist 
+} from './operationalChecklistService.ts';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const STORAGE_DIR = path.join(DATA_DIR, 'storage');
@@ -83,7 +115,79 @@ export interface DatabaseSchema {
   jobPositionDocuments: JobPositionDocument[];
   communicationLogs: CommunicationLog[];
   settings?: SystemSettings;
+  employeeDocuments?: EmployeeDocument[];
+  admissionProcess?: AdmissionProcessConfig;
+  admissionProcessVersions?: AdmissionProcessVersion[];
 }
+
+export const DEFAULT_ADMISSION_PROCESS_STEPS: ConfigurableProcessStep[] = [
+  {
+    id: 'step-cadastro',
+    stepKey: 'CADASTRO',
+    name: 'Cadastro da Admissão',
+    description: 'Abertura do processo admissional pelo RH com dados contratuais iniciais e geração de convite de acesso.',
+    order: 1,
+    active: true,
+    required: true,
+    responsibleRole: 'RH',
+    completionRule: 'CADASTRO_INICIAL'
+  },
+  {
+    id: 'step-dados-pessoais',
+    stepKey: 'DADOS_PESSOAIS',
+    name: 'Dados do Funcionário',
+    description: 'Preenchimento, conferência cadastral com consentimento LGPD e confirmação formal dos dados pelo candidato.',
+    order: 2,
+    active: true,
+    required: true,
+    responsibleRole: 'RH',
+    completionRule: 'DADOS_PREENCHIDOS'
+  },
+  {
+    id: 'step-documentos',
+    stepKey: 'DOCUMENTOS',
+    name: 'Documentos',
+    description: 'Upload e envio dos documentos admissionais obrigatórios conforme o checklist do cargo selecionado.',
+    order: 3,
+    active: true,
+    required: true,
+    responsibleRole: 'RH',
+    completionRule: 'DOCUMENTOS_APROVADOS'
+  },
+  {
+    id: 'step-conferencia',
+    stepKey: 'CONFERENCIA',
+    name: 'Conferência',
+    description: 'Análise minuciosa, validação de conformidade e conferência documental pela equipe especializada do RH.',
+    order: 4,
+    active: true,
+    required: true,
+    responsibleRole: 'RH_CONFERENCIA',
+    completionRule: 'CONFERENCIA_FINALIZADA'
+  },
+  {
+    id: 'step-aprovacao',
+    stepKey: 'APROVACAO',
+    name: 'Aprovação',
+    description: 'Parecer favorável e validação final da contratação pela liderança ou gestão da unidade.',
+    order: 5,
+    active: true,
+    required: true,
+    responsibleRole: 'GESTOR',
+    completionRule: 'APROVACAO_MANUAL'
+  },
+  {
+    id: 'step-conclusao',
+    stepKey: 'CONCLUSAO',
+    name: 'Conclusão',
+    description: 'Finalização do processo admissional, consolidação do prontuário digital e liberação para início das atividades.',
+    order: 6,
+    active: true,
+    required: true,
+    responsibleRole: 'ADMIN',
+    completionRule: 'ETAPAS_ANTERIORES_CONCLUIDAS'
+  }
+];
 
 export function generateDefaultSettings(): SystemSettings {
   const now = new Date().toISOString();
@@ -978,6 +1082,39 @@ export class Database {
           this.data.settings = generateDefaultSettings();
           this.save();
         }
+
+        // Garante a existência e integridade dos Funcionários (Parte 5 - Bloco 5.1)
+        if (!this.data.employees) {
+          this.data.employees = [];
+        }
+        let employeesNeedSave = false;
+        for (const adm of (this.data.admissions || [])) {
+          if (adm.employee) {
+            const cleanCpf = adm.employee.cpf.replace(/\D/g, '');
+            const existingEmp = this.data.employees.find(e => e.id === adm.employeeId || e.cpf.replace(/\D/g, '') === cleanCpf);
+            if (!existingEmp) {
+              this.data.employees.push({
+                ...adm.employee,
+                active: true,
+                status: 'Ativo'
+              });
+              employeesNeedSave = true;
+            }
+          }
+        }
+        this.data.employees.forEach(emp => {
+          if (emp.active === undefined) {
+            emp.active = true;
+            employeesNeedSave = true;
+          }
+          if (!emp.status) {
+            emp.status = emp.active ? 'Ativo' : 'Inativo';
+            employeesNeedSave = true;
+          }
+        });
+        if (employeesNeedSave) {
+          this.save();
+        }
       } catch (e) {
         console.warn('Falha ao ler db.json, inicializando com dados mestres estruturados:', e);
         this.data = JSON.parse(JSON.stringify(initialDbData));
@@ -987,6 +1124,9 @@ export class Database {
       this.data = JSON.parse(JSON.stringify(initialDbData));
       this.save();
     }
+
+    // Inicialização do Processo Admissional Configurável (Bloco 5.4)
+    this.ensureAdmissionProcessInitialized();
   }
 
   private save() {
@@ -1007,6 +1147,666 @@ export class Database {
         // Modo somente leitura: dados permanecem em memória sem quebrar a execução
       }
     }
+  }
+
+  // =========================================================================
+  // BLOCO 5.4 — PROCESSO ADMISSIONAL CONFIGURÁVEL (Métodos de Gestão e Snapshot)
+  // =========================================================================
+
+  private ensureAdmissionProcessInitialized() {
+    let needsSave = false;
+    const now = new Date().toISOString();
+    const v1Id = 'proc-ver-1';
+
+    if (!this.data.admissionProcessVersions || this.data.admissionProcessVersions.length === 0) {
+      const v1: AdmissionProcessVersion = {
+        id: v1Id,
+        versionNumber: 1,
+        status: 'ativa',
+        description: 'Versão inicial padrão do processo admissional em 6 etapas estruturadas.',
+        changeNotes: 'Configuração inicial padrão do sistema (Bloco 5.4)',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        createdBy: 'Sistema',
+        steps: JSON.parse(JSON.stringify(DEFAULT_ADMISSION_PROCESS_STEPS))
+      };
+      this.data.admissionProcessVersions = [v1];
+      needsSave = true;
+    }
+
+    if (!this.data.admissionProcess) {
+      this.data.admissionProcess = {
+        id: 'processo-padrao',
+        name: 'Processo Admissional Padrão',
+        description: 'Fluxo operacional de admissão digital com etapas auditadas, versionamento e controle rigoroso de avanço.',
+        currentVersion: 1,
+        activeVersionId: this.data.admissionProcessVersions[0].id,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: now,
+        updatedBy: 'Sistema'
+      };
+      needsSave = true;
+    }
+
+    // Migração e retrocompatibilidade segura para admissões existentes
+    const activeVer = this.data.admissionProcessVersions.find(v => v.id === this.data.admissionProcess?.activeVersionId) || this.data.admissionProcessVersions[0];
+
+    for (const adm of (this.data.admissions || [])) {
+      if (!adm.processSteps || adm.processSteps.length === 0) {
+        adm.processVersionId = activeVer.id;
+        adm.processVersionNumber = activeVer.versionNumber;
+
+        const steps: AdmissionProcessStepSnapshot[] = activeVer.steps
+          .filter(s => s.active)
+          .sort((a, b) => a.order - b.order)
+          .map((s) => {
+            let stepStatus: ProcessStepStatus = 'PENDENTE';
+            let completedAt: string | undefined;
+            let completedBy: string | undefined;
+            let startedAt: string | undefined;
+
+            // CADASTRO: concluído no ato da abertura
+            if (s.stepKey === 'CADASTRO') {
+              stepStatus = 'CONCLUIDA';
+              startedAt = adm.createdAt;
+              completedAt = adm.createdAt;
+              completedBy = 'RH';
+            } else if (s.stepKey === 'DADOS_PESSOAIS') {
+              if (adm.dataConfirmed || adm.status === 'Em conferência' || adm.status === 'Concluída') {
+                stepStatus = 'CONCLUIDA';
+                startedAt = adm.createdAt;
+                completedAt = adm.dataConfirmedAt || adm.createdAt;
+                completedBy = adm.employee?.name || 'Colaborador';
+              } else if (adm.status === 'Aguardando documentos' || adm.status === 'Rascunho') {
+                stepStatus = 'EM_ANDAMENTO';
+                startedAt = adm.createdAt;
+              }
+            } else if (s.stepKey === 'DOCUMENTOS') {
+              if (adm.status === 'Concluída' || (adm.documents && adm.documents.length > 0 && adm.documents.filter(d => d.required).every(d => d.status === 'Aprovado'))) {
+                stepStatus = 'CONCLUIDA';
+                startedAt = adm.createdAt;
+                completedAt = adm.updatedAt || adm.createdAt;
+                completedBy = 'RH';
+              } else if (adm.dataConfirmed || adm.status === 'Em conferência') {
+                stepStatus = 'EM_ANDAMENTO';
+                startedAt = adm.dataConfirmedAt || adm.createdAt;
+              } else if (adm.status === 'Pendência') {
+                stepStatus = 'EM_ANDAMENTO';
+                startedAt = adm.createdAt;
+              }
+            } else if (s.stepKey === 'CONFERENCIA') {
+              if (adm.status === 'Concluída') {
+                stepStatus = 'CONCLUIDA';
+                completedAt = adm.completedAt || adm.updatedAt;
+                completedBy = adm.completedBy || 'RH';
+              } else if (adm.status === 'Em conferência') {
+                stepStatus = 'EM_ANDAMENTO';
+                startedAt = adm.updatedAt || adm.createdAt;
+              }
+            } else if (s.stepKey === 'APROVACAO') {
+              if (adm.status === 'Concluída') {
+                stepStatus = 'CONCLUIDA';
+                completedAt = adm.completedAt || adm.updatedAt;
+                completedBy = adm.completedBy || 'Gestor';
+              }
+            } else if (s.stepKey === 'CONCLUSAO') {
+              if (adm.status === 'Concluída') {
+                stepStatus = 'CONCLUIDA';
+                completedAt = adm.completedAt || adm.updatedAt;
+                completedBy = adm.completedBy || 'Sistema';
+              }
+            }
+
+            let blockReason: string | undefined;
+            if (adm.status === 'Pendência' && (s.stepKey === 'DOCUMENTOS' || s.stepKey === 'CONFERENCIA')) {
+              blockReason = 'Existem pendências ou documentos rejeitados na admissão.';
+            }
+
+            return {
+              id: 'step-snap-' + crypto.randomUUID(),
+              admissionId: adm.id,
+              processVersionId: activeVer.id,
+              processVersionNumber: activeVer.versionNumber,
+              stepKey: s.stepKey,
+              stepName: s.name,
+              stepDescription: s.description,
+              stepOrder: s.order,
+              required: s.required,
+              responsibleRole: s.responsibleRole,
+              completionRule: s.completionRule,
+              status: stepStatus,
+              blockReason,
+              startedAt,
+              completedAt,
+              completedBy,
+              history: [
+                {
+                  action: stepStatus === 'CONCLUIDA' ? 'concluida' : 'iniciada',
+                  timestamp: adm.createdAt,
+                  userName: 'Sistema',
+                  details: `Etapa inicializada no snapshot do processo admissional (Versão ${activeVer.versionNumber}).`
+                }
+              ]
+            };
+          });
+
+        if (adm.status !== 'Concluída' && adm.status !== 'Cancelada') {
+          const hasInProgress = steps.some(st => st.status === 'EM_ANDAMENTO');
+          if (!hasInProgress) {
+            const firstPending = steps.find(st => st.status === 'PENDENTE');
+            if (firstPending) {
+              firstPending.status = 'EM_ANDAMENTO';
+              firstPending.startedAt = now;
+            }
+          }
+        }
+
+        adm.processSteps = steps;
+        const currentStep = steps.find(st => st.status === 'EM_ANDAMENTO') || steps[steps.length - 1];
+        adm.currentStepKey = currentStep?.stepKey;
+        needsSave = true;
+      }
+    }
+
+    if (needsSave) {
+      this.save();
+    }
+  }
+
+  getAdmissionProcess(): AdmissionProcessResponse {
+    this.ensureAdmissionProcessInitialized();
+    const process = this.data.admissionProcess!;
+    const allVersions = (this.data.admissionProcessVersions || []).sort((a, b) => b.versionNumber - a.versionNumber);
+    const activeVersion = allVersions.find(v => v.id === process.activeVersionId) || allVersions[0];
+
+    return {
+      process,
+      activeVersion,
+      allVersions
+    };
+  }
+
+  getActiveAdmissionProcessVersion(): AdmissionProcessVersion {
+    this.ensureAdmissionProcessInitialized();
+    const process = this.data.admissionProcess!;
+    const allVersions = this.data.admissionProcessVersions || [];
+    const activeVersion = allVersions.find(v => v.id === process.activeVersionId);
+    if (activeVersion) return activeVersion;
+    if (allVersions.length > 0) return allVersions[0];
+
+    return {
+      id: 'proc-ver-1',
+      versionNumber: 1,
+      status: 'ativa',
+      description: 'Versão inicial padrão do processo admissional.',
+      createdAt: new Date().toISOString(),
+      createdBy: 'Sistema',
+      steps: JSON.parse(JSON.stringify(DEFAULT_ADMISSION_PROCESS_STEPS))
+    };
+  }
+
+  createAdmissionProcessVersion(
+    steps: ConfigurableProcessStep[], 
+    changeNotes: string, 
+    userName: string
+  ): AdmissionProcessVersion {
+    this.ensureAdmissionProcessInitialized();
+
+    if (!Array.isArray(steps) || steps.length < 2) {
+      throw new Error('O processo admissional deve possuir pelo menos 2 etapas configuradas.');
+    }
+
+    const activeSteps = steps.filter(s => s.active);
+    if (activeSteps.length < 2) {
+      throw new Error('É necessário que pelo menos 2 etapas estejam ativas no processo.');
+    }
+
+    const requiredSteps = activeSteps.filter(s => s.required);
+    if (requiredSteps.length < 1) {
+      throw new Error('Pelo menos uma etapa ativa deve ser marcada como obrigatória.');
+    }
+
+    // Validação de nomes e keys
+    const seenKeys = new Set<string>();
+    steps.forEach((s, idx) => {
+      if (!s.name || !s.name.trim()) {
+        throw new Error(`A etapa ${idx + 1} possui nome em branco.`);
+      }
+      if (!s.stepKey || !s.stepKey.trim()) {
+        throw new Error(`A etapa "${s.name}" possui identificador estável inválido.`);
+      }
+      const upperKey = s.stepKey.trim().toUpperCase();
+      if (seenKeys.has(upperKey)) {
+        throw new Error(`Identificador estável duplicado: "${upperKey}". Cada etapa deve ter um identificador único.`);
+      }
+      seenKeys.add(upperKey);
+    });
+
+    const currentVersionNumber = this.data.admissionProcess?.currentVersion || 1;
+    const newVersionNumber = currentVersionNumber + 1;
+    const now = new Date().toISOString();
+    const newVersionId = 'proc-ver-' + newVersionNumber;
+
+    // Normaliza ordens sequenciais
+    const normalizedSteps: ConfigurableProcessStep[] = steps.map((s, idx) => ({
+      ...s,
+      id: s.id || ('step-' + crypto.randomUUID()),
+      stepKey: s.stepKey.trim().toUpperCase() as ProcessStepKey,
+      name: s.name.trim(),
+      description: s.description ? s.description.trim() : '',
+      order: idx + 1
+    }));
+
+    // Cria a nova versão ativa
+    const newVersion: AdmissionProcessVersion = {
+      id: newVersionId,
+      versionNumber: newVersionNumber,
+      status: 'ativa',
+      description: `Versão ${newVersionNumber} do Processo Admissional`,
+      changeNotes: changeNotes ? changeNotes.trim() : 'Atualização estrutural nas etapas do processo.',
+      createdAt: now,
+      createdBy: userName,
+      steps: normalizedSteps
+    };
+
+    // Marca versões anteriores como 'historica'
+    if (this.data.admissionProcessVersions) {
+      this.data.admissionProcessVersions.forEach(v => {
+        v.status = 'historica';
+      });
+    } else {
+      this.data.admissionProcessVersions = [];
+    }
+
+    this.data.admissionProcessVersions.unshift(newVersion);
+
+    // Atualiza a configuração do processo
+    if (this.data.admissionProcess) {
+      this.data.admissionProcess.currentVersion = newVersionNumber;
+      this.data.admissionProcess.activeVersionId = newVersionId;
+      this.data.admissionProcess.updatedAt = now;
+      this.data.admissionProcess.updatedBy = userName;
+    } else {
+      this.data.admissionProcess = {
+        id: 'processo-padrao',
+        name: 'Processo Admissional Padrão',
+        currentVersion: newVersionNumber,
+        activeVersionId: newVersionId,
+        createdAt: now,
+        updatedAt: now,
+        updatedBy: userName
+      };
+    }
+
+    // REGRA CRÍTICA (Seção 2): NÃO altera admissões existentes!
+    // Admissões criadas anteriormente mantêm intacto o snapshot de sua versão.
+
+    // Auditoria
+    this.addAuditLog({
+      userName,
+      action: 'admission_process_version_created',
+      entityType: 'admission_process',
+      entityId: newVersionId,
+      entityName: `Processo Admissional Versão ${newVersionNumber}`,
+      fieldChanged: 'versão do processo',
+      previousValue: `Versão ${currentVersionNumber}`,
+      newValue: `Versão ${newVersionNumber}`,
+      details: `Nova versão (${newVersionNumber}) do Processo Admissional criada por ${userName}. Total de etapas: ${normalizedSteps.length} (${activeSteps.length} ativas). Motivo: "${changeNotes || 'Atualização das etapas'}"`
+    });
+
+    this.save();
+    return newVersion;
+  }
+
+  evaluateAdmissionProcessSteps(admission: Admission, userName: string = 'Sistema'): boolean {
+    if (!admission.processSteps || admission.processSteps.length === 0) {
+      return false;
+    }
+
+    let modified = false;
+    const now = new Date().toISOString();
+
+    // 1. Etapa CADASTRO: sempre concluída
+    const cadastroStep = admission.processSteps.find(s => s.stepKey === 'CADASTRO');
+    if (cadastroStep && cadastroStep.status !== 'CONCLUIDA') {
+      cadastroStep.status = 'CONCLUIDA';
+      cadastroStep.completedAt = cadastroStep.completedAt || admission.createdAt;
+      cadastroStep.completedBy = cadastroStep.completedBy || 'RH';
+      modified = true;
+    }
+
+    // 2. Etapa DADOS_PESSOAIS: se dataConfirmed for true, concluir
+    const dadosStep = admission.processSteps.find(s => s.stepKey === 'DADOS_PESSOAIS');
+    if (dadosStep) {
+      if (admission.dataConfirmed && dadosStep.status !== 'CONCLUIDA') {
+        dadosStep.status = 'CONCLUIDA';
+        dadosStep.completedAt = admission.dataConfirmedAt || now;
+        dadosStep.completedBy = admission.employee?.name || 'Colaborador';
+        dadosStep.history = dadosStep.history || [];
+        dadosStep.history.push({
+          action: 'concluida',
+          timestamp: now,
+          userName: userName || 'Colaborador',
+          details: 'Dados cadastrais confirmados pelo colaborador.'
+        });
+        modified = true;
+
+        // Se a próxima etapa (DOCUMENTOS) for PENDENTE, avança para EM_ANDAMENTO
+        const docsStep = admission.processSteps.find(s => s.stepKey === 'DOCUMENTOS');
+        if (docsStep && docsStep.status === 'PENDENTE') {
+          docsStep.status = 'EM_ANDAMENTO';
+          docsStep.startedAt = now;
+          docsStep.history = docsStep.history || [];
+          docsStep.history.push({
+            action: 'iniciada',
+            timestamp: now,
+            userName: 'Sistema',
+            details: 'Iniciada automaticamente após confirmação de dados cadastrais.'
+          });
+        }
+      }
+    }
+
+    // 3. Etapa DOCUMENTOS
+    const docsStep = admission.processSteps.find(s => s.stepKey === 'DOCUMENTOS');
+    if (docsStep) {
+      const requiredDocs = (admission.documents || []).filter(d => d.required);
+      const allRequiredApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
+      const anyRejected = (admission.documents || []).some(d => d.status === 'Rejeitado');
+
+      if (anyRejected) {
+        docsStep.blockReason = 'Existem documentos com status "Rejeitado" que precisam de reenvio pelo colaborador.';
+      } else {
+        docsStep.blockReason = undefined;
+      }
+
+      if (allRequiredApproved && docsStep.status !== 'CONCLUIDA') {
+        docsStep.status = 'CONCLUIDA';
+        docsStep.completedAt = now;
+        docsStep.completedBy = userName || 'Sistema';
+        docsStep.blockReason = undefined;
+        docsStep.history = docsStep.history || [];
+        docsStep.history.push({
+          action: 'concluida',
+          timestamp: now,
+          userName: userName || 'Sistema',
+          details: 'Todos os documentos obrigatórios foram aprovados pela equipe.'
+        });
+        modified = true;
+
+        // Se a próxima etapa (CONFERENCIA) for PENDENTE ou BLOQUEADA, avança para EM_ANDAMENTO
+        const confStep = admission.processSteps.find(s => s.stepKey === 'CONFERENCIA');
+        if (confStep && (confStep.status === 'PENDENTE' || confStep.status === 'BLOQUEADA')) {
+          confStep.status = 'EM_ANDAMENTO';
+          confStep.startedAt = now;
+          confStep.blockReason = undefined;
+          confStep.history = confStep.history || [];
+          confStep.history.push({
+            action: 'iniciada',
+            timestamp: now,
+            userName: 'Sistema',
+            details: 'Iniciada automaticamente após aprovação de todos os documentos obrigatórios.'
+          });
+        }
+      }
+    }
+
+    // 4. Se a admissão está Concluída, garante que todas as etapas ativas estejam CONCLUIDA
+    if (admission.status === 'Concluída') {
+      for (const st of admission.processSteps) {
+        if (st.status !== 'CONCLUIDA' && st.status !== 'IGNORADA') {
+          st.status = 'CONCLUIDA';
+          st.completedAt = st.completedAt || admission.completedAt || now;
+          st.completedBy = st.completedBy || admission.completedBy || 'Sistema';
+          modified = true;
+        }
+      }
+    }
+
+    // Atualiza currentStepKey
+    const inProgressStep = admission.processSteps.find(s => s.status === 'EM_ANDAMENTO');
+    if (inProgressStep) {
+      admission.currentStepKey = inProgressStep.stepKey;
+    } else {
+      const lastStep = admission.processSteps[admission.processSteps.length - 1];
+      admission.currentStepKey = lastStep?.stepKey;
+    }
+
+    return modified;
+  }
+
+  completeAdmissionProcessStep(
+    admissionId: string, 
+    stepId: string, 
+    userName: string, 
+    notes?: string
+  ): { admission: Admission; step: AdmissionProcessStepSnapshot } {
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    if (!admission.processSteps || admission.processSteps.length === 0) {
+      throw new Error('Nenhuma etapa de processo vinculada a esta admissão.');
+    }
+
+    const stepIndex = admission.processSteps.findIndex(s => s.id === stepId || s.stepKey === stepId);
+    if (stepIndex === -1) {
+      throw new Error('Etapa do processo não encontrada nesta admissão.');
+    }
+
+    const step = admission.processSteps[stepIndex];
+    if (step.status === 'CONCLUIDA') {
+      throw new Error(`A etapa "${step.stepName}" já está concluída.`);
+    }
+
+    // Regra de dependência: etapas anteriores obrigatórias devem estar concluídas
+    for (let i = 0; i < stepIndex; i++) {
+      const priorStep = admission.processSteps[i];
+      if (priorStep.required && priorStep.status !== 'CONCLUIDA' && priorStep.status !== 'IGNORADA') {
+        throw new Error(`Não é possível concluir a etapa "${step.stepName}": a etapa anterior obrigatória "${priorStep.stepName}" ainda está ${priorStep.status.toLowerCase()}.`);
+      }
+    }
+
+    // Validações de Regras Específicas
+    if (step.completionRule === 'DOCUMENTOS_APROVADOS') {
+      const requiredDocs = (admission.documents || []).filter(d => d.required);
+      const notApproved = requiredDocs.filter(d => d.status !== 'Aprovado');
+      if (notApproved.length > 0) {
+        throw new Error(`Não é possível concluir: ainda existem ${notApproved.length} documentos obrigatórios não aprovados.`);
+      }
+    } else if (step.completionRule === 'DADOS_PREENCHIDOS') {
+      if (!admission.dataConfirmed) {
+        admission.dataConfirmed = true;
+        admission.dataConfirmedAt = new Date().toISOString();
+      }
+    }
+
+    const now = new Date().toISOString();
+    step.status = 'CONCLUIDA';
+    step.completedAt = now;
+    step.completedBy = userName;
+    step.blockReason = undefined;
+    if (notes) step.notes = notes;
+
+    step.history = step.history || [];
+    step.history.push({
+      action: 'concluida',
+      timestamp: now,
+      userName,
+      details: notes || `Etapa "${step.stepName}" concluída manualmente por ${userName}.`
+    });
+
+    // Auditoria
+    this.addAuditLog({
+      userName,
+      action: 'admission_process_step_completed',
+      entityType: 'admission_process_step',
+      entityId: step.id,
+      entityName: step.stepName,
+      admissionId: admission.id,
+      employeeName: admission.employee?.name,
+      fieldChanged: 'status da etapa',
+      previousValue: 'EM_ANDAMENTO',
+      newValue: 'CONCLUIDA',
+      details: `Etapa "${step.stepName}" (ordem ${step.stepOrder}) concluída na admissão de ${admission.employee?.name} por ${userName}.${notes ? ` Observações: "${notes}".` : ''}`
+    });
+
+    // Avança para a próxima etapa se houver
+    let nextStep: AdmissionProcessStepSnapshot | undefined;
+    for (let j = stepIndex + 1; j < admission.processSteps.length; j++) {
+      const candidate = admission.processSteps[j];
+      if (candidate.status !== 'IGNORADA') {
+        nextStep = candidate;
+        break;
+      }
+    }
+
+    if (nextStep) {
+      if (nextStep.status === 'PENDENTE' || nextStep.status === 'BLOQUEADA') {
+        nextStep.status = 'EM_ANDAMENTO';
+        nextStep.startedAt = now;
+        nextStep.history = nextStep.history || [];
+        nextStep.history.push({
+          action: 'iniciada',
+          timestamp: now,
+          userName: 'Sistema',
+          details: `Etapa liberada e iniciada automaticamente após a conclusão de "${step.stepName}".`
+        });
+
+        this.addAuditLog({
+          userName: 'Sistema',
+          action: 'admission_process_step_started',
+          entityType: 'admission_process_step',
+          entityId: nextStep.id,
+          entityName: nextStep.stepName,
+          admissionId: admission.id,
+          employeeName: admission.employee?.name,
+          details: `Próxima etapa "${nextStep.stepName}" iniciada automaticamente.`
+        });
+      }
+      admission.currentStepKey = nextStep.stepKey;
+    } else {
+      // Era a última etapa! Conclui o processo admissional se todas obrigatórias concluídas
+      const allRequiredDone = admission.processSteps.filter(s => s.required).every(s => s.status === 'CONCLUIDA' || s.status === 'IGNORADA');
+      if (allRequiredDone) {
+        admission.status = 'Concluída';
+        admission.completedAt = now;
+        admission.completedBy = userName;
+        admission.currentStepKey = step.stepKey;
+
+        this.addAuditLog({
+          userName,
+          action: 'admission_process_completed',
+          entityType: 'admission_process',
+          entityId: admission.processVersionId,
+          admissionId: admission.id,
+          employeeName: admission.employee?.name,
+          details: `Todas as etapas do processo admissional foram concluídas com sucesso. Admissão finalizada!`
+        });
+
+        this.addNotification({
+          title: 'Admissão concluída com sucesso',
+          message: `O processo admissional de ${admission.employee?.name} foi 100% concluído em todas as etapas por ${userName}.`,
+          type: 'completed',
+          admissionId: admission.id,
+          link: `/admissoes/${admission.id}`
+        });
+      }
+    }
+
+    admission.updatedAt = now;
+    this.save();
+    return { admission, step };
+  }
+
+  reopenAdmissionProcessStep(
+    admissionId: string, 
+    stepId: string, 
+    userName: string, 
+    reason: string
+  ): { admission: Admission; step: AdmissionProcessStepSnapshot } {
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission) throw new Error('Admissão não encontrada.');
+
+    if (!reason || !reason.trim()) {
+      throw new Error('É obrigatório informar uma justificativa detalhada para a reabertura da etapa.');
+    }
+
+    if (!admission.processSteps || admission.processSteps.length === 0) {
+      throw new Error('Nenhuma etapa de processo vinculada a esta admissão.');
+    }
+
+    const stepIndex = admission.processSteps.findIndex(s => s.id === stepId || s.stepKey === stepId);
+    if (stepIndex === -1) {
+      throw new Error('Etapa não encontrada nesta admissão.');
+    }
+
+    const step = admission.processSteps[stepIndex];
+    if (step.status !== 'CONCLUIDA') {
+      throw new Error(`Apenas etapas concluídas podem ser reabertas. Status atual: ${step.status}.`);
+    }
+
+    const now = new Date().toISOString();
+    const previousCompletedAt = step.completedAt;
+    const previousCompletedBy = step.completedBy;
+
+    // Atualiza a etapa para EM_ANDAMENTO
+    step.status = 'EM_ANDAMENTO';
+    step.completedAt = undefined;
+    step.completedBy = undefined;
+    step.notes = `Reaberta em ${new Date(now).toLocaleString('pt-BR')}: ${reason.trim()}`;
+
+    step.history = step.history || [];
+    step.history.push({
+      action: 'reaberta',
+      timestamp: now,
+      userName,
+      reason: reason.trim(),
+      details: `Etapa reaberta por ${userName}. Motivo: "${reason.trim()}". (Conclusão anterior: ${previousCompletedAt ? new Date(previousCompletedAt).toLocaleString('pt-BR') : 'N/A'} por ${previousCompletedBy || 'N/A'})`
+    });
+
+    // Reverte etapas posteriores para PENDENTE
+    for (let i = stepIndex + 1; i < admission.processSteps.length; i++) {
+      const nextStep = admission.processSteps[i];
+      if (nextStep.status === 'CONCLUIDA' || nextStep.status === 'EM_ANDAMENTO') {
+        nextStep.status = 'PENDENTE';
+        nextStep.completedAt = undefined;
+        nextStep.completedBy = undefined;
+        nextStep.history = nextStep.history || [];
+        nextStep.history.push({
+          action: 'bloqueada',
+          timestamp: now,
+          userName: 'Sistema',
+          details: `Retornada para status PENDENTE devido à reabertura da etapa anterior "${step.stepName}".`
+        });
+      }
+    }
+
+    // Se a admissão estava Concluída, reverte o status
+    if (admission.status === 'Concluída') {
+      admission.status = 'Em conferência';
+      admission.completedAt = undefined;
+      admission.completedBy = undefined;
+    }
+
+    admission.currentStepKey = step.stepKey;
+    admission.updatedAt = now;
+
+    // Auditoria
+    this.addAuditLog({
+      userName,
+      action: 'admission_process_step_reopened',
+      entityType: 'admission_process_step',
+      entityId: step.id,
+      entityName: step.stepName,
+      admissionId: admission.id,
+      employeeName: admission.employee?.name,
+      fieldChanged: 'status da etapa',
+      previousValue: 'CONCLUIDA',
+      newValue: 'EM_ANDAMENTO',
+      details: `Etapa "${step.stepName}" reaberta na admissão de ${admission.employee?.name} por ${userName}. Motivo obrigatório: "${reason.trim()}".`
+    });
+
+    this.save();
+    return { admission, step };
   }
 
   // Estatísticas do Dashboard
@@ -1193,6 +1993,26 @@ export class Database {
         };
       });
 
+    // Distribuição de admissões ativas por etapa do processo (Bloco 5.4)
+    const byProcessStep: Record<string, { name: string; count: number; stepOrder: number }> = {};
+    const activeVersion = this.getActiveAdmissionProcessVersion();
+    (activeVersion?.steps || DEFAULT_ADMISSION_PROCESS_STEPS).forEach(st => {
+      byProcessStep[st.stepKey] = {
+        name: st.name,
+        count: 0,
+        stepOrder: st.order
+      };
+    });
+
+    allAdmissions.filter(a => a.status !== 'Cancelada' && a.status !== 'Concluída').forEach(a => {
+      const activeStep = a.processSteps?.find(s => s.status === 'EM_ANDAMENTO');
+      if (activeStep && byProcessStep[activeStep.stepKey]) {
+        byProcessStep[activeStep.stepKey].count++;
+      } else if (a.currentStepKey && byProcessStep[a.currentStepKey]) {
+        byProcessStep[a.currentStepKey].count++;
+      }
+    });
+
     return {
       newAdmissions,
       waitingDocuments,
@@ -1204,7 +2024,8 @@ export class Database {
       upcoming,
       documentStats,
       byStatus,
-      evolution
+      evolution,
+      byProcessStep
     };
   }
 
@@ -2420,6 +3241,47 @@ export class Database {
     const optionalDocsCount = documents.filter(d => !d.required).length;
     const totalDocsCount = documents.length;
 
+    // Snapshot das Etapas do Processo Admissional Vigente (Bloco 5.4)
+    const activeVersion = this.getActiveAdmissionProcessVersion();
+    const activeSteps = (activeVersion?.steps || DEFAULT_ADMISSION_PROCESS_STEPS)
+      .filter(s => s.active)
+      .sort((a, b) => a.order - b.order);
+
+    const processSteps: AdmissionProcessStepSnapshot[] = activeSteps.map((s, idx) => {
+      const isFirst = idx === 0;
+      const isSecond = idx === 1;
+      return {
+        id: 'step-snap-' + crypto.randomUUID(),
+        admissionId,
+        processVersionId: activeVersion.id,
+        processVersionNumber: activeVersion.versionNumber,
+        stepKey: s.stepKey,
+        stepName: s.name,
+        stepDescription: s.description,
+        stepOrder: s.order,
+        required: s.required,
+        responsibleRole: s.responsibleRole,
+        completionRule: s.completionRule,
+        status: isFirst ? 'CONCLUIDA' : (isSecond ? 'EM_ANDAMENTO' : 'PENDENTE'),
+        startedAt: isFirst || isSecond ? now : undefined,
+        completedAt: isFirst ? now : undefined,
+        completedBy: isFirst ? (createdByUserName || 'RH') : undefined,
+        notes: isFirst ? 'Cadastro inicial da admissão realizado pelo RH.' : undefined,
+        history: [
+          {
+            action: isFirst ? 'concluida' : 'iniciada',
+            timestamp: now,
+            userName: createdByUserName || 'Sistema',
+            details: isFirst
+              ? `Admissão criada e cadastrada sob a Versão ${activeVersion.versionNumber} do Processo Admissional.`
+              : 'Etapa iniciada: aguardando preenchimento e confirmação cadastral do colaborador.'
+          }
+        ]
+      };
+    });
+
+    const currentStepKey = processSteps.find(st => st.status === 'EM_ANDAMENTO')?.stepKey || 'DADOS_PESSOAIS';
+
     const newAdmission: Admission = {
       id: admissionId,
       employeeId,
@@ -2434,6 +3296,10 @@ export class Database {
       progressPercent: 0,
       totalDocuments: requiredDocsCount,
       approvedDocuments: 0,
+      processVersionId: activeVersion.id,
+      processVersionNumber: activeVersion.versionNumber,
+      processSteps,
+      currentStepKey,
       createdAt: now,
       updatedAt: now
     };
@@ -2450,6 +3316,30 @@ export class Database {
       employeeName: employee.name,
       details: `Admissão cadastrada para o cargo ${employee.role} (${employee.department} - ${employee.unit})`
     });
+
+    // Auditoria do Processo Admissional (Bloco 5.4)
+    this.addAuditLog({
+      userName: createdByUserName || 'Sistema',
+      action: 'admission_process_started',
+      entityType: 'admission_process',
+      entityId: activeVersion.id,
+      admissionId,
+      employeeName: employee.name,
+      details: `Processo admissional iniciado com a Versão ${activeVersion.versionNumber} (${processSteps.length} etapas no snapshot).`
+    });
+
+    if (processSteps[0]) {
+      this.addAuditLog({
+        userName: createdByUserName || 'Sistema',
+        action: 'admission_process_step_completed',
+        entityType: 'admission_process_step',
+        entityId: processSteps[0].id,
+        entityName: processSteps[0].stepName,
+        admissionId,
+        employeeName: employee.name,
+        details: `Etapa 1 "Cadastro da Admissão" concluída na abertura do processo.`
+      });
+    }
 
     // Auditoria Específica da Criação do Checklist de Documentos (Bloco 3.4 - Requisito 20)
     this.addAuditLog({
@@ -2533,6 +3423,1116 @@ export class Database {
     return consentRecord;
   }
 
+  // ==========================================
+  // PARTE 5 - BLOCO 5.1: GESTÃO DE FUNCIONÁRIOS
+  // ==========================================
+
+  getEmployeesFiltered(options?: EmployeeFilters): EmployeeResponse {
+    const list = this.data.employees || [];
+
+    // Coleta filtros disponíveis na base inteira
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const statusesSet = new Set<string>();
+
+    for (const emp of list) {
+      if (emp.role) rolesSet.add(emp.role);
+      if (emp.department) departmentsSet.add(emp.department);
+      if (emp.unit) unitsSet.add(emp.unit);
+      statusesSet.add(emp.status || (emp.active ? 'Ativo' : 'Inativo'));
+    }
+
+    let filtered = list.map(emp => {
+      const active = emp.active !== undefined ? emp.active : true;
+      const status: EmployeeStatus = emp.status || (active ? 'Ativo' : 'Inativo');
+      return {
+        ...emp,
+        active,
+        status,
+        cpfMasked: maskCPF(emp.cpf)
+      };
+    });
+
+    if (options) {
+      // 1. Pesquisa por nome, CPF (limpo ou formatado), e-mail, telefone, matrícula
+      if (options.search && options.search.trim()) {
+        const q = options.search.trim().toLowerCase();
+        const cleanQuery = q.replace(/\D/g, '');
+
+        filtered = filtered.filter(emp => {
+          const matchName = emp.name.toLowerCase().includes(q);
+          const matchEmail = emp.email.toLowerCase().includes(q);
+          const matchPhone = emp.phone ? emp.phone.includes(cleanQuery) : false;
+          const matchSecPhone = emp.secondaryPhone ? emp.secondaryPhone.includes(cleanQuery) : false;
+          const matchReg = emp.registrationNumber ? emp.registrationNumber.toLowerCase().includes(q) : false;
+          const cleanEmpCpf = emp.cpf ? emp.cpf.replace(/\D/g, '') : '';
+          const matchCpf = cleanQuery.length >= 3 && cleanEmpCpf.includes(cleanQuery);
+
+          return matchName || matchEmail || matchPhone || matchSecPhone || matchReg || matchCpf;
+        });
+      }
+
+      // 2. Filtro por Situação
+      if (options.status && options.status !== 'TODOS') {
+        filtered = filtered.filter(emp => emp.status === options.status);
+      }
+
+      // 3. Filtro por Cargo
+      if (options.role && options.role !== 'TODOS') {
+        filtered = filtered.filter(emp => emp.role === options.role);
+      }
+
+      // 4. Filtro por Setor / Departamento
+      if (options.department && options.department !== 'TODOS') {
+        filtered = filtered.filter(emp => emp.department === options.department);
+      }
+
+      // 5. Filtro por Unidade
+      if (options.unit && options.unit !== 'TODOS') {
+        filtered = filtered.filter(emp => emp.unit === options.unit);
+      }
+
+      // 6. Filtro por Período de Admissão / Início Previsto
+      if (options.startDate) {
+        const start = options.startDate.split('T')[0];
+        filtered = filtered.filter(emp => {
+          const d = (emp.admissionDate || emp.expectedStartDate || emp.createdAt || '').split('T')[0];
+          return d >= start;
+        });
+      }
+      if (options.endDate) {
+        const end = options.endDate.split('T')[0];
+        filtered = filtered.filter(emp => {
+          const d = (emp.admissionDate || emp.expectedStartDate || emp.createdAt || '').split('T')[0];
+          return d <= end;
+        });
+      }
+    }
+
+    // Ordenação padrão: mais recentes primeiro (createdAt desc)
+    filtered.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+
+    const total = filtered.length;
+    const page = Math.max(1, Number(options?.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(options?.limit) || 10));
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const startIndex = (page - 1) * limit;
+    const paginatedEmployees = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      employees: paginatedEmployees,
+      total,
+      page,
+      limit,
+      totalPages,
+      filters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        statuses: ['Ativo', 'Inativo']
+      }
+    };
+  }
+
+  getEmployeeById(id: string): Employee | undefined {
+    return (this.data.employees || []).find(e => e.id === id);
+  }
+
+  getEmployeeDetails(id: string): EmployeeDetailResponse | null {
+    const employee = this.getEmployeeById(id);
+    if (!employee) return null;
+
+    const active = employee.active !== undefined ? employee.active : true;
+    const status: EmployeeStatus = employee.status || (active ? 'Ativo' : 'Inativo');
+    const cleanCpf = employee.cpf.replace(/\D/g, '');
+
+    // Busca todas as admissões vinculadas ao colaborador
+    const admissions = (this.data.admissions || [])
+      .filter(a => a.employeeId === id || a.employee?.cpf?.replace(/\D/g, '') === cleanCpf)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Calcula resumo operacional
+    const lastAdmission = admissions[0] || null;
+    let pendingCount = 0;
+    for (const adm of admissions) {
+      if (adm.status !== 'Concluída' && adm.status !== 'Cancelada') {
+        for (const doc of (adm.documents || [])) {
+          if (doc.status === 'Não enviado' || doc.status === 'Rejeitado' || doc.status === 'Em análise' || doc.status === 'Reenviado') {
+            pendingCount++;
+          }
+        }
+      }
+    }
+
+    // Busca registros de auditoria vinculados ao colaborador
+    const auditLogs = (this.data.auditLogs || [])
+      .filter(log => 
+        log.entityId === id || 
+        log.employeeName === employee.name || 
+        (log.admissionId && admissions.some(a => a.id === log.admissionId))
+      )
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    return {
+      employee: {
+        ...employee,
+        active,
+        status,
+        cpfMasked: maskCPF(employee.cpf)
+      },
+      admissions,
+      summary: {
+        totalAdmissions: admissions.length,
+        lastAdmission,
+        lastAdmissionStatus: lastAdmission ? lastAdmission.status : null,
+        pendingCount
+      },
+      auditLogs,
+      documents: this.getEmployeeDocuments(id),
+      documentStats: this.getEmployeeDocumentStats(id)
+    };
+  }
+
+  createEmployee(data: Partial<Employee>, createdByUserName: string): Employee {
+    if (!data.name || data.name.trim().length < 2) {
+      throw new Error('O nome completo do funcionário é obrigatório.');
+    }
+    if (!data.cpf) {
+      throw new Error('O CPF é obrigatório.');
+    }
+    const cleanCPF = data.cpf.replace(/\D/g, '');
+    if (!validateCPF(cleanCPF)) {
+      throw new Error('CPF inválido. Verifique os dígitos informados.');
+    }
+
+    // Checagem rigorosa de duplicidade de CPF
+    const existing = (this.data.employees || []).find(e => e.cpf.replace(/\D/g, '') === cleanCPF);
+    if (existing) {
+      const err: any = new Error('Operação bloqueada. CPF já cadastrado.');
+      err.duplicate = true;
+      err.existingEmployeeId = existing.id;
+      throw err;
+    }
+
+    if (!data.birthDate) {
+      throw new Error('A data de nascimento é obrigatória.');
+    }
+    const bdCheck = new Date(data.birthDate + 'T00:00:00');
+    if (isNaN(bdCheck.getTime()) || bdCheck > new Date()) {
+      throw new Error('A data de nascimento não pode ser uma data futura.');
+    }
+    if (!data.phone) {
+      throw new Error('O telefone de contato é obrigatório.');
+    }
+    if (!data.email || !validateEmail(data.email)) {
+      throw new Error('E-mail inválido ou não informado.');
+    }
+    if (!data.role || !data.role.trim()) {
+      throw new Error('O cargo é obrigatório.');
+    }
+    if (!data.department || !data.department.trim()) {
+      throw new Error('O setor é obrigatório.');
+    }
+    if (!data.unit || !data.unit.trim()) {
+      throw new Error('A unidade é obrigatória.');
+    }
+
+    // Se informou matrícula, valida unicidade
+    if (data.registrationNumber && data.registrationNumber.trim()) {
+      const reg = data.registrationNumber.trim().toLowerCase();
+      const existingReg = (this.data.employees || []).find(e => 
+        e.registrationNumber && e.registrationNumber.trim().toLowerCase() === reg
+      );
+      if (existingReg) {
+        throw new Error(`A matrícula "${data.registrationNumber.trim()}" já está em uso pelo funcionário ${existingReg.name}.`);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const newEmployee: Employee = {
+      id: 'emp-' + crypto.randomUUID(),
+      name: data.name.trim(),
+      cpf: cleanCPF,
+      birthDate: data.birthDate,
+      phone: data.phone.replace(/\D/g, ''),
+      secondaryPhone: data.secondaryPhone ? data.secondaryPhone.replace(/\D/g, '') : undefined,
+      email: data.email.trim().toLowerCase(),
+      role: data.role.trim(),
+      jobPositionId: data.jobPositionId || undefined,
+      department: data.department.trim(),
+      unit: data.unit.trim(),
+      expectedStartDate: data.expectedStartDate || data.admissionDate || now.slice(0, 10),
+      admissionDate: data.admissionDate || data.expectedStartDate || now.slice(0, 10),
+      registrationNumber: data.registrationNumber?.trim() || undefined,
+      active: true,
+      status: 'Ativo',
+      cep: data.cep ? data.cep.replace(/\D/g, '') : undefined,
+      street: data.street?.trim() || undefined,
+      number: data.number?.trim() || undefined,
+      complement: data.complement?.trim() || undefined,
+      neighborhood: data.neighborhood?.trim() || undefined,
+      city: data.city?.trim() || undefined,
+      state: data.state?.trim()?.toUpperCase() || undefined,
+      // Bloco 5.2 - Dados Pessoais
+      socialName: data.socialName?.trim() || undefined,
+      rg: data.rg?.trim() || undefined,
+      rgIssuer: data.rgIssuer?.trim() || undefined,
+      rgIssueDate: data.rgIssueDate?.trim() || undefined,
+      gender: data.gender?.trim() || undefined,
+      maritalStatus: data.maritalStatus?.trim() || undefined,
+      motherName: data.motherName?.trim() || undefined,
+      fatherName: data.fatherName?.trim() || undefined,
+      nationality: data.nationality?.trim() || undefined,
+      birthplace: data.birthplace?.trim() || undefined,
+      // Bloco 5.2 - Contato
+      whatsapp: data.whatsapp ? data.whatsapp.replace(/\D/g, '') : undefined,
+      personalEmail: data.personalEmail?.trim()?.toLowerCase() || undefined,
+      corporateEmail: data.corporateEmail?.trim()?.toLowerCase() || undefined,
+      emergencyContactName: data.emergencyContactName?.trim() || undefined,
+      emergencyContactRelationship: data.emergencyContactRelationship?.trim() || undefined,
+      emergencyContactPhone: data.emergencyContactPhone ? data.emergencyContactPhone.replace(/\D/g, '') : undefined,
+      emergencyContactNotes: data.emergencyContactNotes?.trim() || undefined,
+      // Bloco 5.2 - Dados Profissionais
+      manager: data.manager?.trim() || undefined,
+      contractType: data.contractType?.trim() || undefined,
+      workShift: data.workShift?.trim() || undefined,
+      professionalNotes: data.professionalNotes?.trim() || undefined,
+      // Bloco 5.2 - Dados Complementares
+      administrativeNotes: data.administrativeNotes?.trim() || undefined,
+      internalId: data.internalId?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    if (!this.data.employees) this.data.employees = [];
+    this.data.employees.push(newEmployee);
+
+    this.addAuditLog({
+      userName: createdByUserName,
+      action: 'Novo funcionário cadastrado pelo RH',
+      entityType: 'employee',
+      entityId: newEmployee.id,
+      employeeName: newEmployee.name,
+      details: `Cadastro manual do funcionário ${newEmployee.name} (CPF: ${maskCPF(newEmployee.cpf)}, Cargo: ${newEmployee.role}) realizado por ${createdByUserName}.`
+    });
+
+    this.save();
+    return newEmployee;
+  }
+
+  updateEmployee(id: string, updates: Partial<Employee>, updatedByUserName: string): Employee {
+    const employee = this.getEmployeeById(id);
+    if (!employee) {
+      throw new Error('Funcionário não encontrado.');
+    }
+
+    const structuredChanges: AuditLogChange[] = [];
+
+    // 1. Validação de CPF se alterado
+    if (updates.cpf && updates.cpf !== employee.cpf) {
+      const cleanCPF = updates.cpf.replace(/\D/g, '');
+      if (!validateCPF(cleanCPF)) {
+        throw new Error('CPF informado é inválido.');
+      }
+      const duplicate = (this.data.employees || []).find(e => e.id !== id && e.cpf.replace(/\D/g, '') === cleanCPF);
+      if (duplicate) {
+        throw new Error('Operação bloqueada. CPF já cadastrado.');
+      }
+      structuredChanges.push({
+        field: 'cpf',
+        label: 'CPF',
+        previousValue: maskCPF(employee.cpf),
+        newValue: maskCPF(cleanCPF)
+      });
+      employee.cpf = cleanCPF;
+    }
+
+    // 2. Validação de matrícula se alterada
+    if (updates.registrationNumber !== undefined && updates.registrationNumber !== employee.registrationNumber) {
+      const reg = updates.registrationNumber ? updates.registrationNumber.trim() : '';
+      if (reg) {
+        const duplicate = (this.data.employees || []).find(e => e.id !== id && e.registrationNumber && e.registrationNumber.trim().toLowerCase() === reg.toLowerCase());
+        if (duplicate) {
+          throw new Error(`A matrícula "${reg}" já está em uso pelo funcionário ${duplicate.name}.`);
+        }
+      }
+      structuredChanges.push({
+        field: 'registrationNumber',
+        label: 'Matrícula',
+        previousValue: employee.registrationNumber || '(não preenchida)',
+        newValue: reg || '(removida)'
+      });
+      employee.registrationNumber = reg || undefined;
+    }
+
+    // 3. Validação de e-mail se alterado
+    if (updates.email && updates.email !== employee.email) {
+      if (!validateEmail(updates.email)) {
+        throw new Error('Formato de e-mail inválido.');
+      }
+      structuredChanges.push({
+        field: 'email',
+        label: 'E-mail',
+        previousValue: employee.email,
+        newValue: updates.email.trim().toLowerCase()
+      });
+      employee.email = updates.email.trim().toLowerCase();
+    }
+
+    // 4. Checagem dos demais campos
+    const checkStringChange = (field: keyof Employee, label: string, cleanFunc?: (v: string) => string) => {
+      if (updates[field] !== undefined && updates[field] !== employee[field]) {
+        const val = updates[field] as string;
+        const processed = cleanFunc ? cleanFunc(val) : (typeof val === 'string' ? val.trim() : val);
+        structuredChanges.push({
+          field: field as string,
+          label,
+          previousValue: (employee[field] as string) || '(não informado)',
+          newValue: processed || '(removido)'
+        });
+        (employee as any)[field] = processed || undefined;
+      }
+    };
+
+    // Validação de Data de Nascimento se alterada
+    if (updates.birthDate && updates.birthDate !== employee.birthDate) {
+      const bdCheck = new Date(updates.birthDate + 'T00:00:00');
+      if (isNaN(bdCheck.getTime()) || bdCheck > new Date()) {
+        throw new Error('A data de nascimento não pode ser uma data futura.');
+      }
+    }
+
+    checkStringChange('name', 'Nome Completo');
+    checkStringChange('birthDate', 'Data de Nascimento');
+    checkStringChange('phone', 'Telefone', v => v.replace(/\D/g, ''));
+    checkStringChange('secondaryPhone', 'Telefone Secundário', v => v.replace(/\D/g, ''));
+    checkStringChange('role', 'Cargo');
+    checkStringChange('jobPositionId', 'Identificador de Cargo');
+    checkStringChange('department', 'Setor');
+    checkStringChange('unit', 'Unidade');
+    checkStringChange('expectedStartDate', 'Início Previsto');
+    checkStringChange('admissionDate', 'Data de Admissão');
+
+    // Endereço
+    checkStringChange('cep', 'CEP', v => v.replace(/\D/g, ''));
+    checkStringChange('street', 'Logradouro');
+    checkStringChange('number', 'Número');
+    checkStringChange('complement', 'Complemento');
+    checkStringChange('neighborhood', 'Bairro');
+    checkStringChange('city', 'Cidade');
+    checkStringChange('state', 'UF', v => v.toUpperCase());
+
+    // Bloco 5.2 - Dados Pessoais e Identificação
+    checkStringChange('socialName', 'Nome Social');
+    checkStringChange('rg', 'RG');
+    checkStringChange('rgIssuer', 'Órgão Emissor do RG');
+    checkStringChange('rgIssueDate', 'Data de Emissão do RG');
+    checkStringChange('gender', 'Gênero/Sexo');
+    checkStringChange('maritalStatus', 'Estado Civil');
+    checkStringChange('motherName', 'Nome da Mãe');
+    checkStringChange('fatherName', 'Nome do Pai');
+    checkStringChange('nationality', 'Nacionalidade');
+    checkStringChange('birthplace', 'Naturalidade');
+
+    // Bloco 5.2 - Contato
+    checkStringChange('whatsapp', 'WhatsApp', v => v.replace(/\D/g, ''));
+    checkStringChange('personalEmail', 'E-mail Pessoal', v => v.toLowerCase());
+    checkStringChange('corporateEmail', 'E-mail Corporativo', v => v.toLowerCase());
+    checkStringChange('emergencyContactName', 'Nome do Contato de Emergência');
+    checkStringChange('emergencyContactRelationship', 'Grau de Parentesco de Emergência');
+    checkStringChange('emergencyContactPhone', 'Telefone de Emergência', v => v.replace(/\D/g, ''));
+    checkStringChange('emergencyContactNotes', 'Observações do Contato de Emergência');
+
+    // Bloco 5.2 - Dados Profissionais
+    checkStringChange('manager', 'Gestor Imediato');
+    checkStringChange('contractType', 'Tipo de Vínculo');
+    checkStringChange('workShift', 'Turno de Trabalho');
+    checkStringChange('professionalNotes', 'Observações Profissionais');
+
+    // Bloco 5.2 - Dados Complementares
+    checkStringChange('administrativeNotes', 'Observações Administrativas');
+    checkStringChange('internalId', 'Identificador Interno');
+
+    employee.updatedAt = new Date().toISOString();
+
+    // Sincroniza dados cadastrais em admissões ativas/abertas sem violar snapshots históricos de documentos
+    for (const adm of (this.data.admissions || [])) {
+      if (adm.employeeId === id) {
+        if (employee.name) adm.employee.name = employee.name;
+        if (employee.phone) adm.employee.phone = employee.phone;
+        if (employee.email) adm.employee.email = employee.email;
+        adm.updatedAt = new Date().toISOString();
+      }
+    }
+
+    if (structuredChanges.length > 0) {
+      this.addAuditLog({
+        userName: updatedByUserName,
+        action: 'Cadastro do funcionário atualizado pelo RH',
+        entityType: 'employee',
+        entityId: employee.id,
+        employeeName: employee.name,
+        changes: structuredChanges,
+        details: `Alteração de cadastro de ${employee.name} realizada por ${updatedByUserName}: ${structuredChanges.map(c => c.label).join(', ')}.`
+      });
+    }
+
+    this.save();
+    return employee;
+  }
+
+  setEmployeeStatus(id: string, status: 'Ativo' | 'Inativo', reason: string, updatedByUserName: string): Employee {
+    const employee = this.getEmployeeById(id);
+    if (!employee) {
+      throw new Error('Funcionário não encontrado.');
+    }
+
+    const previousStatus = employee.status || (employee.active ? 'Ativo' : 'Inativo');
+    if (previousStatus === status) {
+      return employee;
+    }
+
+    employee.status = status;
+    employee.active = (status === 'Ativo');
+    employee.updatedAt = new Date().toISOString();
+
+    this.addAuditLog({
+      userName: updatedByUserName,
+      action: status === 'Inativo' ? 'Funcionário inativado pelo RH' : 'Funcionário reativado pelo RH',
+      entityType: 'employee',
+      entityId: employee.id,
+      employeeName: employee.name,
+      fieldChanged: 'Situação',
+      previousValue: previousStatus,
+      newValue: status,
+      details: `Situação de ${employee.name} alterada para "${status}" por ${updatedByUserName}.${reason ? ' Motivo: ' + reason : ''}`
+    });
+
+    this.save();
+    return employee;
+  }
+
+  deleteEmployee(id: string, deletedByUserName: string): boolean {
+    const employee = this.getEmployeeById(id);
+    if (!employee) {
+      throw new Error('Funcionário não encontrado.');
+    }
+
+    // Regra de Integridade e Soft Delete: não excluir se houver admissões ou histórico
+    const cleanCpf = employee.cpf.replace(/\D/g, '');
+    const hasAdmissions = (this.data.admissions || []).some(a => 
+      a.employeeId === id || a.employee?.cpf?.replace(/\D/g, '') === cleanCpf
+    );
+    const hasAuditLogs = (this.data.auditLogs || []).some(l => 
+      l.entityId === id || l.employeeName === employee.name
+    );
+
+    if (hasAdmissions || hasAuditLogs) {
+      throw new Error('Não é permitido excluir fisicamente um funcionário que possui admissões ou histórico vinculados. Utilize a opção de Inativação para preservar os registros legais e auditoria.');
+    }
+
+    this.data.employees = (this.data.employees || []).filter(e => e.id !== id);
+
+    this.addAuditLog({
+      userName: deletedByUserName,
+      action: 'Funcionário excluído pelo RH',
+      entityType: 'employee',
+      entityId: id,
+      employeeName: employee.name,
+      details: `Exclusão cadastral do funcionário ${employee.name} realizada por ${deletedByUserName}.`
+    });
+
+    this.save();
+    return true;
+  }
+
+  // ------------------------------------------------------------------
+  // PARTE 5 - BLOCO 5.3: GESTÃO DE DOCUMENTOS DO FUNCIONÁRIO
+  // ------------------------------------------------------------------
+
+  getEmployeeDocuments(employeeId: string, options?: EmployeeDocumentFilterOptions): EmployeeDocument[] {
+    const employee = this.getEmployeeById(employeeId);
+    if (!employee) return [];
+
+    if (!this.data.employeeDocuments) {
+      this.data.employeeDocuments = [];
+    }
+
+    const cleanCpf = employee.cpf.replace(/\D/g, '');
+    const admissions = (this.data.admissions || []).filter(a => 
+      a.employeeId === employeeId || a.employee?.cpf?.replace(/\D/g, '') === cleanCpf
+    );
+
+    const now = new Date();
+    const result: EmployeeDocument[] = [];
+
+    // 1. Documentos diretos do prontuário (arquivados/renovados pelo RH)
+    const directDocs = this.data.employeeDocuments.filter(d => d.employeeId === employeeId);
+    for (const doc of directDocs) {
+      let status = doc.status;
+      let isExpired = false;
+      let isNearExpiration = false;
+      let daysUntilExpiration: number | undefined = undefined;
+
+      if (doc.hasExpiration && doc.expirationDate) {
+        const expDate = new Date(doc.expirationDate + 'T23:59:59');
+        if (!isNaN(expDate.getTime())) {
+          const diffMs = expDate.getTime() - now.getTime();
+          daysUntilExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+          if (daysUntilExpiration < 0) {
+            isExpired = true;
+            status = 'Vencido';
+          } else if (daysUntilExpiration <= 30) {
+            isNearExpiration = true;
+            if (status === 'Válido' || status === 'Pendente') {
+              status = 'A Vencer';
+            }
+          }
+        }
+      }
+
+      result.push({
+        ...doc,
+        status,
+        isExpired,
+        isNearExpiration,
+        daysUntilExpiration,
+        fileUrl: doc.fileUrl || `/api/employees/documents/${doc.id}/file`
+      });
+    }
+
+    // 2. Documentos consolidados dos processos de admissão
+    for (const adm of admissions) {
+      for (const admDoc of (adm.documents || [])) {
+        const alreadyInDirect = directDocs.some(d => 
+          d.id === admDoc.id || 
+          (d.admissionId === adm.id && d.title.toLowerCase() === (admDoc.document_type_name || admDoc.documentType || '').toLowerCase())
+        );
+
+        if (!alreadyInDirect) {
+          let status: EmployeeDocumentStatus = 'Pendente';
+          if (admDoc.status === 'Aprovado') status = 'Válido';
+          else if (admDoc.status === 'Em análise' || admDoc.status === 'Reenviado') status = 'Em Análise';
+          else if (admDoc.status === 'Rejeitado') status = 'Rejeitado';
+
+          let isExpired = false;
+          let isNearExpiration = false;
+          let daysUntilExpiration: number | undefined = undefined;
+
+          const expDateStr = (admDoc as any).expirationDate;
+          if (expDateStr) {
+            const expDate = new Date(expDateStr + 'T23:59:59');
+            if (!isNaN(expDate.getTime())) {
+              const diffMs = expDate.getTime() - now.getTime();
+              daysUntilExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+              if (daysUntilExpiration < 0) {
+                isExpired = true;
+                status = 'Vencido';
+              } else if (daysUntilExpiration <= 30) {
+                isNearExpiration = true;
+                if (status === 'Válido') status = 'A Vencer';
+              }
+            }
+          }
+
+          const versions: EmployeeDocumentVersion[] = (admDoc.versions || []).map(v => ({
+            version: v.version,
+            fileName: v.fileName || admDoc.fileName || `${admDoc.documentType}.pdf`,
+            fileSize: v.fileSize || admDoc.fileSize || 1024 * 1024,
+            mimeType: v.mimeType || admDoc.mimeType || 'application/pdf',
+            storagePath: v.storagePath || admDoc.storagePath,
+            fileUrl: `/api/documents/${admDoc.id}/file?version=${v.version}`,
+            uploadedAt: v.uploadedAt || admDoc.uploadedAt || adm.createdAt,
+            uploadedBy: 'Colaborador (Admissão)',
+            notes: v.rejectionReason || ''
+          }));
+
+          if (versions.length === 0 && (admDoc.fileName || admDoc.storagePath)) {
+            versions.push({
+              version: admDoc.currentVersion || 1,
+              fileName: admDoc.fileName || `${admDoc.documentType}.pdf`,
+              fileSize: admDoc.fileSize || 1024 * 1024,
+              mimeType: admDoc.mimeType || 'application/pdf',
+              storagePath: admDoc.storagePath,
+              fileUrl: `/api/documents/${admDoc.id}/file`,
+              uploadedAt: admDoc.uploadedAt || adm.createdAt,
+              uploadedBy: 'Colaborador (Admissão)'
+            });
+          }
+
+          let category: EmployeeDocumentCategory = 'Identificação';
+          const typeName = (admDoc.document_type_name || admDoc.documentType || '').toLowerCase();
+          if (typeName.includes('aso') || typeName.includes('exame') || typeName.includes('médico') || typeName.includes('saúde')) {
+            category = 'Saúde e Segurança (SST)';
+          } else if (typeName.includes('contrato') || typeName.includes('termo') || typeName.includes('declaração') || typeName.includes('aditivo')) {
+            category = 'Contratual';
+          } else if (typeName.includes('curso') || typeName.includes('nr-') || typeName.includes('certificado') || typeName.includes('escolaridade') || typeName.includes('diploma')) {
+            category = 'Certificações e Treinamentos';
+          } else if (typeName.includes('conta') || typeName.includes('bancár') || typeName.includes('vale') || typeName.includes('salár')) {
+            category = 'Financeiro e Benefícios';
+          }
+
+          result.push({
+            id: admDoc.id,
+            employeeId,
+            title: admDoc.document_type_name || admDoc.documentType || 'Documento de Admissão',
+            category: admDoc.category || category,
+            documentTypeId: admDoc.document_type_id,
+            documentTypeName: admDoc.document_type_name || admDoc.documentType,
+            description: admDoc.instructions || '',
+            hasExpiration: !!admDoc.requires_expiration_date || !!expDateStr,
+            expirationDate: expDateStr,
+            daysUntilExpiration,
+            isExpired,
+            isNearExpiration,
+            status,
+            fileName: admDoc.fileName || `${admDoc.documentType}.pdf`,
+            fileSize: admDoc.fileSize || 1024 * 1024,
+            mimeType: admDoc.mimeType || 'application/pdf',
+            storagePath: admDoc.storagePath,
+            fileUrl: `/api/documents/${admDoc.id}/file`,
+            currentVersion: admDoc.currentVersion || 1,
+            versions,
+            origin: 'Admissão',
+            admissionId: adm.id,
+            admissionRole: adm.employee?.role,
+            notes: admDoc.rejectionReason || admDoc.rejectionNotes,
+            createdAt: admDoc.uploadedAt || admDoc.createdAt || adm.createdAt,
+            createdBy: adm.employee.name,
+            updatedAt: admDoc.reviewedAt || admDoc.uploadedAt || adm.updatedAt,
+            updatedBy: admDoc.reviewedBy || 'RH'
+          });
+        }
+      }
+    }
+
+    // Aplicação dos Filtros
+    let filtered = result;
+
+    if (options?.search && options.search.trim()) {
+      const q = options.search.toLowerCase().trim();
+      filtered = filtered.filter(d => 
+        d.title.toLowerCase().includes(q) ||
+        d.fileName.toLowerCase().includes(q) ||
+        (d.category && d.category.toLowerCase().includes(q)) ||
+        (d.notes && d.notes.toLowerCase().includes(q)) ||
+        (d.description && d.description.toLowerCase().includes(q))
+      );
+    }
+
+    if (options?.category && options.category !== 'TODAS' && options.category !== 'all') {
+      filtered = filtered.filter(d => d.category === options.category);
+    }
+
+    if (options?.status && options.status !== 'TODOS' && options.status !== 'all') {
+      filtered = filtered.filter(d => d.status === options.status);
+    }
+
+    if (options?.expirationStatus && options.expirationStatus !== 'todos') {
+      if (options.expirationStatus === 'valido') {
+        filtered = filtered.filter(d => d.status === 'Válido' && !d.isExpired);
+      } else if (options.expirationStatus === 'a_vencer') {
+        filtered = filtered.filter(d => d.isNearExpiration || d.status === 'A Vencer');
+      } else if (options.expirationStatus === 'vencido') {
+        filtered = filtered.filter(d => d.isExpired || d.status === 'Vencido');
+      } else if (options.expirationStatus === 'sem_validade') {
+        filtered = filtered.filter(d => !d.hasExpiration || !d.expirationDate);
+      }
+    }
+
+    if (options?.origin && options.origin !== 'TODOS' && options.origin !== 'all') {
+      filtered = filtered.filter(d => d.origin.toLowerCase() === options.origin?.toLowerCase());
+    }
+
+    // Ordenação
+    filtered.sort((a, b) => {
+      if (a.isExpired && !b.isExpired) return -1;
+      if (!a.isExpired && b.isExpired) return 1;
+      if (a.isNearExpiration && !b.isNearExpiration) return -1;
+      if (!a.isNearExpiration && b.isNearExpiration) return 1;
+      return new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime();
+    });
+
+    return filtered;
+  }
+
+  getEmployeeDocumentStats(employeeId: string): EmployeeDocumentStats {
+    const all = this.getEmployeeDocuments(employeeId);
+    let valid = 0;
+    let nearExpiration = 0;
+    let expired = 0;
+    let noExpiration = 0;
+    const byCategory: Record<string, number> = {};
+
+    for (const d of all) {
+      const cat = d.category || 'Outros';
+      byCategory[cat] = (byCategory[cat] || 0) + 1;
+
+      if (d.isExpired || d.status === 'Vencido') {
+        expired++;
+      } else if (d.isNearExpiration || d.status === 'A Vencer') {
+        nearExpiration++;
+      } else if (d.status === 'Válido') {
+        valid++;
+      }
+
+      if (!d.hasExpiration || !d.expirationDate) {
+        noExpiration++;
+      }
+    }
+
+    return {
+      total: all.length,
+      valid,
+      nearExpiration,
+      expired,
+      noExpiration,
+      byCategory
+    };
+  }
+
+  getEmployeeDocumentById(id: string): EmployeeDocument | undefined {
+    if (!this.data.employeeDocuments) this.data.employeeDocuments = [];
+    const direct = this.data.employeeDocuments.find(d => d.id === id);
+    if (direct) return direct;
+
+    for (const emp of (this.data.employees || [])) {
+      const docs = this.getEmployeeDocuments(emp.id);
+      const found = docs.find(d => d.id === id);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  createEmployeeDocument(
+    employeeId: string,
+    docData: {
+      title: string;
+      category: EmployeeDocumentCategory | string;
+      documentTypeId?: string;
+      documentTypeName?: string;
+      description?: string;
+      hasExpiration?: boolean;
+      issueDate?: string;
+      expirationDate?: string;
+      notes?: string;
+    },
+    fileInfo: {
+      filename: string;
+      originalname: string;
+      size: number;
+      mimetype: string;
+    },
+    userName: string = 'RH'
+  ): EmployeeDocument {
+    const employee = this.getEmployeeById(employeeId);
+    if (!employee) {
+      throw new Error('Funcionário não encontrado.');
+    }
+
+    if (!docData.title || !docData.title.trim()) {
+      throw new Error('O título do documento é obrigatório.');
+    }
+
+    if (!this.data.employeeDocuments) {
+      this.data.employeeDocuments = [];
+    }
+
+    const docId = `empdoc-${crypto.randomUUID()}`;
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    let isExpired = false;
+    let isNearExpiration = false;
+    let daysUntilExpiration: number | undefined = undefined;
+    let status: EmployeeDocumentStatus = 'Válido';
+
+    if (docData.hasExpiration && docData.expirationDate) {
+      const expDate = new Date(docData.expirationDate + 'T23:59:59');
+      if (!isNaN(expDate.getTime())) {
+        const diffMs = expDate.getTime() - now.getTime();
+        daysUntilExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        if (daysUntilExpiration < 0) {
+          isExpired = true;
+          status = 'Vencido';
+        } else if (daysUntilExpiration <= 30) {
+          isNearExpiration = true;
+          status = 'A Vencer';
+        }
+      }
+    }
+
+    const initialVersion: EmployeeDocumentVersion = {
+      version: 1,
+      fileName: fileInfo.originalname,
+      fileSize: fileInfo.size,
+      mimeType: fileInfo.mimetype,
+      fileHash: (fileInfo as any).fileHash,
+      storagePath: fileInfo.filename,
+      fileUrl: `/api/employees/documents/${docId}/file?version=1`,
+      uploadedAt: nowIso,
+      uploadedBy: userName,
+      notes: docData.notes || 'Versão inicial'
+    };
+
+    const newDoc: EmployeeDocument = {
+      id: docId,
+      employeeId,
+      title: docData.title.trim(),
+      category: docData.category || 'Outros',
+      documentTypeId: docData.documentTypeId,
+      documentTypeName: docData.documentTypeName || docData.title.trim(),
+      description: docData.description,
+      hasExpiration: !!docData.hasExpiration,
+      issueDate: docData.issueDate,
+      expirationDate: docData.expirationDate,
+      daysUntilExpiration,
+      isExpired,
+      isNearExpiration,
+      status,
+      fileName: fileInfo.originalname,
+      fileSize: fileInfo.size,
+      mimeType: fileInfo.mimetype,
+      fileHash: (fileInfo as any).fileHash,
+      storagePath: fileInfo.filename,
+      fileUrl: `/api/employees/documents/${docId}/file`,
+      currentVersion: 1,
+      versions: [initialVersion],
+      origin: 'RH',
+      notes: docData.notes,
+      createdAt: nowIso,
+      createdBy: userName,
+      updatedAt: nowIso,
+      updatedBy: userName
+    };
+
+    this.data.employeeDocuments.unshift(newDoc);
+    this.save();
+
+    this.addAuditLog({
+      userName,
+      action: 'Inclusão de documento do funcionário',
+      entityType: 'employee_document',
+      entityId: docId,
+      employeeName: employee.name,
+      details: `Documento "${newDoc.title}" (${newDoc.category}) arquivado com sucesso no prontuário de ${employee.name} por ${userName}.`
+    });
+
+    return newDoc;
+  }
+
+  renewEmployeeDocumentVersion(
+    docId: string,
+    fileInfo: {
+      filename: string;
+      originalname: string;
+      size: number;
+      mimetype: string;
+    },
+    updates: {
+      expirationDate?: string;
+      issueDate?: string;
+      replacementReason?: string;
+      notes?: string;
+    },
+    userName: string = 'RH'
+  ): EmployeeDocument {
+    if (!this.data.employeeDocuments) this.data.employeeDocuments = [];
+
+    let docIndex = this.data.employeeDocuments.findIndex(d => d.id === docId);
+    let doc: EmployeeDocument;
+
+    if (docIndex === -1) {
+      const virtualDoc = this.getEmployeeDocumentById(docId);
+      if (!virtualDoc) {
+        throw new Error('Documento não encontrado para renovação.');
+      }
+      doc = { ...virtualDoc };
+      this.data.employeeDocuments.push(doc);
+      docIndex = this.data.employeeDocuments.length - 1;
+    } else {
+      doc = this.data.employeeDocuments[docIndex];
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const newVersionNumber = (doc.currentVersion || 1) + 1;
+
+    let isExpired = false;
+    let isNearExpiration = false;
+    let daysUntilExpiration: number | undefined = undefined;
+    let status: EmployeeDocumentStatus = 'Válido';
+
+    const finalExpDate = updates.expirationDate !== undefined ? updates.expirationDate : doc.expirationDate;
+
+    if (doc.hasExpiration && finalExpDate) {
+      const expDate = new Date(finalExpDate + 'T23:59:59');
+      if (!isNaN(expDate.getTime())) {
+        const diffMs = expDate.getTime() - now.getTime();
+        daysUntilExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        if (daysUntilExpiration < 0) {
+          isExpired = true;
+          status = 'Vencido';
+        } else if (daysUntilExpiration <= 30) {
+          isNearExpiration = true;
+          status = 'A Vencer';
+        }
+      }
+    }
+
+    const newVersionItem: EmployeeDocumentVersion = {
+      version: newVersionNumber,
+      fileName: fileInfo.originalname,
+      fileSize: fileInfo.size,
+      mimeType: fileInfo.mimetype,
+      fileHash: (fileInfo as any).fileHash,
+      storagePath: fileInfo.filename,
+      fileUrl: `/api/employees/documents/${doc.id}/file?version=${newVersionNumber}`,
+      uploadedAt: nowIso,
+      uploadedBy: userName,
+      replacementReason: updates.replacementReason,
+      notes: updates.notes || `Renovação / Versão ${newVersionNumber}`
+    };
+
+    doc.currentVersion = newVersionNumber;
+    doc.fileName = fileInfo.originalname;
+    doc.fileSize = fileInfo.size;
+    doc.mimeType = fileInfo.mimetype;
+    doc.fileHash = (fileInfo as any).fileHash;
+    doc.storagePath = fileInfo.filename;
+    doc.fileUrl = `/api/employees/documents/${doc.id}/file`;
+    doc.versions.push(newVersionItem);
+
+    if (updates.expirationDate !== undefined) doc.expirationDate = updates.expirationDate;
+    if (updates.issueDate !== undefined) doc.issueDate = updates.issueDate;
+    if (updates.notes !== undefined) doc.notes = updates.notes;
+
+    doc.status = status;
+    doc.isExpired = isExpired;
+    doc.isNearExpiration = isNearExpiration;
+    doc.daysUntilExpiration = daysUntilExpiration;
+    doc.updatedAt = nowIso;
+    doc.updatedBy = userName;
+
+    this.data.employeeDocuments[docIndex] = doc;
+    this.save();
+
+    const employee = this.getEmployeeById(doc.employeeId);
+    this.addAuditLog({
+      userName,
+      action: 'Renovação de documento do funcionário',
+      entityType: 'employee_document',
+      entityId: doc.id,
+      employeeName: employee?.name || 'Funcionário',
+      details: `Documento "${doc.title}" renovado para a Versão ${newVersionNumber} por ${userName}.${finalExpDate ? ' Novo vencimento: ' + finalExpDate : ''}`
+    });
+
+    return doc;
+  }
+
+  updateEmployeeDocument(
+    docId: string,
+    updates: Partial<EmployeeDocument>,
+    userName: string = 'RH'
+  ): EmployeeDocument {
+    if (!this.data.employeeDocuments) this.data.employeeDocuments = [];
+
+    let docIndex = this.data.employeeDocuments.findIndex(d => d.id === docId);
+    let doc: EmployeeDocument;
+
+    if (docIndex === -1) {
+      const virtualDoc = this.getEmployeeDocumentById(docId);
+      if (!virtualDoc) {
+        throw new Error('Documento não encontrado.');
+      }
+      doc = { ...virtualDoc };
+      this.data.employeeDocuments.push(doc);
+      docIndex = this.data.employeeDocuments.length - 1;
+    } else {
+      doc = this.data.employeeDocuments[docIndex];
+    }
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    if (updates.title) doc.title = updates.title.trim();
+    if (updates.category) doc.category = updates.category;
+    if (updates.description !== undefined) doc.description = updates.description;
+    if (updates.hasExpiration !== undefined) doc.hasExpiration = updates.hasExpiration;
+    if (updates.issueDate !== undefined) doc.issueDate = updates.issueDate;
+    if (updates.expirationDate !== undefined) doc.expirationDate = updates.expirationDate;
+    if (updates.notes !== undefined) doc.notes = updates.notes;
+    if (updates.status) doc.status = updates.status;
+
+    if (doc.hasExpiration && doc.expirationDate) {
+      const expDate = new Date(doc.expirationDate + 'T23:59:59');
+      if (!isNaN(expDate.getTime())) {
+        const diffMs = expDate.getTime() - now.getTime();
+        doc.daysUntilExpiration = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        doc.isExpired = doc.daysUntilExpiration < 0;
+        doc.isNearExpiration = doc.daysUntilExpiration >= 0 && doc.daysUntilExpiration <= 30;
+        if (doc.isExpired) {
+          doc.status = 'Vencido';
+        } else if (doc.isNearExpiration && (doc.status === 'Válido' || !doc.status)) {
+          doc.status = 'A Vencer';
+        }
+      }
+    } else if (!doc.hasExpiration) {
+      doc.daysUntilExpiration = undefined;
+      doc.isExpired = false;
+      doc.isNearExpiration = false;
+    }
+
+    doc.updatedAt = nowIso;
+    doc.updatedBy = userName;
+
+    this.data.employeeDocuments[docIndex] = doc;
+    this.save();
+
+    const employee = this.getEmployeeById(doc.employeeId);
+    this.addAuditLog({
+      userName,
+      action: 'Metadados de documento atualizados',
+      entityType: 'employee_document',
+      entityId: doc.id,
+      employeeName: employee?.name || 'Funcionário',
+      details: `Metadados do documento "${doc.title}" atualizados por ${userName}.`
+    });
+
+    return doc;
+  }
+
+  deleteEmployeeDocument(docId: string, userName: string = 'RH'): boolean {
+    if (!this.data.employeeDocuments) this.data.employeeDocuments = [];
+
+    const docIndex = this.data.employeeDocuments.findIndex(d => d.id === docId);
+    if (docIndex === -1) {
+      throw new Error('Documentos arquivados originalmente no processo de admissão não podem ser excluídos fisicamente para preservar a integridade histórica da contratação.');
+    }
+
+    const doc = this.data.employeeDocuments[docIndex];
+    const employee = this.getEmployeeById(doc.employeeId);
+
+    this.data.employeeDocuments.splice(docIndex, 1);
+    this.save();
+
+    this.addAuditLog({
+      userName,
+      action: 'Exclusão de documento do funcionário',
+      entityType: 'employee_document',
+      entityId: docId,
+      employeeName: employee?.name || 'Funcionário',
+      details: `Documento "${doc.title}" removido do prontuário de ${employee?.name || 'Funcionário'} por ${userName}.`
+    });
+
+    return true;
+  }
+
   confirmEmployeeData(admissionId: string) {
     const admission = this.getAdmissionById(admissionId);
     if (!admission) throw new Error('Admissão não encontrada');
@@ -2540,6 +4540,9 @@ export class Database {
     admission.dataConfirmed = true;
     admission.dataConfirmedAt = new Date().toISOString();
     admission.updatedAt = new Date().toISOString();
+
+    // Atualiza automaticamente as etapas do processo admissional
+    this.evaluateAdmissionProcessSteps(admission, admission.employee?.name || 'Colaborador');
 
     this.addAuditLog({
       userName: admission.employee.name,
@@ -2830,6 +4833,9 @@ export class Database {
     }
 
     admission.updatedAt = new Date().toISOString();
+
+    // Sincroniza e avalia as etapas do processo admissional
+    this.evaluateAdmissionProcessSteps(admission, 'Sistema');
   }
 
   // Filtragem, busca e paginação de admissões para o RH
@@ -2984,6 +4990,7 @@ export class Database {
           id: `pend-${adm.id}-processo`,
           admissionId: adm.id,
           admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+          employeeId: adm.employeeId || adm.employee.id,
           employeeName: adm.employee.name,
           employeeCpf: adm.employee.cpf,
           role: adm.employee.role,
@@ -3021,6 +5028,7 @@ export class Database {
             id: `pend-${adm.id}-${doc.id}`,
             admissionId: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeId: adm.employeeId || adm.employee.id,
             employeeName: adm.employee.name,
             employeeCpf: adm.employee.cpf,
             role: adm.employee.role,
@@ -3051,6 +5059,7 @@ export class Database {
             id: `pend-${adm.id}-${doc.id}`,
             admissionId: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeId: adm.employeeId || adm.employee.id,
             employeeName: adm.employee.name,
             employeeCpf: adm.employee.cpf,
             role: adm.employee.role,
@@ -3080,6 +5089,7 @@ export class Database {
             id: `pend-${adm.id}-${doc.id}`,
             admissionId: adm.id,
             admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+            employeeId: adm.employeeId || adm.employee.id,
             employeeName: adm.employee.name,
             employeeCpf: adm.employee.cpf,
             role: adm.employee.role,
@@ -3401,7 +5411,7 @@ export class Database {
   // Atualização Cadastral Completa da Admissão e Colaborador (CRUD: Update)
   updateAdmission(
     id: string, 
-    updates: Partial<Employee> & { status?: AdmissionStatus }, 
+    updates: Omit<Partial<Employee>, 'status'> & { status?: AdmissionStatus }, 
     updatedBy: string
   ): Admission {
     const admission = this.getAdmissionById(id);
@@ -5951,6 +7961,80 @@ export class Database {
     });
 
     return updated;
+  }
+
+  // =========================================================================
+  // BLOCO 5.5 — CHECKLIST OPERACIONAL AVANÇADO
+  // =========================================================================
+
+  /**
+   * Retorna os dados operacionais consolidados do Checklist Avançado (Bloco 5.5).
+   * Integra indicadores, filtros, priorização automática e tarefas operacionais.
+   */
+  public getOperationalChecklistData(options?: OperationalChecklistFilters): OperationalChecklistResponse {
+    const admissions = this.data.admissions || [];
+    const settings = this.getSettings();
+
+    // Garante que cada admissão possua seu snapshot de etapas 5.4 sincronizado
+    admissions.forEach(adm => {
+      this.evaluateAdmissionProcessSteps(adm, 'Sistema');
+    });
+
+    return filterAndPaginateChecklist(admissions, options, settings);
+  }
+
+  /**
+   * Retorna os detalhes operacionais e lista de tarefas de uma admissão específica.
+   */
+  public getAdmissionOperationalChecklist(admissionId: string): OperationalChecklistItem | null {
+    const admission = (this.data.admissions || []).find(a => a.id === admissionId);
+    if (!admission) return null;
+
+    this.evaluateAdmissionProcessSteps(admission, 'Sistema');
+
+    const settings = this.getSettings();
+    return buildOperationalChecklistItem(admission, settings);
+  }
+
+  /**
+   * Atualiza ou define a prioridade operacional de uma admissão com auditoria no audit_logs.
+   */
+  public updateAdmissionOperationalPriority(
+    admissionId: string, 
+    priority: OperationalPriority, 
+    reason?: string, 
+    updatedBy: string = 'RH'
+  ): OperationalChecklistItem | null {
+    const admission = (this.data.admissions || []).find(a => a.id === admissionId);
+    if (!admission) return null;
+
+    const previousPriority = admission.operationalPriority || 'NORMAL';
+    admission.operationalPriority = priority;
+    admission.operationalPriorityReason = reason;
+    admission.operationalPriorityUpdatedAt = new Date().toISOString();
+    admission.operationalPriorityUpdatedBy = updatedBy;
+    admission.updatedAt = new Date().toISOString();
+
+    this.save();
+
+    this.addAuditLog({
+      userName: updatedBy,
+      action: 'Alteração de Prioridade Operacional',
+      admissionId: admission.id,
+      employeeName: admission.employee?.name,
+      details: `Prioridade operacional alterada de ${previousPriority} para ${priority}.${reason ? ` Justificativa: "${reason}"` : ''}`,
+      changes: [
+        {
+          field: 'operationalPriority',
+          label: 'Prioridade Operacional',
+          previousValue: previousPriority,
+          newValue: priority
+        }
+      ]
+    });
+
+    const settings = this.getSettings();
+    return buildOperationalChecklistItem(admission, settings);
   }
 }
 

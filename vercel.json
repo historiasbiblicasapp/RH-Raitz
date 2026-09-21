@@ -1,5 +1,7 @@
 {
   "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/api/(.*)",
@@ -10,7 +12,7 @@
       "destination": "/api"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/|auth/|assets/|favicon\\.ico|favicon\\.png|raitz-logo\\.jpg|.*\\.[a-zA-Z0-9]+$).*)",
       "destination": "/index.html"
     }
   ]

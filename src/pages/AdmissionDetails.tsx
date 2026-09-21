@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { 
   ArrowLeft, 
   MessageCircle, 
@@ -51,9 +51,11 @@ import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
 import { ManageInviteModal } from '../components/ManageInviteModal.tsx';
 import { CommunicationModal } from '../components/CommunicationModal.tsx';
 import { AdmissionTimeline } from '../components/AdmissionTimeline.tsx';
+import { AdmissionProcessStepper } from '../components/AdmissionProcessStepper.tsx';
+import { AdmissionOperationalChecklistTab } from '../components/AdmissionOperationalChecklistTab.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
-type ActiveTab = 'resumo' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
+type ActiveTab = 'resumo' | 'etapas' | 'checklist' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
 
 export const AdmissionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -71,7 +73,7 @@ export const AdmissionDetails: React.FC = () => {
     const tabParam = searchParams.get('tab');
     const docIdParam = searchParams.get('docId');
 
-    if (tabParam && ['resumo', 'dados', 'documentos', 'pendencias', 'prazos', 'acompanhamento', 'historico', 'convite'].includes(tabParam)) {
+    if (tabParam && ['resumo', 'etapas', 'checklist', 'dados', 'documentos', 'pendencias', 'prazos', 'acompanhamento', 'historico', 'convite'].includes(tabParam)) {
       setActiveTab(tabParam === 'acompanhamento' ? 'prazos' : (tabParam as ActiveTab));
     }
     if (docIdParam) {
@@ -622,6 +624,14 @@ export const AdmissionDetails: React.FC = () => {
                   {admission.employee.name}
                 </h1>
                 <StatusBadge status={admission.status} size="md" />
+                <Link
+                  to={`/funcionarios/${admission.employeeId || admission.employee?.id}`}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 transition"
+                  title="Abrir ficha cadastral completa do funcionário"
+                >
+                  <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                  Ficha do Funcionário
+                </Link>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1 font-medium">
                 <span className="text-slate-800 font-semibold">{admission.employee.role}</span>
@@ -670,6 +680,38 @@ export const AdmissionDetails: React.FC = () => {
             }`}
           >
             Resumo
+          </button>
+
+          <button
+            onClick={() => setActiveTab('etapas')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'etapas'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <span>Etapas do Processo</span>
+            {admission.processSteps && admission.processSteps.length > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                activeTab === 'etapas' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
+              }`}>
+                {admission.processSteps.filter(s => s.status === 'CONCLUIDA').length}/{admission.processSteps.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('checklist')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'checklist'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <span>Checklist Operacional</span>
+            {admission.operationalPriority === 'CRITICA' && (
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" title="Prioridade Crítica" />
+            )}
           </button>
 
           <button
@@ -830,103 +872,48 @@ export const AdmissionDetails: React.FC = () => {
             </div>
           </div>
 
-          {/* Linha do tempo simplificada do processo admissional */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
-            <h2 className="text-sm font-bold text-slate-900 mb-4">Etapas do Processo Admissional</h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-6 gap-4 relative">
-              {/* Etapa 1: Cadastro criado */}
-              <div className="flex flex-col items-center text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs mb-2">
-                  <Check className="w-4 h-4" />
-                </div>
-                <span className="text-xs font-bold text-slate-900">1. Cadastro Criado</span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  {new Date(admission.createdAt).toLocaleDateString('pt-BR')}
-                </span>
-              </div>
-
-              {/* Etapa 2: Convite enviado */}
-              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
-                admission.inviteSentViaWhatsApp ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
-              }`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
-                  admission.inviteSentViaWhatsApp ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {admission.inviteSentViaWhatsApp ? <Check className="w-4 h-4" /> : '2'}
-                </div>
-                <span className="text-xs font-bold text-slate-900">2. Convite Enviado</span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  {admission.inviteSentAt ? new Date(admission.inviteSentAt).toLocaleDateString('pt-BR') : 'Pendente'}
-                </span>
-              </div>
-
-              {/* Etapa 3: Funcionário acessou */}
-              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
-                (admission.inviteAccessCount || 0) > 0 ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
-              }`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
-                  (admission.inviteAccessCount || 0) > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {(admission.inviteAccessCount || 0) > 0 ? <Check className="w-4 h-4" /> : '3'}
-                </div>
-                <span className="text-xs font-bold text-slate-900">3. Acesso Colaborador</span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  {admission.inviteLastAccessedAt ? new Date(admission.inviteLastAccessedAt).toLocaleDateString('pt-BR') : 'Aguardando'}
-                </span>
-              </div>
-
-              {/* Etapa 4: Consentimento & Dados */}
-              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
-                admission.dataConfirmed ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
-              }`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
-                  admission.dataConfirmed ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {admission.dataConfirmed ? <Check className="w-4 h-4" /> : '4'}
-                </div>
-                <span className="text-xs font-bold text-slate-900">4. Dados Validados</span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  {admission.dataConfirmedAt ? new Date(admission.dataConfirmedAt).toLocaleDateString('pt-BR') : 'Aguardando'}
-                </span>
-              </div>
-
-              {/* Etapa 5: Documentos enviados e em conferência */}
-              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
-                admission.approvedDocuments > 0 || inReviewDocs.length > 0 ? 'bg-slate-50 border-slate-100' : 'bg-slate-50/50 border-dashed border-slate-200'
-              }`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
-                  admission.approvedDocuments === admission.totalDocuments && admission.totalDocuments > 0
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : inReviewDocs.length > 0
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {admission.approvedDocuments === admission.totalDocuments ? <Check className="w-4 h-4" /> : '5'}
-                </div>
-                <span className="text-xs font-bold text-slate-900">5. Conferência RH</span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  {admission.approvedDocuments}/{admission.totalDocuments} aprovados
-                </span>
-              </div>
-
-              {/* Etapa 6: Conclusão */}
-              <div className={`flex flex-col items-center text-center p-3 rounded-xl border ${
-                isCompleted ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50/50 border-dashed border-slate-200'
-              }`}>
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs mb-2 ${
-                  isCompleted ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {isCompleted ? <Check className="w-4 h-4" /> : '6'}
-                </div>
-                <span className="text-xs font-bold text-slate-900">6. Concluída</span>
-                <span className="text-[11px] text-slate-500 mt-0.5">
-                  {admission.completedAt ? new Date(admission.completedAt).toLocaleDateString('pt-BR') : 'Em andamento'}
-                </span>
-              </div>
+          {/* Processo Admissional Configurável (Bloco 5.4) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800">Processo Admissional (Snapshot Desta Admissão)</span>
+              <button
+                onClick={() => setActiveTab('etapas')}
+                className="text-xs text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <span>Acessar Gestão Completa de Etapas</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
+            <AdmissionProcessStepper 
+              admission={admission} 
+              onUpdate={setAdmission} 
+              compact={true} 
+            />
           </div>
         </div>
+      )}
+
+      {/* ABA: ETAPAS DO PROCESSO (BLOCO 5.4) */}
+      {activeTab === 'etapas' && (
+        <AdmissionProcessStepper 
+          admission={admission} 
+          onUpdate={setAdmission} 
+          compact={false} 
+        />
+      )}
+
+      {/* ABA: CHECKLIST OPERACIONAL (BLOCO 5.5) */}
+      {activeTab === 'checklist' && (
+        <AdmissionOperationalChecklistTab
+          admission={admission}
+          onUpdateAdmission={setAdmission}
+          onNavigateTab={(tab, docId) => {
+            if (['resumo', 'etapas', 'checklist', 'dados', 'documentos', 'pendencias', 'prazos', 'historico', 'convite'].includes(tab)) {
+              setActiveTab(tab as ActiveTab);
+              if (docId) setHighlightedDocId(docId);
+            }
+          }}
+        />
       )}
 
       {/* ABA 2: DADOS PESSOAIS (Item 13) */}

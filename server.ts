@@ -114,6 +114,30 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Fallback universal para SPA em desenvolvimento:
+    // Garante que rotas como /login, /dashboard, /prazos funcionem perfeitamente ao atualizar a página (F5)
+    // ou ao digitar diretamente na barra de endereços
+    app.use('*', async (req, res, next) => {
+      // Ignora requisições de API e Auth
+      if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/auth')) {
+        return next();
+      }
+
+      try {
+        const url = req.originalUrl;
+        const indexPath = path.resolve(process.cwd(), 'index.html');
+        if (fs.existsSync(indexPath)) {
+          let template = fs.readFileSync(indexPath, 'utf-8');
+          template = await vite.transformIndexHtml(url, template);
+          return res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+        }
+        next();
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

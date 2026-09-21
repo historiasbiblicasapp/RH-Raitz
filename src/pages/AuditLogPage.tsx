@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { History, Search, ShieldCheck, Download, Filter, ChevronRight, Eye, User, FileText, Briefcase, CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react';
 import { AuditLog, AuditLogChange } from '../types/index.ts';
+import { safeFetchJson } from '../lib/api.ts';
 
 export const AuditLogPage: React.FC = () => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -13,13 +14,14 @@ export const AuditLogPage: React.FC = () => {
   const loadLogs = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/audit-logs');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<any>('/api/audit-logs');
+      if (Array.isArray(data)) {
         setLogs(data);
+      } else if (data?.logs) {
+        setLogs(data.logs);
       }
     } catch (err) {
-      console.error(err);
+      console.warn('Erro ao carregar logs de auditoria:', err);
     } finally {
       setLoading(false);
     }

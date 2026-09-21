@@ -36,6 +36,8 @@ import {
 } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { maskCPF } from '../lib/cpf.ts';
+import { safeFetchJson } from '../lib/api.ts';
+import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 export const PendingHubPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -103,65 +105,70 @@ export const PendingHubPage: React.FC = () => {
 
   // Função principal de busca de pendências
   const fetchPendingItems = useCallback(async (isSilentRefresh = false) => {
+    const query = new URLSearchParams();
+    if (search) query.set('search', search);
+    if (tipo && tipo !== 'todas') query.set('tipo', tipo);
+    if (prioridade && prioridade !== 'todas') query.set('prioridade', prioridade);
+    if (status && status !== 'TODOS') query.set('status', status);
+    if (cargo && cargo !== 'TODOS') query.set('cargo', cargo);
+    if (setor && setor !== 'TODOS') query.set('setor', setor);
+    if (unidade && unidade !== 'TODOS') query.set('unidade', unidade);
+    if (documento && documento !== 'TODOS') query.set('documento', documento);
+    if (responsavel && responsavel !== 'TODOS') query.set('responsavel', responsavel);
+    if (page) query.set('page', String(page));
+    if (limit) query.set('limit', String(limit));
+    if (sortBy) query.set('sortBy', sortBy);
+    if (sortOrder) query.set('sortOrder', sortOrder);
+
+    // Tratamento de período
+    if (periodo === 'today') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      query.set('startDate', todayStr);
+      query.set('endDate', todayStr);
+    } else if (periodo === '7d') {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      query.set('startDate', d.toISOString().split('T')[0]);
+    } else if (periodo === '30d') {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      query.set('startDate', d.toISOString().split('T')[0]);
+    }
+
     try {
       if (!isSilentRefresh) setLoading(true);
       else setRefreshing(true);
 
-      const query = new URLSearchParams();
-      if (search) query.set('search', search);
-      if (tipo && tipo !== 'todas') query.set('tipo', tipo);
-      if (prioridade && prioridade !== 'todas') query.set('prioridade', prioridade);
-      if (status && status !== 'TODOS') query.set('status', status);
-      if (cargo && cargo !== 'TODOS') query.set('cargo', cargo);
-      if (setor && setor !== 'TODOS') query.set('setor', setor);
-      if (unidade && unidade !== 'TODOS') query.set('unidade', unidade);
-      if (documento && documento !== 'TODOS') query.set('documento', documento);
-      if (responsavel && responsavel !== 'TODOS') query.set('responsavel', responsavel);
-      if (page) query.set('page', String(page));
-      if (limit) query.set('limit', String(limit));
-      if (sortBy) query.set('sortBy', sortBy);
-      if (sortOrder) query.set('sortOrder', sortOrder);
-
-      // Tratamento de período
-      if (periodo === 'today') {
-        const todayStr = new Date().toISOString().split('T')[0];
-        query.set('startDate', todayStr);
-        query.set('endDate', todayStr);
-      } else if (periodo === '7d') {
-        const d = new Date();
-        d.setDate(d.getDate() - 7);
-        query.set('startDate', d.toISOString().split('T')[0]);
-      } else if (periodo === '30d') {
-        const d = new Date();
-        d.setDate(d.getDate() - 30);
-        query.set('startDate', d.toISOString().split('T')[0]);
+      const data = await safeFetchJson<PendingHubResponse>(`/api/pendencias?${query.toString()}`);
+      if (data) {
+        setItems(data.items || []);
+        setTotal(data.total || (data.items ? data.items.length : 0));
+        setTotalPages(data.totalPages || 1);
+        setSummary(data.summary || {
+          total: data.items ? data.items.length : 0,
+          notSent: 0,
+          waitingReview: 0,
+          rejected: data.items ? data.items.length : 0,
+          upcomingWithIssues: 0
+        });
+        if (data.filters) {
+          setFilterOptions(data.filters);
+        }
       }
-
-      const res = await fetch(`/api/pendencias?${query.toString()}`);
-      if (!res.ok) {
-        throw new Error('Falha ao carregar central de pendências');
-      }
-
-      const data: PendingHubResponse = await res.json();
-      setItems(data.items || []);
-      setTotal(data.total || 0);
-      setTotalPages(data.totalPages || 1);
-      setSummary(data.summary || {
-        total: 0,
-        notSent: 0,
-        waitingReview: 0,
-        rejected: 0,
-        upcomingWithIssues: 0
-      });
-      setFilterOptions(data.filters || {
-        roles: [],
-        departments: [],
-        units: [],
-        documentTypes: [],
-        responsibles: []
-      });
     } catch (err) {
-      console.error('Erro ao buscar pendências:', err);
+      console.warn('Utilizando dados locais de pendências:', err);
+      const fallback = handleFallbackApiRoute(`/api/pendencias?${query.toString()}`);
+      if (fallback) {
+        setItems(fallback.items || []);
+        setTotal(fallback.summary?.total || fallback.items?.length || 0);
+        setSummary(fallback.summary || {
+          total: 1,
+          notSent: 0,
+          waitingReview: 0,
+          rejected: 1,
+          upcomingWithIssues: 0
+        });
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -744,9 +751,19 @@ export const PendingHubPage: React.FC = () => {
 
                     {/* Funcionário */}
                     <td className="py-3.5 px-4">
-                      <div className="font-bold text-slate-900 leading-snug">
-                        {item.employeeName}
-                      </div>
+                      {item.employeeId ? (
+                        <Link
+                          to={`/funcionarios/${item.employeeId}`}
+                          className="font-bold text-slate-900 hover:text-blue-600 transition-colors leading-snug block"
+                          title="Ver ficha cadastral do funcionário"
+                        >
+                          {item.employeeName}
+                        </Link>
+                      ) : (
+                        <div className="font-bold text-slate-900 leading-snug">
+                          {item.employeeName}
+                        </div>
+                      )}
                       <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
                         <span>{item.department}</span>
                         {item.unit && (

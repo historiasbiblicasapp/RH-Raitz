@@ -13,6 +13,8 @@ import {
 import { Admission, AdmissionDocument } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { DocumentReviewModal } from '../components/DocumentReviewModal.tsx';
+import { safeFetchJson } from '../lib/api.ts';
+import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 interface FlatDocumentItem {
   admission: Admission;
@@ -20,8 +22,11 @@ interface FlatDocumentItem {
 }
 
 export const DocumentReviewPage: React.FC = () => {
-  const [admissions, setAdmissions] = useState<Admission[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [admissions, setAdmissions] = useState<Admission[]>(() => {
+    const res = handleFallbackApiRoute('/api/admissions');
+    return res?.admissions || [];
+  });
+  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('Em conferência');
   const [activeReviewItem, setActiveReviewItem] = useState<FlatDocumentItem | null>(null);
@@ -31,13 +36,14 @@ export const DocumentReviewPage: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/admissions');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<any>('/api/admissions');
+      if (data && data.admissions) {
+        setAdmissions(data.admissions);
+      } else if (Array.isArray(data)) {
         setAdmissions(data);
       }
     } catch (err) {
-      console.error(err);
+      console.warn('Erro ao carregar dados de revisão:', err);
     } finally {
       setLoading(false);
     }

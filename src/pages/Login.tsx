@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ShieldCheck, 
@@ -7,7 +7,8 @@ import {
   Lock, 
   Mail, 
   ArrowRight, 
-  CheckCircle2
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -19,8 +20,14 @@ export const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [forgotPasswordSent, setForgotPasswordSent] = useState(false);
 
-  const { login } = useAuth();
+  const { login, demoLogin, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,9 +36,22 @@ export const Login: React.FC = () => {
 
     try {
       await login(email, password);
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setError(err.message || 'Falha ao autenticar. Verifique seus dados.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleQuickDemo = async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      await demoLogin();
+      navigate('/dashboard', { replace: true });
+    } catch (err: any) {
+      setError(err.message || 'Falha ao autenticar.');
     } finally {
       setIsLoading(false);
     }
@@ -139,7 +159,7 @@ export const Login: React.FC = () => {
             </div>
 
             {/* Botão Entrar */}
-            <div className="pt-2">
+            <div className="pt-2 space-y-2.5">
               <button
                 type="submit"
                 disabled={isLoading}
@@ -147,6 +167,22 @@ export const Login: React.FC = () => {
               >
                 <span>{isLoading ? 'Autenticando...' : 'Acessar Painel do RH'}</span>
                 <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-200"></div>
+                <span className="flex-shrink mx-2 text-[11px] text-slate-400 font-medium">ou</span>
+                <div className="flex-grow border-t border-slate-200"></div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleQuickDemo}
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2.5 px-3 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                <span>Acesso Rápido RH (Demonstração)</span>
               </button>
             </div>
           </form>

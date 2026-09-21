@@ -108,21 +108,211 @@ export interface JobPositionDocument {
   job_position?: JobPosition;
 }
 
+export type EmployeeStatus = 'Ativo' | 'Inativo';
+
 export interface Employee {
   id: string;
   name: string;
   cpf: string;
+  cpfMasked?: string;
   birthDate: string;
   phone: string;
+  secondaryPhone?: string;
   email: string;
   role: string;
   jobPositionId?: string;
   department: string;
   unit: string;
   expectedStartDate: string;
+  admissionDate?: string;
+  registrationNumber?: string; // Matrícula
+  active?: boolean;
+  status?: EmployeeStatus;
+  // Endereço
+  cep?: string;
+  street?: string;
+  number?: string;
+  complement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  // Dados Pessoais e Identificação (Bloco 5.2)
+  socialName?: string;
+  rg?: string;
+  rgIssuer?: string;
+  rgIssueDate?: string;
+  gender?: string;
+  maritalStatus?: string;
+  motherName?: string;
+  fatherName?: string;
+  nationality?: string;
+  birthplace?: string;
+  // Contato (Bloco 5.2)
+  whatsapp?: string;
+  personalEmail?: string;
+  corporateEmail?: string;
+  // Contato de Emergência (Bloco 5.2)
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string;
+  emergencyContactPhone?: string;
+  emergencyContactNotes?: string;
+  // Dados Profissionais (Bloco 5.2)
+  manager?: string;
+  contractType?: string;
+  workShift?: string;
+  professionalNotes?: string;
+  // Dados Complementares (Bloco 5.2)
+  administrativeNotes?: string;
+  internalId?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export interface EmployeeFilters {
+  search?: string;
+  status?: EmployeeStatus | 'TODOS';
+  role?: string;
+  department?: string;
+  unit?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface EmployeeResponse {
+  employees: Employee[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  filters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    statuses: string[];
+  };
+}
+
+export interface EmployeeDetailResponse {
+  employee: Employee;
+  admissions: Admission[];
+  summary: {
+    totalAdmissions: number;
+    lastAdmission?: Admission | null;
+    lastAdmissionStatus?: string | null;
+    pendingCount: number;
+  };
+  auditLogs: AuditLog[];
+  documents?: EmployeeDocument[];
+  documentStats?: EmployeeDocumentStats;
+}
+
+// ------------------------------------------------------------------
+// BLOCO 5.3: GESTÃO DE DOCUMENTOS DO FUNCIONÁRIO
+// ------------------------------------------------------------------
+
+export type EmployeeDocumentCategory = 
+  | 'Identificação'
+  | 'Contratual'
+  | 'Saúde e Segurança (SST)'
+  | 'Certificações e Treinamentos'
+  | 'Financeiro e Benefícios'
+  | 'Outros';
+
+export type EmployeeDocumentStatus = 
+  | 'Válido'
+  | 'A Vencer'
+  | 'Vencido'
+  | 'Em Análise'
+  | 'Rejeitado'
+  | 'Arquivado'
+  | 'Pendente';
+
+export type EmployeeDocumentExpirationStatus = 'valid' | 'near_expiration' | 'expired' | 'no_expiration';
+
+export interface EmployeeDocumentVersion {
+  version: number;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  storagePath?: string;
+  fileUrl?: string;
+  fileHash?: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  replacementReason?: string;
+  notes?: string;
+}
+
+export interface EmployeeDocument {
+  id: string;
+  employeeId: string;
+  title: string;
+  category: EmployeeDocumentCategory | string;
+  documentTypeId?: string;
+  documentTypeName?: string;
+  description?: string;
+  
+  // Controle de Vigência e Vencimento
+  hasExpiration: boolean;
+  issueDate?: string;
+  expirationDate?: string;
+  daysUntilExpiration?: number;
+  isExpired?: boolean;
+  isNearExpiration?: boolean;
+  expirationStatus?: EmployeeDocumentExpirationStatus;
+  
+  // Status de validação/conferência
+  status: EmployeeDocumentStatus;
+  
+  // Arquivo Atual e Versionamento
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  fileHash?: string;
+  storagePath?: string;
+  fileUrl?: string;
+  currentVersion: number;
+  versions: EmployeeDocumentVersion[];
+  
+  // Origem do Documento
+  origin: 'Admissão' | 'RH' | 'Upload Direto';
+  admissionId?: string;
+  admissionRole?: string;
+  
+  // Auditoria e Metadados
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+  uploadedBy?: string;
+}
+
+export interface EmployeeDocumentStats {
+  total: number;
+  valid: number;
+  nearExpiration: number; // A vencer nos próximos 30 dias
+  expired: number;
+  noExpiration: number;
+  byCategory: Record<string, number>;
+}
+
+export interface EmployeeDocumentFilterOptions {
+  category?: string;
+  status?: string;
+  expirationStatus?: 'todos' | 'valido' | 'a_vencer' | 'vencido' | 'sem_validade';
+  search?: string;
+  origin?: string;
+}
+
+export interface EmployeeDocumentsResponse {
+  documents: EmployeeDocument[];
+  stats: EmployeeDocumentStats;
+  total: number;
+}
+
 
 export interface DocumentVersion {
   version: number;
@@ -224,6 +414,118 @@ export interface Admission {
   cancelledAt?: string;
   cancelledBy?: string;
   cancellationReason?: string;
+
+  // Bloco 5.4: Processo Admissional Configurável
+  processVersionId?: string;
+  processVersionNumber?: number;
+  processSteps?: AdmissionProcessStepSnapshot[];
+  currentStepKey?: string;
+
+  // Bloco 5.5: Checklist Operacional Avançado
+  operationalPriority?: OperationalPriority;
+  operationalPriorityReason?: string;
+  operationalPriorityUpdatedAt?: string;
+  operationalPriorityUpdatedBy?: string;
+}
+
+// ------------------------------------------------------------------
+// BLOCO 5.4: PROCESSO ADMISSIONAL CONFIGURÁVEL
+// ------------------------------------------------------------------
+
+export type ProcessStepKey =
+  | 'CADASTRO'
+  | 'DADOS_PESSOAIS'
+  | 'DOCUMENTOS'
+  | 'CONFERENCIA'
+  | 'APROVACAO'
+  | 'CONCLUSAO'
+  | string;
+
+export type ProcessStepStatus =
+  | 'PENDENTE'
+  | 'EM_ANDAMENTO'
+  | 'CONCLUIDA'
+  | 'BLOQUEADA'
+  | 'IGNORADA';
+
+export type ProcessStepCompletionRule =
+  | 'CADASTRO_INICIAL'
+  | 'DADOS_PREENCHIDOS'
+  | 'DOCUMENTOS_APROVADOS'
+  | 'CONFERENCIA_FINALIZADA'
+  | 'APROVACAO_MANUAL'
+  | 'ETAPAS_ANTERIORES_CONCLUIDAS'
+  | 'MANUAL';
+
+export type ProcessStepResponsibleRole = 'ADMIN' | 'RH' | 'GESTOR' | 'RH_CONFERENCIA' | 'DP' | 'CANDIDATO';
+
+export interface ConfigurableProcessStep {
+  id: string;
+  stepKey: ProcessStepKey;
+  name: string;
+  description: string;
+  order: number;
+  active: boolean;
+  required: boolean;
+  responsibleRole: ProcessStepResponsibleRole;
+  completionRule: ProcessStepCompletionRule;
+}
+
+export interface AdmissionProcessVersion {
+  id: string;
+  versionNumber: number;
+  status: 'ativa' | 'historica';
+  description?: string;
+  changeNotes?: string;
+  createdAt: string;
+  createdBy: string;
+  steps: ConfigurableProcessStep[];
+}
+
+export interface AdmissionProcessConfig {
+  id: string;
+  name: string;
+  description?: string;
+  currentVersion: number;
+  activeVersionId: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface AdmissionProcessStepHistoryItem {
+  action: 'iniciada' | 'concluida' | 'bloqueada' | 'reaberta';
+  timestamp: string;
+  userName: string;
+  reason?: string;
+  details?: string;
+}
+
+export interface AdmissionProcessStepSnapshot {
+  id: string;
+  admissionId: string;
+  processVersionId: string;
+  processVersionNumber: number;
+  stepKey: ProcessStepKey;
+  stepName: string;
+  stepDescription: string;
+  stepOrder: number;
+  required: boolean;
+  responsibleRole: string;
+  completionRule: ProcessStepCompletionRule;
+  status: ProcessStepStatus;
+  blockReason?: string;
+  startedAt?: string;
+  completedAt?: string;
+  completedBy?: string;
+  notes?: string;
+  history?: AdmissionProcessStepHistoryItem[];
+}
+
+export interface AdmissionProcessResponse {
+  process: AdmissionProcessConfig;
+  activeVersion: AdmissionProcessVersion;
+  allVersions: AdmissionProcessVersion[];
 }
 
 export interface InviteItem {
@@ -276,11 +578,12 @@ export interface AuditLogChange {
 export interface AuditLog {
   id: string;
   timestamp: string;
+  createdAt?: string;
   userId?: string;
   userName: string;
   performedBy?: string;
   action: string;
-  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template';
+  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step';
   entityId?: string;
   entityName?: string;
   admissionId?: string;
@@ -357,6 +660,11 @@ export interface DashboardStats {
     label: string;
     count: number;
   }>;
+  byProcessStep?: Record<string, {
+    name: string;
+    count: number;
+    stepOrder: number;
+  }>;
 }
 
 export interface DashboardStatsOptions {
@@ -386,6 +694,7 @@ export interface PendingItem {
   id: string;
   admissionId: string;
   admissionCode: string;
+  employeeId?: string;
   employeeName: string;
   employeeCpf: string;
   role: string;
@@ -973,5 +1282,161 @@ export interface SystemSettings {
   updatedAt: string;
   updatedBy?: string;
 }
+
+// ------------------------------------------------------------------
+// BLOCO 5.5: CHECKLIST OPERACIONAL AVANÇADO
+// ------------------------------------------------------------------
+
+export type OperationalPriority = 'NORMAL' | 'ALTA' | 'CRITICA';
+
+export type OperationalChecklistSituation = 
+  | 'EM_DIA' 
+  | 'PROXIMA' 
+  | 'ATRASADA' 
+  | 'SEM_MOVIMENTACAO' 
+  | 'BLOQUEADA';
+
+export type OperationalResponsible = 
+  | 'FUNCIONARIO' 
+  | 'RH' 
+  | 'GESTOR' 
+  | 'RH_CONFERENCIA' 
+  | 'DP' 
+  | 'ADMIN' 
+  | 'SISTEMA';
+
+export interface OperationalPendingSummary {
+  totalInCourse: number;       // Admissões ativas em andamento
+  criticalPendings: number;    // Admissões com prioridade Crítica
+  employeePendings: number;    // Pendências sob responsabilidade do Funcionário
+  rhPendings: number;          // Pendências sob responsabilidade do RH
+  waitingReviewDocs: number;   // Documentos enviados aguardando conferência
+  upcomingAdmissions: number;  // Admissões próximas do início previsto
+  delayedAdmissions: number;   // Admissões atrasadas (data prevista ultrapassada)
+  inactiveAdmissions: number;  // Admissões sem movimentação há mais tempo que o limiar
+  blockedAdmissions: number;   // Admissões com etapa ou processo bloqueado
+}
+
+export interface OperationalTaskItem {
+  id: string;
+  title: string;
+  description?: string;
+  category: 'CADASTRO' | 'DADOS' | 'DOCUMENTO' | 'CONFERENCIA' | 'APROVACAO' | 'CONCLUSAO' | 'ETAPA' | 'GERAL';
+  responsible: OperationalResponsible;
+  status: 'PENDENTE' | 'EM_ANDAMENTO' | 'CONCLUIDA' | 'BLOQUEADA' | 'REJEITADA';
+  documentId?: string;
+  documentName?: string;
+  rejectionReason?: string;
+  rejectionNotes?: string;
+  stepId?: string;
+  stepName?: string;
+  priority: OperationalPriority;
+  actionRequired?: string;
+  completedAt?: string;
+  completedBy?: string;
+}
+
+export interface OperationalChecklistItem {
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpf: string;
+  employeeCpfMasked: string;
+  employeeRole: string;
+  employeeDepartment: string;
+  employeeUnit: string;
+  employeeEmail: string;
+  employeePhone: string;
+  
+  // Datas e Prazos Operacionais
+  createdAt: string;
+  expectedStartDate?: string;
+  lastActivityAt: string;
+  lastActivityDescription?: string;
+  daysSinceCreation: number;
+  daysWithoutMovement: number;
+  daysInCurrentStep: number;
+
+  // Processo & Etapa (Bloco 5.4)
+  currentStepKey?: string;
+  currentStepName: string;
+  currentStepOrder: number;
+  totalSteps: number;
+  completedSteps: number;
+  currentStepStatus: ProcessStepStatus;
+  currentStepResponsible: string;
+  currentStepBlockReason?: string;
+
+  // Progresso Consolidado
+  progressPercent: number; // Percentual ponderado global
+  documentsProgressPercent: number;
+  totalDocuments: number;
+  approvedDocuments: number;
+  inReviewDocuments: number;
+  rejectedDocuments: number;
+  notSentDocuments: number;
+
+  // Operacional
+  status: AdmissionStatus;
+  operationalPriority: OperationalPriority;
+  operationalPriorityReason?: string;
+  operationalSituation: OperationalChecklistSituation;
+  operationalSituationLabel: string;
+  primaryPending: {
+    type: 
+      | 'BLOQUEIO' 
+      | 'DOC_REJEITADO' 
+      | 'DOC_NAO_ENVIADO' 
+      | 'DOC_CONFERENCIA' 
+      | 'ETAPA_RESPONSAVEL' 
+      | 'ADMISSAO_PROXIMA' 
+      | 'SEM_MOVIMENTACAO' 
+      | 'NENHUMA';
+    title: string;
+    description: string;
+    responsible: OperationalResponsible;
+    documentId?: string;
+    stepId?: string;
+  };
+  currentResponsible: OperationalResponsible;
+
+  // Tarefas operacionais desta admissão
+  tasks?: OperationalTaskItem[];
+}
+
+export interface OperationalChecklistFilters {
+  search?: string;
+  status?: string;
+  step?: string;
+  responsible?: string;
+  priority?: string;
+  situation?: string;
+  period?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface OperationalChecklistResponse {
+  items: OperationalChecklistItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: OperationalPendingSummary;
+  filters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    steps: { key: string; name: string }[];
+    responsibles: string[];
+    statuses: string[];
+  };
+}
+
 
 

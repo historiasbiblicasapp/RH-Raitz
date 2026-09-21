@@ -988,6 +988,546 @@ router.get('/admissions/:id/timeline', (req: Request, res: Response) => {
 });
 
 // ------------------------------------------------------------------
+// PARTE 5 - BLOCO 5.1: GESTÃO DE FUNCIONÁRIOS (RH)
+// ------------------------------------------------------------------
+
+// 1. Listagem com busca, filtros e paginação (CPF mascarado por padrão)
+router.get('/employees', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    search,
+    status,
+    role,
+    department,
+    unit,
+    startDate,
+    endDate,
+    page,
+    limit
+  } = req.query;
+
+  try {
+    const result = db.getEmployeesFiltered({
+      search: search as string | undefined,
+      status: status as any,
+      role: role as string | undefined,
+      department: department as string | undefined,
+      unit: unit as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined
+    });
+
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Erro ao carregar funcionários.' });
+  }
+});
+
+// 2. Detalhes completos do funcionário (/funcionarios/:id)
+router.get('/employees/:id', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const details = db.getEmployeeDetails(req.params.id);
+    if (!details) {
+      return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    }
+    return res.json(details);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Erro ao carregar detalhes do funcionário.' });
+  }
+});
+
+// 2.1 Revelação segura de CPF com registro de auditoria LGPD
+router.post('/employees/:id/reveal-cpf', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const employee = db.getEmployeeById(req.params.id);
+    if (!employee) {
+      return res.status(404).json({ error: 'Funcionário não encontrado.' });
+    }
+
+    db.addAuditLog({
+      userName: auth.user.name || 'RH',
+      action: 'Visualização de CPF desmascarado do funcionário',
+      entityType: 'employee',
+      entityId: employee.id,
+      employeeName: employee.name,
+      details: `O usuário ${auth.user.name || 'RH'} solicitou a visualização do CPF completo de ${employee.name} em conformidade com a política LGPD.`
+    });
+
+    return res.json({ cpf: employee.cpf });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Erro ao consultar CPF.' });
+  }
+});
+
+// 3. Cadastro manual de funcionário
+router.post('/employees', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const newEmployee = db.createEmployee(req.body, auth.user.name || 'RH');
+    return res.status(201).json(newEmployee);
+  } catch (err: any) {
+    if ((err as any).duplicate) {
+      return res.status(409).json({ 
+        error: err.message, 
+        duplicate: true, 
+        existingEmployeeId: (err as any).existingEmployeeId 
+      });
+    }
+    return res.status(400).json({ error: err.message || 'Erro ao criar funcionário.' });
+  }
+});
+
+// 4. Edição de funcionário (dados pessoais, profissionais, endereço, etc.)
+router.put('/employees/:id', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const updated = db.updateEmployee(req.params.id, req.body, auth.user.name || 'RH');
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao atualizar dados do funcionário.' });
+  }
+});
+
+// 5. Alteração de Situação (Ativo / Inativo)
+router.patch('/employees/:id/status', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { status, reason } = req.body;
+  if (!status || !['Ativo', 'Inativo'].includes(status)) {
+    return res.status(400).json({ error: 'Situação inválida. Utilize "Ativo" ou "Inativo".' });
+  }
+
+  try {
+    const updated = db.setEmployeeStatus(req.params.id, status, reason || '', auth.user.name || 'RH');
+    return res.json(updated);
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao alterar situação do funcionário.' });
+  }
+});
+
+// 6. Exclusão de funcionário (com regra estrita de soft delete / impedimento se houver histórico)
+router.delete('/employees/:id', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    db.deleteEmployee(req.params.id, auth.user.name || 'RH');
+    return res.json({ success: true, message: 'Funcionário excluído com sucesso.' });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível excluir o funcionário.' });
+  }
+});
+
+// ------------------------------------------------------------------
+// PARTE 5 - BLOCO 5.3: GESTÃO DE DOCUMENTOS DO FUNCIONÁRIO (RH)
+// ------------------------------------------------------------------
+
+// 1. Listagem dos documentos do funcionário com filtros e estatísticas de vencimento
+router.get('/employees/:id/documents', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const { search, category, status, expirationStatus, origin } = req.query;
+    const documents = db.getEmployeeDocuments(req.params.id, {
+      search: search as string | undefined,
+      category: category as string | undefined,
+      status: status as string | undefined,
+      expirationStatus: expirationStatus as any,
+      origin: origin as string | undefined
+    });
+    const stats = db.getEmployeeDocumentStats(req.params.id);
+
+    return res.json({
+      documents,
+      stats,
+      total: documents.length
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Erro ao carregar documentos do colaborador.' });
+  }
+});
+
+// 2. Upload e arquivamento de novo documento para o funcionário
+router.post('/employees/:id/documents', upload.single('file'), (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const {
+      title,
+      category,
+      documentTypeId,
+      documentTypeName,
+      description,
+      hasExpiration,
+      issueDate,
+      expirationDate,
+      notes
+    } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'O título do documento é obrigatório.' });
+    }
+
+    let fileInfo: { filename: string; originalname: string; size: number; mimetype: string; fileHash?: string };
+
+    if (req.file) {
+      let fileHash: string | undefined;
+      try {
+        const fullDiskPath = path.join(STORAGE_DIR, req.file.filename);
+        if (fs.existsSync(fullDiskPath)) {
+          const fileBuf = fs.readFileSync(fullDiskPath);
+          fileHash = crypto.createHash('sha256').update(fileBuf).digest('hex');
+        }
+      } catch (hashErr) {
+        // Fallback gracefully
+      }
+
+      fileInfo = {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+        fileHash
+      };
+    } else {
+      // Se não enviou arquivo binário direto pelo form (ex: simulação/registro cadastral)
+      const safeName = `doc_${Date.now()}.pdf`;
+      fileInfo = {
+        filename: safeName,
+        originalname: `${title.trim()}.pdf`,
+        size: 256 * 1024,
+        mimetype: 'application/pdf',
+        fileHash: crypto.createHash('sha256').update(safeName).digest('hex')
+      };
+    }
+
+    // Verificação de duplicidade conforme Seção 39
+    let duplicateWarning = false;
+    if (fileInfo.fileHash) {
+      const existingDocs = db.getEmployeeDocuments(req.params.id);
+      const isDuplicate = existingDocs.some(d => 
+        d.fileHash === fileInfo.fileHash || 
+        (d.versions && d.versions.some(v => v.fileHash === fileInfo.fileHash))
+      );
+      if (isDuplicate) {
+        duplicateWarning = true;
+      }
+    }
+
+    const newDoc = db.createEmployeeDocument(
+      req.params.id,
+      {
+        title: title.trim(),
+        category: category || 'Outros',
+        documentTypeId,
+        documentTypeName,
+        description,
+        hasExpiration: hasExpiration === 'true' || hasExpiration === true,
+        issueDate,
+        expirationDate,
+        notes
+      },
+      fileInfo,
+      auth.user.name || 'RH'
+    );
+
+    return res.status(201).json({
+      success: true,
+      document: newDoc,
+      duplicateWarning,
+      message: duplicateWarning 
+        ? 'Documento arquivado. Atenção: detectamos que um arquivo idêntico já consta no histórico do prontuário.' 
+        : 'Documento arquivado com sucesso no prontuário do colaborador.'
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao cadastrar documento.' });
+  }
+});
+
+// 3. Obtenção de documento individual e histórico de versões
+router.get('/employees/documents/:docId', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const doc = db.getEmployeeDocumentById(req.params.docId);
+    if (!doc) {
+      return res.status(404).json({ error: 'Documento não encontrado.' });
+    }
+    return res.json({ document: doc });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Erro ao obter documento.' });
+  }
+});
+
+// 4. Renovação documental / Upload de nova versão (v2, v3...)
+router.post('/employees/documents/:docId/versions', upload.single('file'), (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const { expirationDate, issueDate, replacementReason, notes } = req.body;
+
+    let fileInfo: { filename: string; originalname: string; size: number; mimetype: string; fileHash?: string };
+
+    if (req.file) {
+      let fileHash: string | undefined;
+      try {
+        const fullDiskPath = path.join(STORAGE_DIR, req.file.filename);
+        if (fs.existsSync(fullDiskPath)) {
+          const fileBuf = fs.readFileSync(fullDiskPath);
+          fileHash = crypto.createHash('sha256').update(fileBuf).digest('hex');
+        }
+      } catch (hashErr) {
+        // Fallback
+      }
+
+      fileInfo = {
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+        fileHash
+      };
+    } else {
+      const safeName = `renew_${Date.now()}.pdf`;
+      fileInfo = {
+        filename: safeName,
+        originalname: `Renovacao_${Date.now()}.pdf`,
+        size: 512 * 1024,
+        mimetype: 'application/pdf',
+        fileHash: crypto.createHash('sha256').update(safeName).digest('hex')
+      };
+    }
+
+    const updated = db.renewEmployeeDocumentVersion(
+      req.params.docId,
+      fileInfo,
+      {
+        expirationDate,
+        issueDate,
+        replacementReason,
+        notes
+      },
+      auth.user.name || 'RH'
+    );
+
+    return res.json({
+      success: true,
+      document: updated,
+      message: `Documento renovado com sucesso (Versão ${updated.currentVersion}).`
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao renovar documento.' });
+  }
+});
+
+// 5. Atualização de metadados do documento (título, categoria, validade, notas, status)
+router.put('/employees/documents/:docId', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const updated = db.updateEmployeeDocument(req.params.docId, req.body, auth.user.name || 'RH');
+    return res.json({
+      success: true,
+      document: updated,
+      message: 'Dados do documento atualizados com sucesso.'
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao atualizar documento.' });
+  }
+});
+
+// 6. Exclusão de documento avulso do colaborador
+router.delete('/employees/documents/:docId', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    db.deleteEmployeeDocument(req.params.docId, auth.user.name || 'RH');
+    return res.json({
+      success: true,
+      message: 'Documento excluído com sucesso.'
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Não foi possível excluir o documento.' });
+  }
+});
+
+// 7. Visualização e Download Seguro do Arquivo com Suporte a Versões e Auditoria LGPD
+router.get('/employees/documents/:docId/file', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const doc = db.getEmployeeDocumentById(req.params.docId);
+    if (!doc) {
+      return res.status(404).send('Documento não encontrado.');
+    }
+
+    const versionParam = req.query.version ? Number(req.query.version) : undefined;
+    const isDownload = req.query.download === 'true';
+
+    // Determina qual versão servir
+    let targetFileName = doc.fileName;
+    let targetStoragePath = doc.storagePath;
+    let targetMimeType = doc.mimeType || 'application/pdf';
+
+    if (versionParam && doc.versions && doc.versions.length > 0) {
+      const v = doc.versions.find(ver => ver.version === versionParam);
+      if (v) {
+        targetFileName = v.fileName;
+        targetStoragePath = v.storagePath || targetStoragePath;
+        targetMimeType = v.mimeType || targetMimeType;
+      }
+    }
+
+    // Registra acesso ao arquivo no log de auditoria
+    db.addAuditLog({
+      userName: auth.user.name || 'RH',
+      action: isDownload ? 'Download de documento do colaborador' : 'Visualização de documento do colaborador',
+      entityType: 'employee_document',
+      entityId: doc.id,
+      employeeName: doc.title,
+      details: `${isDownload ? 'Download' : 'Visualização'} do arquivo "${targetFileName}" (v${versionParam || doc.currentVersion}) realizado por ${auth.user.name || 'RH'}.`
+    });
+
+    // Se o arquivo existir fisicamente no STORAGE_DIR
+    if (targetStoragePath) {
+      const fullPath = path.join(STORAGE_DIR, targetStoragePath);
+      if (fs.existsSync(fullPath)) {
+        res.setHeader('Content-Type', targetMimeType);
+        res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(targetFileName)}"`);
+        return fs.createReadStream(fullPath).pipe(res);
+      }
+    }
+
+    // Fallback: visualização rica e elegante de documento digital corporativo
+    const safeTitle = (doc.title || 'Documento Corporativo').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeCategory = (doc.category || 'Geral').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeVersion = `v${versionParam || doc.currentVersion || 1}`;
+    const safeDate = doc.issueDate || doc.createdAt ? new Date(doc.issueDate || doc.createdAt).toLocaleDateString('pt-BR') : 'Vigente';
+    const safeExp = doc.hasExpiration && doc.expirationDate ? new Date(doc.expirationDate).toLocaleDateString('pt-BR') : 'Indeterminado';
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1100" width="100%" height="100%">
+        <defs>
+          <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#0f766e" />
+            <stop offset="100%" stop-color="#115e59" />
+          </linearGradient>
+          <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+            <feDropShadow dx="0" dy="4" stdDeviation="8" flood-opacity="0.1" />
+          </filter>
+        </defs>
+
+        <!-- Folha de Papel Timbrado Corporativo -->
+        <rect width="800" height="1100" fill="#ffffff" />
+        <rect x="20" y="20" width="760" height="1060" fill="#fafafa" rx="12" stroke="#e2e8f0" stroke-width="2" />
+
+        <!-- Topo Timbrado -->
+        <rect x="20" y="20" width="760" height="140" fill="url(#headerGrad)" rx="12" />
+        <rect x="20" y="140" width="760" height="20" fill="url(#headerGrad)" />
+
+        <text x="60" y="80" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="26" font-weight="bold" fill="#ffffff">
+          GALVANIZAÇÃO RAITZ LTDA.
+        </text>
+        <text x="60" y="112" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#ccfbf1">
+          Departamento de Recursos Humanos &amp; Segurança do Trabalho • Prontuário Digital
+        </text>
+
+        <!-- Título do Documento -->
+        <rect x="60" y="200" width="680" height="90" fill="#f8fafc" rx="8" stroke="#cbd5e1" stroke-width="1" />
+        <text x="80" y="240" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="bold" fill="#0d9488" letter-spacing="1">
+          DOCUMENTO DIGITAL ARQUIVADO (${safeCategory.toUpperCase()})
+        </text>
+        <text x="80" y="272" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="bold" fill="#0f172a">
+          ${safeTitle}
+        </text>
+
+        <!-- Metadados da Ficha -->
+        <rect x="60" y="320" width="680" height="200" fill="#ffffff" rx="8" stroke="#e2e8f0" stroke-width="1" />
+        
+        <text x="90" y="365" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#64748b">Versão Cadastrada:</text>
+        <text x="250" y="365" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="bold" fill="#0f172a">${safeVersion}</text>
+
+        <text x="90" y="405" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#64748b">Data de Emissão:</text>
+        <text x="250" y="405" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="bold" fill="#0f172a">${safeDate}</text>
+
+        <text x="90" y="445" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#64748b">Validade / Vencimento:</text>
+        <text x="250" y="445" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="bold" fill="#0f172a">${safeExp}</text>
+
+        <text x="90" y="485" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" fill="#64748b">Origem do Registro:</text>
+        <text x="250" y="485" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="bold" fill="#0f172a">${doc.origin || 'RH'}</text>
+
+        <!-- Marca d'Água Central -->
+        <g transform="rotate(-30 400 680)" opacity="0.06">
+          <text x="220" y="700" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="60" font-weight="900" fill="#0f766e">
+            AUTENTICADO RH
+          </text>
+        </g>
+
+        <!-- Corpo do Documento / Declaração -->
+        <rect x="60" y="550" width="680" height="340" fill="#ffffff" rx="8" stroke="#e2e8f0" stroke-width="1" />
+        
+        <text x="90" y="600" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" fill="#334155">
+          Certificamos que o presente documento digital encontra-se regularmente arquivado
+        </text>
+        <text x="90" y="630" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="15" fill="#334155">
+          no prontuário eletrônico do colaborador sob identificação funcional única.
+        </text>
+        
+        <text x="90" y="680" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#64748b">
+          Identificador do Documento: ${doc.id}
+        </text>
+        <text x="90" y="710" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#64748b">
+          Nome do Arquivo Original: ${targetFileName}
+        </text>
+        <text x="90" y="740" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#64748b">
+          Formato de Armazenamento: ${targetMimeType}
+        </text>
+        <text x="90" y="770" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#64748b">
+          Observações: ${doc.notes || 'Sem observações adicionais registradas.'}
+        </text>
+
+        <!-- Rodapé de Conformidade Legal e LGPD -->
+        <line x1="60" y1="960" x2="740" y2="960" stroke="#cbd5e1" stroke-width="1" />
+        <text x="400" y="990" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">
+          Documento armazenado em conformidade com a Lei Geral de Proteção de Dados (LGPD - Lei 13.709/2018).
+        </text>
+        <text x="400" y="1015" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#94a3b8" text-anchor="middle">
+          Rastreabilidade: Acesso registrado nos logs de auditoria em ${new Date().toLocaleString('pt-BR')}.
+        </text>
+      </svg>
+    `;
+
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(targetFileName.replace(/\.pdf$/, ''))}.svg"`);
+    return res.send(svg);
+  } catch (err: any) {
+    return res.status(500).send('Erro ao processar visualização do documento.');
+  }
+});
+
+// ------------------------------------------------------------------
 // GESTÃO DE ADMISSÕES (RH)
 // ------------------------------------------------------------------
 router.get('/admissions', (req: Request, res: Response) => {
@@ -2021,6 +2561,215 @@ router.get(['/settings/history', '/configuracoes/historico'], (req: Request, res
     });
   } catch (error: any) {
     return res.status(500).json({ error: 'Erro ao carregar histórico: ' + error.message });
+  }
+});
+
+// =========================================================================
+// BLOCO 5.4 — PROCESSO ADMISSIONAL CONFIGURÁVEL (ROTAS DA API)
+// =========================================================================
+
+// 1. Obter configuração do processo admissional e versão ativa
+router.get(['/admission-process', '/processo-admissional'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const processData = db.getAdmissionProcess();
+    return res.json(processData);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar configuração do processo admissional: ' + error.message });
+  }
+});
+
+// 2. Criar nova versão estrutural do processo admissional
+router.put(['/admission-process/version', '/processo-admissional/versao'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  const { steps, changeNotes } = req.body;
+  if (!steps || !Array.isArray(steps)) {
+    return res.status(400).json({ error: 'Lista de etapas do processo é obrigatória e deve ser um array.' });
+  }
+
+  try {
+    const newVersion = db.createAdmissionProcessVersion(
+      steps, 
+      changeNotes || 'Atualização na estrutura de etapas', 
+      auth.user.name || auth.user.email
+    );
+    return res.json({
+      success: true,
+      version: newVersion,
+      message: `Versão ${newVersion.versionNumber} do Processo Admissional criada e ativada com sucesso!`
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+// 3. Concluir manualmente uma etapa do processo de uma admissão específica
+router.post(['/admissions/:id/process-steps/:stepId/complete', '/admissoes/:id/etapas/:stepId/concluir'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  const { id, stepId } = req.params;
+  const { notes } = req.body;
+
+  try {
+    const result = db.completeAdmissionProcessStep(
+      id, 
+      stepId, 
+      auth.user.name || auth.user.email, 
+      notes
+    );
+    return res.json({
+      success: true,
+      admission: result.admission,
+      step: result.step,
+      message: `Etapa "${result.step.stepName}" concluída com sucesso!`
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+// 4. Reabrir uma etapa do processo de uma admissão específica (exige justificativa obrigatória)
+router.post(['/admissions/:id/process-steps/:stepId/reopen', '/admissoes/:id/etapas/:stepId/reabrir'], (req: Request, res: Response) => {
+  const auth = checkSettingsAuth(req, res);
+  if (!auth) return;
+
+  const { id, stepId } = req.params;
+  const { reason } = req.body;
+
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'A justificativa de reabertura da etapa é estritamente obrigatória.' });
+  }
+
+  try {
+    const result = db.reopenAdmissionProcessStep(
+      id, 
+      stepId, 
+      auth.user.name || auth.user.email, 
+      reason.trim()
+    );
+    return res.json({
+      success: true,
+      admission: result.admission,
+      step: result.step,
+      message: `Etapa "${result.step.stepName}" reaberta com sucesso.`
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+// =========================================================================
+// BLOCO 5.5 — CHECKLIST OPERACIONAL AVANÇADO (ROTAS DA API)
+// =========================================================================
+
+/**
+ * GET /api/operational-checklist ou /api/checklist
+ * Retorna lista operacional completa com indicadores, filtros, priorização automática
+ * e identificação da pendência principal e responsável.
+ */
+router.get(['/operational-checklist', '/checklist'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    search,
+    status,
+    step,
+    responsible,
+    priority,
+    situation,
+    period,
+    startDate,
+    endDate,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  try {
+    const result = db.getOperationalChecklistData({
+      search: search as string | undefined,
+      status: status as string | undefined,
+      step: step as string | undefined,
+      responsible: responsible as string | undefined,
+      priority: priority as string | undefined,
+      situation: situation as string | undefined,
+      period: period as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      sortBy: sortBy as string | undefined,
+      sortOrder: sortOrder as 'asc' | 'desc' | undefined
+    });
+
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar checklist operacional: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/admissions/:id/operational-checklist
+ * Retorna visão operacional detalhada de uma admissão específica com todas as suas tarefas.
+ */
+router.get('/admissions/:id/operational-checklist', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+
+  try {
+    const item = db.getAdmissionOperationalChecklist(id);
+    if (!item) {
+      return res.status(404).json({ error: 'Admissão não encontrada.' });
+    }
+    return res.json(item);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao obter checklist da admissão: ' + error.message });
+  }
+});
+
+/**
+ * PATCH /api/admissions/:id/operational-priority
+ * Permite ao RH ajustar a prioridade operacional (NORMAL, ALTA, CRITICA) com justificativa auditada.
+ */
+router.patch('/admissions/:id/operational-priority', (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { priority, reason } = req.body;
+
+  if (!priority || !['NORMAL', 'ALTA', 'CRITICA'].includes(priority)) {
+    return res.status(400).json({ error: 'Prioridade inválida. Utilize NORMAL, ALTA ou CRITICA.' });
+  }
+
+  try {
+    const updated = db.updateAdmissionOperationalPriority(
+      id,
+      priority,
+      reason,
+      auth.user.name || auth.user.email
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Admissão não encontrada.' });
+    }
+
+    return res.json({
+      success: true,
+      item: updated,
+      message: `Prioridade operacional atualizada para ${priority} com sucesso.`
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
   }
 });
 

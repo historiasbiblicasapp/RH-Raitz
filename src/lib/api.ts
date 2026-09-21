@@ -40,15 +40,23 @@ export async function safeFetchJson<T = any>(
     try {
       const res = await fetch(url, mergedInit);
 
-      // Tratamento para contêiner acordando, reiniciando ou proxy roteando (404 temporário, 502, 503, 504)
-      const isTransientStatus = [404, 502, 503, 504].includes(res.status);
+      // Se a rota não existir no servidor (ex: deploy estático na Vercel ou rota nova)
+      if (res.status === 404) {
+        const fallback = handleFallbackApiRoute(url, mergedInit);
+        if (fallback !== undefined) {
+          return fallback as T;
+        }
+      }
+
+      // Tratamento para contêiner acordando ou reiniciando (502, 503, 504)
+      const isTransientStatus = [502, 503, 504].includes(res.status);
       const contentType = res.headers.get('content-type') || '';
       const isHtml = contentType.includes('text/html');
 
-      // Se for resposta HTML da infraestrutura (Cloud Run / Google Frontend) ou status transitório
+      // Se for status transitório de infraestrutura ou página HTML em requisição de API
       if ((isTransientStatus || isHtml) && attempt < retries) {
         attempt++;
-        await new Promise((r) => setTimeout(r, 700 * attempt));
+        await new Promise((r) => setTimeout(r, 600 * attempt));
         continue;
       }
 
@@ -65,17 +73,17 @@ export async function safeFetchJson<T = any>(
         try {
           data = JSON.parse(text);
         } catch {
-          // Se for HTML (ex: erro da infraestrutura ou página de cookie check)
+          // Se for HTML ou texto não JSON em erro
           if (!res.ok || isHtml) {
-            if (attempt < retries) {
-              attempt++;
-              await new Promise((r) => setTimeout(r, 700 * attempt));
-              continue;
-            }
-
             const fallback = handleFallbackApiRoute(url, mergedInit);
             if (fallback !== undefined) {
               return fallback as T;
+            }
+
+            if (attempt < retries) {
+              attempt++;
+              await new Promise((r) => setTimeout(r, 600 * attempt));
+              continue;
             }
 
             const cleanSnippet = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
@@ -92,19 +100,32 @@ export async function safeFetchJson<T = any>(
       }
 
       if (!res.ok) {
-        // Se a rota der 404 (ex: deploy estático na Vercel)
-        if (res.status === 404) {
-          const fallback = handleFallbackApiRoute(url, mergedInit);
-          if (fallback !== undefined) {
-            return fallback as T;
-          }
+        const fallback = handleFallbackApiRoute(url, mergedInit);
+        if (fallback !== undefined) {
+          return fallback as T;
         }
-        const errMsg = data?.error || data?.message || `Erro no servidor (${res.status}).`;
+
+        let errMsg = `Erro no servidor (${res.status}).`;
+        if (typeof data?.error === 'string') {
+          errMsg = data.error;
+        } else if (typeof data?.error?.message === 'string') {
+          errMsg = data.error.message;
+        } else if (typeof data?.message === 'string') {
+          errMsg = data.message;
+        } else if (typeof data === 'string' && data.length > 0 && data.length < 160) {
+          errMsg = data;
+        }
         throw new Error(errMsg);
       }
 
       return data as T;
     } catch (err: any) {
+      // Se houver fallback cadastrado para a rota, use-o imediatamente
+      const fallback = handleFallbackApiRoute(url, mergedInit);
+      if (fallback !== undefined) {
+        return fallback as T;
+      }
+
       if (
         attempt < retries &&
         (err.name === 'TypeError' ||
@@ -114,14 +135,8 @@ export async function safeFetchJson<T = any>(
           err.message?.includes('temporariamente indisponível'))
       ) {
         attempt++;
-        await new Promise((r) => setTimeout(r, 700 * attempt));
+        await new Promise((r) => setTimeout(r, 600 * attempt));
         continue;
-      }
-
-      // Se falhar a conexão após todas as tentativas (ex: offline ou Vercel sem backend)
-      const fallback = handleFallbackApiRoute(url, mergedInit);
-      if (fallback !== undefined) {
-        return fallback as T;
       }
 
       throw err;

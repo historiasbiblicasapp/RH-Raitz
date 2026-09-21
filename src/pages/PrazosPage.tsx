@@ -20,6 +20,8 @@ import { TrackingAttentionSection } from '../components/TrackingAttentionSection
 import { TrackingFiltersBar } from '../components/TrackingFiltersBar.tsx';
 import { TrackingTable } from '../components/TrackingTable.tsx';
 import { CommunicationModal } from '../components/CommunicationModal.tsx';
+import { safeFetchJson } from '../lib/api.ts';
+import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 export const PrazosPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,39 +83,42 @@ export const PrazosPage: React.FC = () => {
 
   // Busca os dados do backend
   const fetchTrackingData = useCallback(async () => {
+    const q = new URLSearchParams();
+    if (filters.period && filters.period !== 'all') q.set('period', filters.period);
+    if (filters.startDate) q.set('startDate', filters.startDate);
+    if (filters.endDate) q.set('endDate', filters.endDate);
+    if (filters.status && filters.status !== 'TODOS') q.set('status', filters.status);
+    if (filters.cargo && filters.cargo !== 'TODOS') q.set('cargo', filters.cargo);
+    if (filters.setor && filters.setor !== 'TODOS') q.set('setor', filters.setor);
+    if (filters.unidade && filters.unidade !== 'TODOS') q.set('unidade', filters.unidade);
+    if (filters.situacao && filters.situacao !== 'TODOS') q.set('situacao', filters.situacao);
+    if (filters.tempoSemMovimentacao && filters.tempoSemMovimentacao !== 'all') {
+      q.set('tempoSemMovimentacao', filters.tempoSemMovimentacao);
+    }
+    if (filters.search) q.set('search', filters.search);
+    q.set('page', String(filters.page || 1));
+    q.set('limit', String(limit));
+
     try {
       setLoading(true);
-      const q = new URLSearchParams();
-      if (filters.period && filters.period !== 'all') q.set('period', filters.period);
-      if (filters.startDate) q.set('startDate', filters.startDate);
-      if (filters.endDate) q.set('endDate', filters.endDate);
-      if (filters.status && filters.status !== 'TODOS') q.set('status', filters.status);
-      if (filters.cargo && filters.cargo !== 'TODOS') q.set('cargo', filters.cargo);
-      if (filters.setor && filters.setor !== 'TODOS') q.set('setor', filters.setor);
-      if (filters.unidade && filters.unidade !== 'TODOS') q.set('unidade', filters.unidade);
-      if (filters.situacao && filters.situacao !== 'TODOS') q.set('situacao', filters.situacao);
-      if (filters.tempoSemMovimentacao && filters.tempoSemMovimentacao !== 'all') {
-        q.set('tempoSemMovimentacao', filters.tempoSemMovimentacao);
-      }
-      if (filters.search) q.set('search', filters.search);
-      q.set('page', String(filters.page || 1));
-      q.set('limit', String(limit));
 
-      const res = await fetch(`/api/prazos?${q.toString()}`);
-      if (!res.ok) {
-        throw new Error('Falha ao carregar dados operacionais de prazos.');
+      const data = await safeFetchJson<TrackingResponse>(`/api/prazos?${q.toString()}`);
+      if (data) {
+        setItems(data.items || []);
+        setAttentionItems(data.attentionItems || []);
+        if (data.summary) setSummary(data.summary);
+        setTotalPages(data.totalPages || 1);
+        setTotalResults(data.total || (data.items ? data.items.length : 0));
+        if (data.filters) setAvailableFilters(data.filters);
+        setPage(data.page || 1);
       }
-
-      const data: TrackingResponse = await res.json();
-      setItems(data.items);
-      setAttentionItems(data.attentionItems || []);
-      setSummary(data.summary);
-      setTotalPages(data.totalPages);
-      setTotalResults(data.total);
-      setAvailableFilters(data.filters);
-      setPage(data.page);
     } catch (err) {
-      console.error('Erro ao buscar dados de prazos e acompanhamento:', err);
+      console.warn('Utilizando dados locais de prazos:', err);
+      const fallback = handleFallbackApiRoute(`/api/prazos?${q.toString()}`);
+      if (fallback) {
+        setItems(fallback.items || []);
+        setTotalResults(fallback.summary?.total || fallback.items?.length || 0);
+      }
     } finally {
       setLoading(false);
     }

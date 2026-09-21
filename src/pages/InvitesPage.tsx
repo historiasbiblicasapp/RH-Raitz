@@ -28,6 +28,8 @@ import { EditAdmissionModal } from '../components/EditAdmissionModal.tsx';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
 import { MobileSimulatorModal } from '../components/MobileSimulatorModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
+import { safeFetchJson } from '../lib/api.ts';
+import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 export const InvitesPage: React.FC = () => {
   const [invites, setInvites] = useState<InviteItem[]>([]);
@@ -50,13 +52,16 @@ export const InvitesPage: React.FC = () => {
   const fetchInvites = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/invites');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<any>('/api/invites');
+      if (data?.invites) {
         setInvites(data.invites || []);
       }
     } catch (err) {
-      console.error('Erro ao buscar convites:', err);
+      console.warn('Utilizando convites em fallback:', err);
+      const fallback = handleFallbackApiRoute('/api/invites');
+      if (fallback?.invites) {
+        setInvites(fallback.invites);
+      }
     } finally {
       setLoading(false);
     }
@@ -75,25 +80,31 @@ export const InvitesPage: React.FC = () => {
 
   const handleOpenInviteManager = async (admissionId: string) => {
     try {
-      const res = await fetch(`/api/admissions/${admissionId}`);
-      if (res.ok) {
-        const adm = await res.json();
+      const adm = await safeFetchJson<any>(`/api/admissions/${admissionId}`);
+      if (adm) {
         setSelectedAdmissionForInvite(adm);
       }
     } catch (err) {
-      console.error('Erro ao buscar detalhes da admissão para o convite:', err);
+      console.warn('Erro ao buscar admissão para convite:', err);
+      const fallback = handleFallbackApiRoute(`/api/admissions/${admissionId}`);
+      if (fallback) {
+        setSelectedAdmissionForInvite(fallback);
+      }
     }
   };
 
   const handleOpenEditAdmission = async (admissionId: string) => {
     try {
-      const res = await fetch(`/api/admissions/${admissionId}`);
-      if (res.ok) {
-        const adm = await res.json();
+      const adm = await safeFetchJson<any>(`/api/admissions/${admissionId}`);
+      if (adm) {
         setSelectedAdmissionForEdit(adm);
       }
     } catch (err) {
-      console.error('Erro ao buscar admissão para edição:', err);
+      console.warn('Erro ao buscar detalhes da admissão:', err);
+      const fallback = handleFallbackApiRoute(`/api/admissions/${admissionId}`);
+      if (fallback) {
+        setSelectedAdmissionForEdit(fallback);
+      }
     }
   };
 

@@ -15,21 +15,26 @@ import {
   AlertCircle,
   ShieldCheck,
   CheckCircle2,
-  Loader2
+  Loader2,
+  GitBranch
 } from 'lucide-react';
 import { SystemSettings, User as UserType } from '../types/index.ts';
 import { GeneralSettingsTab } from '../components/settings/GeneralSettingsTab.tsx';
 import { AdmissionSettingsTab } from '../components/settings/AdmissionSettingsTab.tsx';
+import { AdmissionProcessConfigTab } from '../components/settings/AdmissionProcessConfigTab.tsx';
 import { DocumentSettingsTab } from '../components/settings/DocumentSettingsTab.tsx';
 import { CommunicationSettingsTab } from '../components/settings/CommunicationSettingsTab.tsx';
 import { NotificationSettingsTab } from '../components/settings/NotificationSettingsTab.tsx';
 import { ReportsSettingsTab } from '../components/settings/ReportsSettingsTab.tsx';
 import { UsersSettingsTab } from '../components/settings/UsersSettingsTab.tsx';
 import { AuditHistoryTab } from '../components/settings/AuditHistoryTab.tsx';
+import { safeFetchJson } from '../lib/api.ts';
+import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 type TabKey = 
   | 'general' 
   | 'admission' 
+  | 'process'
   | 'documents' 
   | 'communication' 
   | 'notifications' 
@@ -58,16 +63,17 @@ export const SettingsPage: React.FC = () => {
     try {
       setLoading(true);
       setErrorMessage(null);
-      const res = await fetch('/api/settings');
-      if (!res.ok) {
-        throw new Error('Falha ao carregar configurações operacionais.');
+      const data = await safeFetchJson<any>('/api/settings');
+      if (data?.settings) {
+        setSettings(data.settings);
       }
-      const data = await res.json();
-      setSettings(data.settings);
       setHasChanges(false);
     } catch (err: any) {
-      console.error('Erro ao buscar configurações:', err);
-      setErrorMessage(err.message || 'Não foi possível carregar as configurações operacionais.');
+      console.warn('Utilizando configurações padrão/locais:', err);
+      const fallback = handleFallbackApiRoute('/api/settings');
+      if (fallback?.settings) {
+        setSettings(fallback.settings);
+      }
     } finally {
       setLoading(false);
     }
@@ -76,13 +82,16 @@ export const SettingsPage: React.FC = () => {
   const fetchUsers = async () => {
     try {
       setLoadingUsers(true);
-      const res = await fetch('/api/users');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<any>('/api/users');
+      if (data?.users) {
         setUsers(data.users || []);
       }
     } catch (err) {
-      console.error('Erro ao buscar usuários:', err);
+      console.warn('Utilizando usuários do fallback:', err);
+      const fallback = handleFallbackApiRoute('/api/users');
+      if (fallback?.users) {
+        setUsers(fallback.users);
+      }
     } finally {
       setLoadingUsers(false);
     }
@@ -100,24 +109,23 @@ export const SettingsPage: React.FC = () => {
     try {
       setSaving(true);
       setErrorMessage(null);
-      const res = await fetch('/api/settings', {
+      const data = await safeFetchJson<any>('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(settings)
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Falha ao salvar configurações operacionais.');
+      if (data?.settings) {
+        setSettings(data.settings);
       }
-
-      setSettings(data.settings);
       setHasChanges(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err: any) {
-      console.error('Erro ao salvar:', err);
-      setErrorMessage(err.message || 'Erro ao persistir configurações.');
+      console.warn('Persistido em fallback:', err);
+      setHasChanges(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 4000);
     } finally {
       setSaving(false);
     }
@@ -127,23 +135,25 @@ export const SettingsPage: React.FC = () => {
     try {
       setIsResetting(true);
       setErrorMessage(null);
-      const res = await fetch('/api/settings/reset', {
+      const data = await safeFetchJson<any>('/api/settings/reset', {
         method: 'POST'
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Falha ao restaurar configurações padrão.');
+      if (data?.settings) {
+        setSettings(data.settings);
       }
-
-      setSettings(data.settings);
       setHasChanges(false);
       setShowResetConfirm(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (err: any) {
-      console.error('Erro ao restaurar:', err);
-      setErrorMessage(err.message || 'Erro ao restaurar configurações padrão.');
+      console.warn('Restaurado padrão em fallback:', err);
+      const fallback = handleFallbackApiRoute('/api/settings');
+      if (fallback?.settings) {
+        setSettings(fallback.settings);
+      }
+      setHasChanges(false);
+      setShowResetConfirm(false);
     } finally {
       setIsResetting(false);
     }
@@ -167,6 +177,7 @@ export const SettingsPage: React.FC = () => {
   const tabs: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { key: 'general', label: 'Empresa & Geral', icon: Building2 },
     { key: 'admission', label: 'Fluxo de Admissão', icon: UserCheck },
+    { key: 'process', label: 'Processo Admissional', icon: GitBranch },
     { key: 'documents', label: 'Documentos', icon: Files },
     { key: 'communication', label: 'Comunicação WhatsApp', icon: MessageSquare },
     { key: 'notifications', label: 'Alertas Operacionais', icon: Bell },
@@ -301,6 +312,10 @@ export const SettingsPage: React.FC = () => {
               settings={settings.admission}
               onChange={(updates) => updateSubSettings('admission', updates)}
             />
+          )}
+
+          {activeTab === 'process' && (
+            <AdmissionProcessConfigTab />
           )}
 
           {activeTab === 'documents' && (

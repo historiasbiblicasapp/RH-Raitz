@@ -23,7 +23,8 @@ import {
   Edit3,
   Trash2,
   KeyRound,
-  AlertCircle
+  AlertCircle,
+  UserCheck
 } from 'lucide-react';
 import { Admission, AdmissionStatus, DashboardStats } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -32,11 +33,19 @@ import { EditAdmissionModal } from '../components/EditAdmissionModal.tsx';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal.tsx';
 import { ManageInviteModal } from '../components/ManageInviteModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
+import { safeFetchJson } from '../lib/api.ts';
+import { computeStats, handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
 export const AdmissionsList: React.FC = () => {
-  const [admissions, setAdmissions] = useState<Admission[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
+  const [admissions, setAdmissions] = useState<Admission[]>(() => {
+    const res = handleFallbackApiRoute('/api/admissions');
+    return res?.admissions || [];
+  });
+  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(() => {
+    const res = handleFallbackApiRoute('/api/admissions');
+    return res?.admissions?.length || 0;
+  });
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
@@ -62,15 +71,8 @@ export const AdmissionsList: React.FC = () => {
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
 
   // Estatísticas para os 5 cards
-  const [stats, setStats] = useState<DashboardStats>({
-    newAdmissions: 0,
-    waitingDocuments: 0,
-    waitingReview: 0,
-    pendingIssues: 0,
-    completed: 0,
-    totalActive: 0
-  });
-  const [loadingStats, setLoadingStats] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>(() => computeStats());
+  const [loadingStats, setLoadingStats] = useState(false);
 
   // Opções de filtros dinâmicos recebidos do servidor
   const [filterOptions, setFilterOptions] = useState<{
@@ -91,13 +93,13 @@ export const AdmissionsList: React.FC = () => {
   const loadStats = async () => {
     try {
       setLoadingStats(true);
-      const res = await fetch('/api/dashboard/stats');
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeFetchJson<DashboardStats>('/api/dashboard/stats');
+      if (data) {
         setStats(data);
       }
     } catch (err) {
-      console.error('Erro ao carregar estatísticas:', err);
+      console.warn('Utilizando estatísticas do fallback:', err);
+      setStats(computeStats());
     } finally {
       setLoadingStats(false);
     }
@@ -130,24 +132,27 @@ export const AdmissionsList: React.FC = () => {
       params.append('page', String(page));
       params.append('limit', String(limit));
 
-      const res = await fetch(`/api/admissions?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.admissions) {
-          setAdmissions(data.admissions);
-          setTotal(data.total);
-          setTotalPages(data.totalPages);
-          if (data.filters) {
-            setFilterOptions(data.filters);
-          }
-        } else if (Array.isArray(data)) {
-          setAdmissions(data);
-          setTotal(data.length);
-          setTotalPages(1);
+      const data = await safeFetchJson<any>(`/api/admissions?${params.toString()}`);
+      if (data && data.admissions) {
+        setAdmissions(data.admissions);
+        setTotal(data.total);
+        setTotalPages(data.totalPages || Math.ceil(data.total / limit) || 1);
+        if (data.filters) {
+          setFilterOptions(data.filters);
         }
+      } else if (Array.isArray(data)) {
+        setAdmissions(data);
+        setTotal(data.length);
+        setTotalPages(Math.ceil(data.length / limit) || 1);
       }
     } catch (err) {
-      console.error('Erro ao carregar admissões:', err);
+      console.warn('Utilizando lista de admissões do fallback:', err);
+      const fallback = handleFallbackApiRoute(`/api/admissions`);
+      if (fallback?.admissions) {
+        setAdmissions(fallback.admissions);
+        setTotal(fallback.total || fallback.admissions.length);
+        setTotalPages(Math.ceil((fallback.total || fallback.admissions.length) / limit) || 1);
+      }
     } finally {
       setLoading(false);
     }
@@ -710,6 +715,14 @@ export const AdmissionsList: React.FC = () => {
                           className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
+                        </button>
+
+                        <button
+                          onClick={() => navigate(`/funcionarios/${adm.employeeId || adm.employee?.id}`)}
+                          title="Ver Ficha Cadastral do Funcionário"
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+                        >
+                          <UserCheck className="w-4 h-4" />
                         </button>
 
                         <button

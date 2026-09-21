@@ -21,7 +21,9 @@ import {
   X,
   AlertCircle,
   MessageSquare,
-  CalendarClock
+  CalendarClock,
+  UserCheck,
+  CheckSquare
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
@@ -46,9 +48,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
   const mainMenuItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/admissoes', label: 'Admissões', icon: Users },
-    { to: '/prazos', label: 'Prazos & Acompanhamento', icon: CalendarClock },
+    { to: '/checklist', label: 'Checklist Operacional', icon: CheckSquare },
+    { to: '/funcionarios', label: 'Funcionários', icon: UserCheck },
     { to: '/pendencias', label: 'Central de Pendências', icon: AlertCircle },
     { to: '/comunicacao', label: 'Comunicação', icon: MessageSquare },
+    { to: '/prazos', label: 'Prazos & Acompanhamento', icon: CalendarClock },
     { to: '/convites', label: 'Convites & Acessos', icon: KeyRound },
     { to: '/documentos', label: 'Documentos', icon: FileCheck2 },
   ];

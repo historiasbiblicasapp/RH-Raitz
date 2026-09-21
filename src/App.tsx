@@ -1,7 +1,24 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext.tsx';
 import { Layout } from './components/Layout.tsx';
+
+// Manipulador para restauração de rota caso haja redirecionamento de host estático (404.html)
+function SpaRedirectHandler() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    try {
+      const redirectPath = sessionStorage.getItem('spa_redirect_path');
+      if (redirectPath) {
+        sessionStorage.removeItem('spa_redirect_path');
+        navigate(redirectPath, { replace: true });
+      }
+    } catch {
+      // ignora se sessionStorage indisponível
+    }
+  }, [navigate]);
+  return null;
+}
 
 // Páginas de RH
 import { Login } from './pages/Login.tsx';
@@ -22,6 +39,9 @@ import { JobPositionChecklistPage } from './pages/JobPositionChecklistPage.tsx';
 import { PendingHubPage } from './pages/PendingHubPage.tsx';
 import { CommunicationHubPage } from './pages/CommunicationHubPage.tsx';
 import { PrazosPage } from './pages/PrazosPage.tsx';
+import { EmployeesPage } from './pages/EmployeesPage.tsx';
+import { EmployeeDetailsPage } from './pages/EmployeeDetailsPage.tsx';
+import { OperationalChecklistPage } from './pages/OperationalChecklistPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -30,6 +50,7 @@ export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <SpaRedirectHandler />
         <Routes>
           {/* Rota Pública de Autenticação do RH */}
           <Route path="/login" element={<Login />} />
@@ -42,6 +63,13 @@ export function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admissoes" element={<AdmissionsList />} />
+            <Route path="/checklist" element={<OperationalChecklistPage />} />
+            <Route path="/checklist-operacional" element={<OperationalChecklistPage />} />
+            <Route path="/admissoes/checklist" element={<OperationalChecklistPage />} />
+            <Route path="/funcionarios" element={<EmployeesPage />} />
+            <Route path="/funcionarios/:id" element={<EmployeeDetailsPage />} />
+            <Route path="/colaboradores" element={<EmployeesPage />} />
+            <Route path="/colaboradores/:id" element={<EmployeeDetailsPage />} />
             <Route path="/prazos" element={<PrazosPage />} />
             <Route path="/acompanhamento" element={<PrazosPage />} />
             <Route path="/pendencias" element={<PendingHubPage />} />
