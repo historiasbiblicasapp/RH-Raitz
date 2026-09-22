@@ -42,6 +42,7 @@ import { PrazosPage } from './pages/PrazosPage.tsx';
 import { EmployeesPage } from './pages/EmployeesPage.tsx';
 import { EmployeeDetailsPage } from './pages/EmployeeDetailsPage.tsx';
 import { OperationalChecklistPage } from './pages/OperationalChecklistPage.tsx';
+import { ApprovalQueue } from './pages/ApprovalQueue.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -63,6 +64,8 @@ export function App() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/admissoes" element={<AdmissionsList />} />
+            <Route path="/aprovacoes" element={<ApprovalQueue />} />
+            <Route path="/admissoes/aprovacoes" element={<ApprovalQueue />} />
             <Route path="/checklist" element={<OperationalChecklistPage />} />
             <Route path="/checklist-operacional" element={<OperationalChecklistPage />} />
             <Route path="/admissoes/checklist" element={<OperationalChecklistPage />} />

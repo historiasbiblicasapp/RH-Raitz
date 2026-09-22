@@ -2221,16 +2221,38 @@ router.get('/documents/:id/file', (req: Request, res: Response) => {
 });
 
 // ------------------------------------------------------------------
-// AUDITORIA E HISTÓRICO
+// AUDITORIA E HISTÓRICO COMPLETO (BLOCO 5.7)
 // ------------------------------------------------------------------
 router.get('/audit-logs', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
   const admissionId = req.query.admissionId as string | undefined;
+  const employeeId = req.query.employeeId as string | undefined;
   const entityType = req.query.entityType as string | undefined;
   const entityId = req.query.entityId as string | undefined;
   const action = req.query.action as string | undefined;
   const search = req.query.search as string | undefined;
+  const category = req.query.category as string | undefined;
+  const userName = req.query.userName as string | undefined;
+  const startDate = req.query.startDate as string | undefined;
+  const endDate = req.query.endDate as string | undefined;
 
-  const logs = db.getAuditLogs(admissionId, { entityType, entityId, action, search });
+  // RLS / Segurança: Se usuário for FUNCIONARIO, restringe apenas ao seu próprio funcionário ou admissão
+  let resolvedEmployeeId = employeeId;
+  if (user && user.role === 'FUNCIONARIO') {
+    resolvedEmployeeId = user.id;
+  }
+
+  const logs = db.getAuditLogs(admissionId, { 
+    entityType, 
+    entityId, 
+    employeeId: resolvedEmployeeId,
+    action, 
+    search,
+    category,
+    userName,
+    startDate,
+    endDate
+  });
   return res.json(logs);
 });
 
@@ -2767,6 +2789,277 @@ router.patch('/admissions/:id/operational-priority', (req: Request, res: Respons
       success: true,
       item: updated,
       message: `Prioridade operacional atualizada para ${priority} com sucesso.`
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+// ==================================================================
+// BLOCO 5.6 — APROVAÇÃO INTERNA (ROTAS DE FILA, DETALHES E DECISÕES)
+// ==================================================================
+
+function checkApprovalAuth(req: Request, res: Response): { user: any } | null {
+  const user = getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ error: 'Sessão inválida ou não autenticada. Faça login para continuar.' });
+    return null;
+  }
+  if (user.role === 'FUNCIONARIO') {
+    res.status(403).json({ error: 'Acesso não autorizado. Apenas gestores, diretoria e RH podem interagir com aprovações internas.' });
+    return null;
+  }
+  return { user };
+}
+
+/**
+ * GET /api/approvals
+ * Retorna a fila de aprovações com paginação, filtros avançados e resumo consolidado.
+ */
+router.get('/approvals', (req: Request, res: Response) => {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const {
+    search,
+    status,
+    type,
+    priority,
+    responsible,
+    unit,
+    role,
+    startDate,
+    endDate,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  try {
+    const queue = db.getApprovalQueue({
+      search: search as string | undefined,
+      status: status as any,
+      type: type as any,
+      priority: priority as any,
+      responsible: responsible as any,
+      unit: unit as string | undefined,
+      role: role as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      sortBy: sortBy as string | undefined,
+      sortOrder: sortOrder as 'asc' | 'desc' | undefined
+    });
+
+    return res.json(queue);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar fila de aprovações: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/approvals/:id
+ * Retorna visão completa para o modal ou página de decisão do aprovador.
+ */
+router.get('/approvals/:id', (req: Request, res: Response) => {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  try {
+    const detail = db.getApprovalById(id);
+    if (!detail) {
+      return res.status(404).json({ error: 'Aprovação não encontrada.' });
+    }
+    return res.json(detail);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao consultar detalhes da aprovação: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/admissions/:id/approval
+ * Retorna a aprovação vinculada a uma admissão específica.
+ */
+router.get('/admissions/:id/approval', (req: Request, res: Response) => {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  try {
+    const approval = db.getAdmissionApproval(id);
+    if (!approval) {
+      return res.status(404).json({ error: 'Esta admissão não possui fluxo de aprovação interna registrado.' });
+    }
+    return res.json(approval);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao consultar aprovação da admissão: ' + error.message });
+  }
+});
+
+/**
+ * POST /api/approvals/:id/start
+ * Marca a aprovação como EM_ANALISE pelo usuário atual.
+ */
+router.post('/approvals/:id/start', (req: Request, res: Response) => {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  try {
+    const approval = db.startApprovalReview(
+      id,
+      auth.user.name || auth.user.email,
+      auth.user.role
+    );
+    return res.json({
+      success: true,
+      approval,
+      message: 'Análise da aprovação iniciada com sucesso.'
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/approvals/:id/approve
+ * Aprova formalmente com controle de duplicidade/concorrência e auditoria.
+ */
+router.post('/api/approvals/:id/approve', (req: Request, res: Response) => {
+  // Aliased endpoint in case /api prefix gets doubled
+  return handleApprove(req, res);
+});
+router.post('/approvals/:id/approve', (req: Request, res: Response) => {
+  return handleApprove(req, res);
+});
+
+function handleApprove(req: Request, res: Response) {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { notes } = req.body;
+
+  try {
+    const result = db.approveAdmissionApproval(
+      id,
+      auth.user.name || auth.user.email,
+      auth.user.role,
+      notes
+    );
+    return res.json({
+      success: true,
+      ...result,
+      message: 'Admissão aprovada com sucesso.'
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+}
+
+/**
+ * POST /api/approvals/:id/reject
+ * Reprova formalmente exigindo justificativa obrigatória.
+ */
+router.post('/api/approvals/:id/reject', (req: Request, res: Response) => {
+  return handleReject(req, res);
+});
+router.post('/approvals/:id/reject', (req: Request, res: Response) => {
+  return handleReject(req, res);
+});
+
+function handleReject(req: Request, res: Response) {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { reason, notes } = req.body;
+
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'A justificativa é obrigatória para reprovar a admissão.' });
+  }
+
+  try {
+    const result = db.rejectAdmissionApproval(
+      id,
+      auth.user.name || auth.user.email,
+      auth.user.role,
+      reason,
+      notes
+    );
+    return res.json({
+      success: true,
+      ...result,
+      message: 'Admissão reprovada na análise interna.'
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+}
+
+/**
+ * POST /api/approvals/:id/reopen
+ * Reabre uma reprovação para nova análise com motivo obrigatório.
+ */
+router.post('/api/approvals/:id/reopen', (req: Request, res: Response) => {
+  return handleReopen(req, res);
+});
+router.post('/approvals/:id/reopen', (req: Request, res: Response) => {
+  return handleReopen(req, res);
+});
+
+function handleReopen(req: Request, res: Response) {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { reason } = req.body;
+
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'O motivo da reabertura é obrigatório.' });
+  }
+
+  try {
+    const result = db.reopenAdmissionApproval(
+      id,
+      auth.user.name || auth.user.email,
+      auth.user.role,
+      reason
+    );
+    return res.json({
+      success: true,
+      ...result,
+      message: 'Aprovação reaberta com sucesso para nova análise.'
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message });
+  }
+}
+
+/**
+ * POST /api/approvals/:id/cancel
+ * Cancela formalmente a aprovação.
+ */
+router.post('/approvals/:id/cancel', (req: Request, res: Response) => {
+  const auth = checkApprovalAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { reason } = req.body;
+
+  try {
+    const approval = db.cancelAdmissionApproval(
+      id,
+      auth.user.name || auth.user.email,
+      reason
+    );
+    return res.json({
+      success: true,
+      approval,
+      message: 'Aprovação cancelada com sucesso.'
     });
   } catch (error: any) {
     return res.status(400).json({ error: error.message });

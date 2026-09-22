@@ -556,6 +556,8 @@ export const EmployeeDetailsPage: React.FC = () => {
         {activeTab === 'historico' && (
           <EmployeeHistoryTab
             auditLogs={data.auditLogs || []}
+            employeeName={employee.name}
+            onRefresh={fetchDetails}
           />
         )}
       </div>

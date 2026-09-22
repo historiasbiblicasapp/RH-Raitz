@@ -90,7 +90,17 @@ import {
   OperationalTaskItem,
   OperationalChecklistItem,
   OperationalChecklistFilters,
-  OperationalChecklistResponse
+  OperationalChecklistResponse,
+  AdmissionApproval,
+  ApprovalStatus,
+  ApprovalType,
+  ApprovalResponsibleRole,
+  AdmissionApprovalHistoryItem,
+  ApprovalQueueItem,
+  ApprovalQueueSummary,
+  ApprovalQueueFilters,
+  ApprovalQueueResponse,
+  ApprovalDetailResponse
 } from '../src/types/index.ts';
 import { maskCPF, validateCPF, validateEmail } from '../src/lib/cpf.ts';
 import { initialDbData } from '../src/data/initialDb.ts';
@@ -1127,6 +1137,9 @@ export class Database {
 
     // Inicialização do Processo Admissional Configurável (Bloco 5.4)
     this.ensureAdmissionProcessInitialized();
+
+    // Inicialização da Aprovação Interna (Bloco 5.6)
+    this.ensureApprovalsInitialized();
   }
 
   private save() {
@@ -1304,6 +1317,93 @@ export class Database {
         const currentStep = steps.find(st => st.status === 'EM_ANDAMENTO') || steps[steps.length - 1];
         adm.currentStepKey = currentStep?.stepKey;
         needsSave = true;
+      }
+    }
+
+    if (needsSave) {
+      this.save();
+    }
+  }
+
+  // =========================================================================
+  // BLOCO 5.6 — APROVAÇÃO INTERNA: Inicialização de Snapshot
+  // =========================================================================
+
+  private ensureApprovalsInitialized() {
+    let needsSave = false;
+    const now = new Date().toISOString();
+
+    for (const adm of (this.data.admissions || [])) {
+      if (!adm.approval) {
+        const approvalStep = (adm.processSteps || []).find(s => s.stepKey === 'APROVACAO');
+        if (approvalStep) {
+          let status: ApprovalStatus = 'PENDENTE';
+          let decidedAt: string | undefined;
+          let decidedBy: string | undefined;
+          let decisionReason: string | undefined;
+          let startedAt: string | undefined;
+
+          if (adm.status === 'Concluída') {
+            status = 'APROVADA';
+            decidedAt = adm.completedAt || adm.updatedAt || adm.createdAt;
+            decidedBy = adm.completedBy || 'Gestor Responsável';
+          } else if (adm.status === 'Cancelada') {
+            status = 'CANCELADA';
+            decidedAt = adm.cancelledAt || adm.updatedAt;
+            decidedBy = adm.cancelledBy || 'RH';
+            decisionReason = adm.cancellationReason;
+          } else if (approvalStep.status === 'CONCLUIDA') {
+            status = 'APROVADA';
+            decidedAt = approvalStep.completedAt || now;
+            decidedBy = approvalStep.completedBy || 'Gestor Responsável';
+          } else if (approvalStep.status === 'BLOQUEADA' && approvalStep.blockReason?.includes('Reprovada')) {
+            status = 'REPROVADA';
+            decidedAt = approvalStep.history?.[approvalStep.history.length - 1]?.timestamp || now;
+            decidedBy = approvalStep.history?.[approvalStep.history.length - 1]?.userName || 'Gestor Responsável';
+            decisionReason = approvalStep.blockReason;
+          } else if (approvalStep.status === 'EM_ANDAMENTO') {
+            status = 'EM_ANALISE';
+            startedAt = approvalStep.startedAt || now;
+          }
+
+          const approval: AdmissionApproval = {
+            id: 'appr-' + adm.id,
+            admissionId: adm.id,
+            processStepId: approvalStep.id,
+            approvalType: 'GESTOR',
+            title: 'Aprovação da Gestão / Diretoria',
+            description: 'Validação final e parecer formal sobre o ingresso do colaborador.',
+            status,
+            required: approvalStep.required ?? true,
+            responsibleRole: (approvalStep.responsibleRole as ApprovalResponsibleRole) || 'GESTOR',
+            requestedAt: adm.createdAt,
+            startedAt,
+            decidedAt,
+            decidedBy,
+            decisionReason,
+            configurationSnapshot: {
+              versionNumber: adm.processVersionNumber || 1,
+              stepName: approvalStep.stepName,
+              allowRejection: true,
+              requireRejectionReason: true
+            },
+            createdAt: adm.createdAt,
+            updatedAt: now,
+            history: [
+              {
+                id: 'hist-appr-init-' + crypto.randomUUID(),
+                action: status === 'APROVADA' ? 'APROVADA' : (status === 'CANCELADA' ? 'CANCELADA' : 'SOLICITADA'),
+                timestamp: adm.createdAt,
+                userName: status === 'APROVADA' ? (decidedBy || 'Sistema') : 'Sistema',
+                newStatus: status,
+                notes: 'Aprovação interna inicializada no snapshot do processo admissional.'
+              }
+            ]
+          };
+
+          adm.approval = approval;
+          needsSave = true;
+        }
       }
     }
 
@@ -3282,6 +3382,41 @@ export class Database {
 
     const currentStepKey = processSteps.find(st => st.status === 'EM_ANDAMENTO')?.stepKey || 'DADOS_PESSOAIS';
 
+    const approvalStep = processSteps.find(s => s.stepKey === 'APROVACAO');
+    let approval: AdmissionApproval | undefined;
+    if (approvalStep) {
+      approval = {
+        id: 'appr-' + admissionId,
+        admissionId,
+        processStepId: approvalStep.id,
+        approvalType: 'GESTOR',
+        title: 'Aprovação da Gestão / Diretoria',
+        description: 'Validação final e parecer formal sobre o ingresso do colaborador.',
+        status: 'PENDENTE',
+        required: approvalStep.required ?? true,
+        responsibleRole: (approvalStep.responsibleRole as ApprovalResponsibleRole) || 'GESTOR',
+        requestedAt: now,
+        configurationSnapshot: {
+          versionNumber: activeVersion.versionNumber,
+          stepName: approvalStep.stepName,
+          allowRejection: true,
+          requireRejectionReason: true
+        },
+        createdAt: now,
+        updatedAt: now,
+        history: [
+          {
+            id: 'hist-appr-init-' + crypto.randomUUID(),
+            action: 'SOLICITADA',
+            timestamp: now,
+            userName: createdByUserName || 'Sistema',
+            newStatus: 'PENDENTE',
+            notes: 'Aprovação interna inicializada no snapshot do processo admissional.'
+          }
+        ]
+      };
+    }
+
     const newAdmission: Admission = {
       id: admissionId,
       employeeId,
@@ -3300,6 +3435,7 @@ export class Database {
       processVersionNumber: activeVersion.versionNumber,
       processSteps,
       currentStepKey,
+      approval,
       createdAt: now,
       updatedAt: now
     };
@@ -3316,6 +3452,19 @@ export class Database {
       employeeName: employee.name,
       details: `Admissão cadastrada para o cargo ${employee.role} (${employee.department} - ${employee.unit})`
     });
+
+    // Auditoria de Aprovação Interna (Bloco 5.6)
+    if (approval) {
+      this.addAuditLog({
+        userName: createdByUserName || 'Sistema',
+        action: 'approval_created',
+        entityType: 'admission_approval',
+        entityId: approval.id,
+        admissionId,
+        employeeName: employee.name,
+        details: `Aprovação interna (${approval.approvalType}) cadastrada no fluxo como PENDENTE sob responsabilidade de ${approval.responsibleRole}.`
+      });
+    }
 
     // Auditoria do Processo Admissional (Bloco 5.4)
     this.addAuditLog({
@@ -5273,6 +5422,27 @@ export class Database {
     admission.cancellationReason = reason.trim();
     admission.updatedAt = now;
 
+    // Bloco 5.6: Se houver aprovação em andamento ou pendente, cancela formalmente
+    if (admission.approval && (admission.approval.status === 'PENDENTE' || admission.approval.status === 'EM_ANALISE')) {
+      const prev = admission.approval.status;
+      admission.approval.status = 'CANCELADA';
+      admission.approval.decidedAt = now;
+      admission.approval.decidedBy = cancelledBy;
+      admission.approval.decisionReason = `Admissão cancelada: ${reason.trim()}`;
+      admission.approval.updatedAt = now;
+      admission.approval.history = admission.approval.history || [];
+      admission.approval.history.push({
+        id: 'hist-appr-' + crypto.randomUUID(),
+        action: 'CANCELADA',
+        timestamp: now,
+        userName: cancelledBy,
+        previousStatus: prev,
+        newStatus: 'CANCELADA',
+        reason: reason.trim(),
+        notes: 'Aprovação cancelada juntamente com o cancelamento da admissão.'
+      });
+    }
+
     this.addAuditLog({
       userName: cancelledBy,
       action: 'RH cancelou a admissão',
@@ -5301,6 +5471,15 @@ export class Database {
       throw new Error('Esta admissão está cancelada e não pode ser concluída.');
     }
 
+    // Bloco 5.6: Bloqueio de Conclusão Indevida se Aprovação Interna Obrigatória não estiver APROVADA
+    if (admission.approval && admission.approval.required && admission.approval.status !== 'APROVADA') {
+      const currentSt = admission.approval.status;
+      const detail = currentSt === 'REPROVADA'
+        ? `reprovada (Motivo: "${admission.approval.decisionReason || 'Reprovada na análise interna'}")`
+        : currentSt.toLowerCase();
+      throw new Error(`Não é possível concluir a admissão: a aprovação interna obrigatória está ${detail} e requer formalização de aprovação.`);
+    }
+
     const requiredDocs = admission.documents.filter(d => d.required);
     const unapproved = requiredDocs.filter(d => d.status !== 'Aprovado');
     if (unapproved.length > 0) {
@@ -5313,6 +5492,14 @@ export class Database {
     admission.completedAt = now;
     admission.completedBy = completedBy;
     admission.updatedAt = now;
+
+    // Se houver aprovação pendente ou em análise (caso não obrigatória), formaliza aprovação
+    if (admission.approval && admission.approval.status !== 'APROVADA') {
+      admission.approval.status = 'APROVADA';
+      admission.approval.decidedAt = now;
+      admission.approval.decidedBy = completedBy;
+      admission.approval.updatedAt = now;
+    }
 
     this.addAuditLog({
       userName: completedBy,
@@ -5765,25 +5952,92 @@ export class Database {
     };
     if (!this.data.auditLogs) this.data.auditLogs = [];
     this.data.auditLogs.unshift(newLog);
-    // Limita a 1000 registros mais recentes em memória
-    if (this.data.auditLogs.length > 1000) {
-      this.data.auditLogs = this.data.auditLogs.slice(0, 1000);
+    // Limita a 10000 registros para garantir histórico completo
+    if (this.data.auditLogs.length > 10000) {
+      this.data.auditLogs = this.data.auditLogs.slice(0, 10000);
     }
   }
 
   getAuditLogs(
     admissionId?: string, 
-    options?: { entityType?: string; entityId?: string; action?: string; search?: string }
+    options?: { 
+      entityType?: string; 
+      entityId?: string; 
+      employeeId?: string;
+      action?: string; 
+      search?: string;
+      category?: string;
+      userName?: string;
+      startDate?: string;
+      endDate?: string;
+    }
   ): AuditLog[] {
     let logs = this.data.auditLogs || [];
     if (admissionId) {
       logs = logs.filter(l => l.admissionId === admissionId);
+    }
+    if (options?.employeeId) {
+      const emp = this.getEmployeeById(options.employeeId);
+      const cleanCpf = emp?.cpf ? emp.cpf.replace(/\D/g, '') : '';
+      const empAdmissions = (this.data.admissions || [])
+        .filter(a => a.employeeId === options.employeeId || (cleanCpf && a.employee?.cpf?.replace(/\D/g, '') === cleanCpf))
+        .map(a => a.id);
+
+      logs = logs.filter(l => 
+        l.entityId === options.employeeId || 
+        (emp && l.employeeName === emp.name) ||
+        (l.admissionId && empAdmissions.includes(l.admissionId))
+      );
     }
     if (options?.entityType) {
       logs = logs.filter(l => l.entityType === options.entityType);
     }
     if (options?.entityId) {
       logs = logs.filter(l => l.entityId === options.entityId);
+    }
+    if (options?.userName) {
+      const u = options.userName.toLowerCase();
+      logs = logs.filter(l => (l.userName || l.performedBy || '').toLowerCase().includes(u));
+    }
+    if (options?.startDate) {
+      const start = new Date(options.startDate).getTime();
+      if (!isNaN(start)) {
+        logs = logs.filter(l => new Date(l.timestamp || l.createdAt || 0).getTime() >= start);
+      }
+    }
+    if (options?.endDate) {
+      const end = new Date(options.endDate + (options.endDate.length === 10 ? 'T23:59:59.999Z' : '')).getTime();
+      if (!isNaN(end)) {
+        logs = logs.filter(l => new Date(l.timestamp || l.createdAt || 0).getTime() <= end);
+      }
+    }
+    if (options?.category && options.category !== 'TODAS') {
+      const cat = options.category.toLowerCase();
+      logs = logs.filter(l => {
+        const act = l.action.toLowerCase();
+        const ent = (l.entityType || '').toLowerCase();
+        const det = (l.details || '').toLowerCase();
+
+        if (cat === 'documento' || cat === 'documentos') {
+          return ent.includes('document') || act.includes('documento') || act.includes('aprovou') || act.includes('rejeitou') || act.includes('download') || act.includes('upload') || Boolean(l.documentType);
+        }
+        if (cat === 'processo' || cat === 'etapas') {
+          return ent.includes('process') || act.includes('etapa') || act.includes('processo') || act.includes('concluída') || act.includes('cancelada');
+        }
+        if (cat === 'aprovacao' || cat === 'aprovacoes') {
+          return ent.includes('approval') || act.includes('aprovação') || act.includes('parecer') || act.includes('reprovada') || act.includes('reaberta');
+        }
+        if (cat === 'cadastro' || cat === 'cadastral') {
+          return ent.includes('employee') || act.includes('cadastr') || act.includes('dados') || act.includes('inativado') || act.includes('reativado') || (l.changes && l.changes.length > 0);
+        }
+        if (cat === 'convite' || cat === 'lgpd') {
+          return act.includes('convite') || act.includes('whatsapp') || act.includes('consentimento') || act.includes('lgpd') || act.includes('token');
+        }
+        if (cat === 'sistema' || cat === 'seguranca') {
+          return ent.includes('system') || ent.includes('setting') || act.includes('configur') || act.includes('relatório') || act.includes('cpf') || act.includes('cargo');
+        }
+        return true;
+      });
     }
     if (options?.action) {
       const act = options.action.toLowerCase();
@@ -5794,9 +6048,18 @@ export class Database {
       logs = logs.filter(l => 
         l.details.toLowerCase().includes(q) ||
         l.userName.toLowerCase().includes(q) ||
+        (l.performedBy && l.performedBy.toLowerCase().includes(q)) ||
         (l.employeeName && l.employeeName.toLowerCase().includes(q)) ||
         (l.documentType && l.documentType.toLowerCase().includes(q)) ||
         (l.entityName && l.entityName.toLowerCase().includes(q)) ||
+        (l.fieldChanged && l.fieldChanged.toLowerCase().includes(q)) ||
+        (l.previousValue && l.previousValue.toLowerCase().includes(q)) ||
+        (l.newValue && l.newValue.toLowerCase().includes(q)) ||
+        (l.changes && l.changes.some(c => 
+          (c.label || '').toLowerCase().includes(q) || 
+          String(c.previousValue || '').toLowerCase().includes(q) || 
+          String(c.newValue || '').toLowerCase().includes(q)
+        )) ||
         l.action.toLowerCase().includes(q)
       );
     }
@@ -8035,6 +8298,686 @@ export class Database {
 
     const settings = this.getSettings();
     return buildOperationalChecklistItem(admission, settings);
+  }
+
+  // =========================================================================
+  // BLOCO 5.6 — APROVAÇÃO INTERNA: MÉTODOS DE FILA, CONSULTA E DECISÕES
+  // =========================================================================
+
+  /**
+   * Retorna a fila de aprovações com paginação, filtros avançados e resumo consolidado.
+   */
+  getApprovalQueue(options?: ApprovalQueueFilters): ApprovalQueueResponse {
+    this.ensureApprovalsInitialized();
+    const admissions = this.data.admissions || [];
+    const queueItems: ApprovalQueueItem[] = [];
+
+    const calculateDayDiff = (dateStr: string): number => {
+      try {
+        const target = new Date(dateStr.includes('T') ? dateStr : dateStr + 'T00:00:00').getTime();
+        const today = new Date().setHours(0, 0, 0, 0);
+        return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+      } catch {
+        return 0;
+      }
+    };
+
+    let pendingCount = 0;
+    let inReviewCount = 0;
+    let approvedCount = 0;
+    let rejectedCount = 0;
+    let cancelledCount = 0;
+    let criticalCount = 0;
+
+    const typesSet = new Set<string>();
+    const rolesSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const responsiblesSet = new Set<string>();
+    const statusesSet = new Set<string>(['PENDENTE', 'EM_ANALISE', 'APROVADA', 'REPROVADA', 'CANCELADA']);
+
+    const now = new Date();
+
+    for (const adm of admissions) {
+      if (!adm.approval) continue;
+
+      const app = adm.approval;
+      const docs = adm.documents || [];
+      const requiredDocs = docs.filter(d => d.required);
+      const approvedDocs = docs.filter(d => d.status === 'Aprovado');
+      const pendingDocs = requiredDocs.filter(d => d.status !== 'Aprovado');
+      const hasRejected = docs.some(d => d.status === 'Rejeitado');
+
+      const reqDate = new Date(app.requestedAt || adm.createdAt);
+      const waitingDays = Math.max(0, Math.floor((now.getTime() - reqDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+      // Contadores
+      if (app.status === 'PENDENTE') pendingCount++;
+      else if (app.status === 'EM_ANALISE') inReviewCount++;
+      else if (app.status === 'APROVADA') approvedCount++;
+      else if (app.status === 'REPROVADA') rejectedCount++;
+      else if (app.status === 'CANCELADA') cancelledCount++;
+
+      // Prioridade Operacional
+      let priority: OperationalPriority = adm.operationalPriority || 'NORMAL';
+      if (!adm.operationalPriority) {
+        if (app.status === 'REPROVADA') {
+          priority = 'CRITICA';
+        } else if (waitingDays >= 5 || (adm.employee.expectedStartDate && Math.abs(calculateDayDiff(adm.employee.expectedStartDate)) <= 3)) {
+          priority = 'CRITICA';
+        } else if (waitingDays >= 2 || (adm.employee.expectedStartDate && Math.abs(calculateDayDiff(adm.employee.expectedStartDate)) <= 7)) {
+          priority = 'ALTA';
+        }
+      }
+
+      if (priority === 'CRITICA' && app.status !== 'APROVADA' && app.status !== 'CANCELADA') {
+        criticalCount++;
+      }
+
+      if (app.approvalType) typesSet.add(app.approvalType);
+      if (adm.employee.role) rolesSet.add(adm.employee.role);
+      if (adm.employee.unit) unitsSet.add(adm.employee.unit);
+      if (app.responsibleRole) responsiblesSet.add(app.responsibleRole);
+
+      const canApprove = adm.status !== 'Cancelada' && adm.status !== 'Concluída' && app.status !== 'APROVADA';
+
+      const stepSnapshot = (adm.processSteps || []).find(s => s.id === app.processStepId || s.stepKey === 'APROVACAO');
+
+      queueItems.push({
+        approvalId: app.id,
+        admissionId: adm.id,
+        admissionCode: `ADM-${adm.id.slice(0, 6).toUpperCase()}`,
+        employeeId: adm.employeeId || adm.employee.id,
+        employeeName: adm.employee.name,
+        employeeCpf: adm.employee.cpf,
+        employeeRole: adm.employee.role,
+        employeeDepartment: adm.employee.department,
+        employeeUnit: adm.employee.unit,
+        expectedStartDate: adm.employee.expectedStartDate,
+        admissionStatus: adm.status,
+        processStepName: stepSnapshot?.stepName || 'Aprovação Interna',
+        approvalType: app.approvalType,
+        status: app.status,
+        required: app.required,
+        responsibleRole: app.responsibleRole,
+        assignedUserName: app.assignedUserName,
+        priority,
+        priorityReason: adm.operationalPriorityReason,
+        requestedAt: app.requestedAt || adm.createdAt,
+        startedAt: app.startedAt,
+        decidedAt: app.decidedAt,
+        decidedBy: app.decidedBy,
+        decisionReason: app.decisionReason,
+        decisionNotes: app.decisionNotes,
+        reopenedAt: app.reopenedAt,
+        reopenedBy: app.reopenedBy,
+        reopenReason: app.reopenReason,
+        waitingDays,
+        approvedDocsCount: approvedDocs.length,
+        requiredDocsCount: requiredDocs.length,
+        pendingDocsCount: pendingDocs.length,
+        totalDocsCount: docs.length,
+        hasRejectedDocs: hasRejected,
+        canApprove
+      });
+    }
+
+    // Aplicação de Filtros
+    let filtered = [...queueItems];
+
+    if (options) {
+      if (options.search && options.search.trim()) {
+        const term = options.search.trim().toLowerCase();
+        const cleanDigits = term.replace(/\D/g, '');
+        filtered = filtered.filter(item => {
+          const nameMatch = item.employeeName.toLowerCase().includes(term);
+          const cpfMatch = cleanDigits ? item.employeeCpf.replace(/\D/g, '').includes(cleanDigits) : false;
+          const codeMatch = item.admissionCode.toLowerCase().includes(term);
+          const roleMatch = item.employeeRole.toLowerCase().includes(term);
+          const unitMatch = item.employeeUnit.toLowerCase().includes(term);
+          return nameMatch || cpfMatch || codeMatch || roleMatch || unitMatch;
+        });
+      }
+
+      if (options.status && options.status !== 'TODOS' && options.status !== 'Todas') {
+        filtered = filtered.filter(i => i.status === options.status);
+      }
+
+      if (options.type && options.type !== 'TODOS' && options.type !== 'Todas') {
+        filtered = filtered.filter(i => i.approvalType === options.type);
+      }
+
+      if (options.priority && options.priority !== 'TODAS' && options.priority !== 'Todas') {
+        filtered = filtered.filter(i => i.priority === options.priority);
+      }
+
+      if (options.responsible && options.responsible !== 'TODOS' && options.responsible !== 'Todos') {
+        filtered = filtered.filter(i => i.responsibleRole === options.responsible);
+      }
+
+      if (options.unit && options.unit !== 'TODAS' && options.unit !== 'Todas') {
+        filtered = filtered.filter(i => i.employeeUnit === options.unit);
+      }
+
+      if (options.role && options.role !== 'TODOS' && options.role !== 'Todos') {
+        filtered = filtered.filter(i => i.employeeRole === options.role);
+      }
+
+      if (options.startDate) {
+        const start = new Date(options.startDate + 'T00:00:00').getTime();
+        filtered = filtered.filter(i => new Date(i.requestedAt).getTime() >= start);
+      }
+      if (options.endDate) {
+        const end = new Date(options.endDate + 'T23:59:59').getTime();
+        filtered = filtered.filter(i => new Date(i.requestedAt).getTime() <= end);
+      }
+    }
+
+    // Ordenação inteligente:
+    // 1. Status ativo: PENDENTE e EM_ANALISE primeiro, depois REPROVADA, depois APROVADA e CANCELADA
+    // 2. Prioridade: CRITICA (1), ALTA (2), NORMAL (3)
+    // 3. Dias aguardando: maior tempo primeiro
+    filtered.sort((a, b) => {
+      if (options?.sortBy) {
+        const order = options.sortOrder === 'desc' ? -1 : 1;
+        if (options.sortBy === 'colaborador') return a.employeeName.localeCompare(b.employeeName) * order;
+        if (options.sortBy === 'dias') return (a.waitingDays - b.waitingDays) * order;
+        if (options.sortBy === 'solicitacao') return (new Date(a.requestedAt).getTime() - new Date(b.requestedAt).getTime()) * order;
+        if (options.sortBy === 'status') return a.status.localeCompare(b.status) * order;
+      }
+
+      // Ordem padrão refinada
+      const statusWeight = (st: ApprovalStatus) => {
+        if (st === 'EM_ANALISE') return 1;
+        if (st === 'PENDENTE') return 2;
+        if (st === 'REPROVADA') return 3;
+        if (st === 'APROVADA') return 4;
+        return 5;
+      };
+
+      const pWeight = (p: OperationalPriority) => {
+        if (p === 'CRITICA') return 1;
+        if (p === 'ALTA') return 2;
+        return 3;
+      };
+
+      const swA = statusWeight(a.status);
+      const swB = statusWeight(b.status);
+      if (swA !== swB) return swA - swB;
+
+      const pwA = pWeight(a.priority);
+      const pwB = pWeight(b.priority);
+      if (pwA !== pwB) return pwA - pwB;
+
+      return b.waitingDays - a.waitingDays;
+    });
+
+    const total = filtered.length;
+    const page = Math.max(1, Number(options?.page) || 1);
+    const limit = Math.max(1, Number(options?.limit) || 20);
+    const totalPages = Math.ceil(total / limit) || 1;
+    const offset = (page - 1) * limit;
+    const paginated = filtered.slice(offset, offset + limit);
+
+    return {
+      items: paginated,
+      total,
+      page,
+      limit,
+      totalPages,
+      summary: {
+        total: queueItems.length,
+        pending: pendingCount,
+        inReview: inReviewCount,
+        approved: approvedCount,
+        rejected: rejectedCount,
+        cancelled: cancelledCount,
+        critical: criticalCount
+      },
+      filters: {
+        types: Array.from(typesSet).sort(),
+        roles: Array.from(rolesSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        responsibles: Array.from(responsiblesSet).sort(),
+        statuses: Array.from(statusesSet)
+      }
+    };
+  }
+
+  /**
+   * Obtém a aprovação vinculada a uma admissão.
+   */
+  getAdmissionApproval(admissionId: string): AdmissionApproval | null {
+    this.ensureApprovalsInitialized();
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission || !admission.approval) return null;
+    return admission.approval;
+  }
+
+  /**
+   * Obtém os detalhes completos de uma aprovação pelo ID.
+   */
+  getApprovalById(approvalId: string): ApprovalDetailResponse | null {
+    this.ensureApprovalsInitialized();
+    const admission = (this.data.admissions || []).find(a => a.approval?.id === approvalId);
+    if (!admission || !admission.approval) return null;
+
+    const canDecide = admission.status !== 'Cancelada' && admission.status !== 'Concluída';
+
+    // Tarefas operacionais relacionadas
+    let tasks: OperationalTaskItem[] = [];
+    try {
+      const checklistItem = buildOperationalChecklistItem(admission, this.getSettings());
+      tasks = checklistItem.tasks || [];
+    } catch {
+      tasks = [];
+    }
+
+    return {
+      approval: admission.approval,
+      admission,
+      employee: admission.employee,
+      documents: admission.documents || [],
+      processSteps: admission.processSteps || [],
+      operationalTasks: tasks,
+      canDecide
+    };
+  }
+
+  /**
+   * Inicia a análise formal da aprovação (PENDENTE -> EM_ANALISE).
+   */
+  startApprovalReview(approvalId: string, userName: string, userRole: string = 'GESTOR'): AdmissionApproval {
+    this.ensureApprovalsInitialized();
+    const admission = (this.data.admissions || []).find(a => a.approval?.id === approvalId);
+    if (!admission || !admission.approval) {
+      throw new Error('Aprovação não encontrada.');
+    }
+
+    const app = admission.approval;
+    if (app.status === 'APROVADA') {
+      throw new Error(`Esta aprovação já foi aprovada por ${app.decidedBy || 'outro usuário'}.`);
+    }
+    if (app.status === 'CANCELADA') {
+      throw new Error('Esta aprovação está cancelada.');
+    }
+
+    if (app.status === 'EM_ANALISE') {
+      return app;
+    }
+
+    const now = new Date().toISOString();
+    const prevStatus = app.status;
+    app.status = 'EM_ANALISE';
+    app.startedAt = now;
+    app.assignedUserName = userName;
+    app.updatedAt = now;
+
+    app.history = app.history || [];
+    app.history.push({
+      id: 'hist-appr-' + crypto.randomUUID(),
+      action: 'INICIADA',
+      timestamp: now,
+      userName,
+      userRole,
+      previousStatus: prevStatus,
+      newStatus: 'EM_ANALISE',
+      notes: `Análise formal iniciada por ${userName}.`
+    });
+
+    // Atualiza etapa APROVACAO se houver
+    const step = (admission.processSteps || []).find(s => s.id === app.processStepId || s.stepKey === 'APROVACAO');
+    if (step && step.status !== 'CONCLUIDA') {
+      step.status = 'EM_ANDAMENTO';
+      step.startedAt = now;
+      step.blockReason = undefined;
+    }
+
+    this.save();
+
+    this.addAuditLog({
+      userName,
+      action: 'approval_started',
+      entityType: 'admission_approval',
+      entityId: app.id,
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Análise da aprovação interna (${app.approvalType}) iniciada por ${userName}.`
+    });
+
+    return app;
+  }
+
+  /**
+   * Aprova formalmente a admissão com verificação de concorrência e sincronização de etapas.
+   */
+  approveAdmissionApproval(
+    approvalId: string, 
+    userName: string, 
+    userRole: string = 'GESTOR', 
+    notes?: string
+  ): { approval: AdmissionApproval; admission: Admission } {
+    this.ensureApprovalsInitialized();
+    const admission = (this.data.admissions || []).find(a => a.approval?.id === approvalId);
+    if (!admission || !admission.approval) {
+      throw new Error('Aprovação não encontrada.');
+    }
+
+    const app = admission.approval;
+
+    // Regra anti-duplicação e concorrência
+    if (app.status === 'APROVADA') {
+      throw new Error(`Esta aprovação já foi formalizada anteriormente por ${app.decidedBy || 'outro usuário'} em ${new Date(app.decidedAt!).toLocaleString('pt-BR')}.`);
+    }
+    if (app.status === 'CANCELADA') {
+      throw new Error('Esta aprovação está cancelada e não pode ser aprovada.');
+    }
+    if (app.status === 'REPROVADA') {
+      throw new Error('Esta aprovação encontra-se reprovada. É necessário realizar a reabertura formal justificando a revisão.');
+    }
+
+    const now = new Date().toISOString();
+    const prevStatus = app.status;
+
+    app.status = 'APROVADA';
+    app.decidedAt = now;
+    app.decidedBy = userName;
+    app.decisionNotes = notes ? notes.trim() : undefined;
+    app.updatedAt = now;
+
+    app.history = app.history || [];
+    app.history.push({
+      id: 'hist-appr-' + crypto.randomUUID(),
+      action: 'APROVADA',
+      timestamp: now,
+      userName,
+      userRole,
+      previousStatus: prevStatus,
+      newStatus: 'APROVADA',
+      notes: notes ? notes.trim() : undefined
+    });
+
+    // Conclui a etapa APROVACAO no snapshot do processo 5.4
+    const step = (admission.processSteps || []).find(s => s.id === app.processStepId || s.stepKey === 'APROVACAO');
+    if (step) {
+      step.status = 'CONCLUIDA';
+      step.completedAt = now;
+      step.completedBy = userName;
+      step.blockReason = undefined;
+      step.notes = notes ? notes.trim() : undefined;
+      step.history = step.history || [];
+      step.history.push({
+        action: 'concluida',
+        timestamp: now,
+        userName,
+        details: `Aprovação interna concedida por ${userName}.${notes ? ` Observações: "${notes.trim()}".` : ''}`
+      });
+    }
+
+    // Avalia o avanço da admissão para a próxima etapa (ex: CONCLUSAO)
+    this.evaluateAdmissionProcessSteps(admission, userName);
+
+    admission.updatedAt = now;
+    this.save();
+
+    // Auditoria rigorosa
+    this.addAuditLog({
+      userName,
+      action: 'approval_approved',
+      entityType: 'admission_approval',
+      entityId: app.id,
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      fieldChanged: 'status da aprovação',
+      previousValue: prevStatus,
+      newValue: 'APROVADA',
+      details: `Aprovação interna (${app.approvalType}) formalizada e aprovada por ${userName}.${notes ? ` Observações: "${notes.trim()}".` : ''}`
+    });
+
+    this.addNotification({
+      title: 'Aprovação interna formalizada',
+      message: `A aprovação da admissão de ${admission.employee.name} foi aprovada por ${userName}.`,
+      type: 'completed',
+      admissionId: admission.id,
+      link: `/admissoes/${admission.id}`
+    });
+
+    return { approval: app, admission };
+  }
+
+  /**
+   * Reprova formalmente a admissão com justificativa obrigatória e bloqueio de etapas.
+   */
+  rejectAdmissionApproval(
+    approvalId: string, 
+    userName: string, 
+    userRole: string = 'GESTOR', 
+    reason: string, 
+    notes?: string
+  ): { approval: AdmissionApproval; admission: Admission } {
+    this.ensureApprovalsInitialized();
+    if (!reason || !reason.trim()) {
+      throw new Error('A justificativa é obrigatória para reprovar a admissão.');
+    }
+
+    const admission = (this.data.admissions || []).find(a => a.approval?.id === approvalId);
+    if (!admission || !admission.approval) {
+      throw new Error('Aprovação não encontrada.');
+    }
+
+    const app = admission.approval;
+
+    if (app.status === 'APROVADA') {
+      throw new Error('Esta aprovação já foi aprovada e não pode ser reprovada diretamente. Utilize a reabertura formal se aplicável.');
+    }
+    if (app.status === 'CANCELADA') {
+      throw new Error('Esta aprovação está cancelada.');
+    }
+
+    const now = new Date().toISOString();
+    const prevStatus = app.status;
+
+    app.status = 'REPROVADA';
+    app.decidedAt = now;
+    app.decidedBy = userName;
+    app.decisionReason = reason.trim();
+    app.decisionNotes = notes ? notes.trim() : undefined;
+    app.updatedAt = now;
+
+    app.history = app.history || [];
+    app.history.push({
+      id: 'hist-appr-' + crypto.randomUUID(),
+      action: 'REPROVADA',
+      timestamp: now,
+      userName,
+      userRole,
+      previousStatus: prevStatus,
+      newStatus: 'REPROVADA',
+      reason: reason.trim(),
+      notes: notes ? notes.trim() : undefined
+    });
+
+    // Bloqueia a etapa APROVACAO no snapshot
+    const step = (admission.processSteps || []).find(s => s.id === app.processStepId || s.stepKey === 'APROVACAO');
+    if (step) {
+      step.status = 'BLOQUEADA';
+      step.blockReason = `Reprovada na aprovação interna: ${reason.trim()}`;
+      step.history = step.history || [];
+      step.history.push({
+        action: 'bloqueada',
+        timestamp: now,
+        userName,
+        details: `Aprovação interna reprovada por ${userName}. Motivo: "${reason.trim()}".`
+      });
+    }
+
+    // Atualiza status da admissão para Pendência e prioridade crítica
+    admission.status = 'Pendência';
+    admission.operationalPriority = 'CRITICA';
+    admission.operationalPriorityReason = `Aprovação interna reprovada por ${userName}: ${reason.trim()}`;
+    admission.operationalPriorityUpdatedAt = now;
+    admission.operationalPriorityUpdatedBy = userName;
+    admission.updatedAt = now;
+
+    this.save();
+
+    // Auditoria
+    this.addAuditLog({
+      userName,
+      action: 'approval_rejected',
+      entityType: 'admission_approval',
+      entityId: app.id,
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      fieldChanged: 'status da aprovação',
+      previousValue: prevStatus,
+      newValue: 'REPROVADA',
+      details: `Aprovação interna (${app.approvalType}) reprovada por ${userName}. Motivo obrigatório: "${reason.trim()}".${notes ? ` Observações: "${notes.trim()}".` : ''}`
+    });
+
+    this.addNotification({
+      title: 'Aprovação interna reprovada',
+      message: `A admissão de ${admission.employee.name} foi reprovada por ${userName}. Motivo: "${reason.trim()}".`,
+      type: 'pending',
+      admissionId: admission.id,
+      link: `/admissoes/${admission.id}`
+    });
+
+    return { approval: app, admission };
+  }
+
+  /**
+   * Reabre uma aprovação reprovada com justificativa obrigatória (REPROVADA -> EM_ANALISE).
+   */
+  reopenAdmissionApproval(
+    approvalId: string, 
+    userName: string, 
+    userRole: string = 'GESTOR', 
+    reason: string
+  ): { approval: AdmissionApproval; admission: Admission } {
+    this.ensureApprovalsInitialized();
+    if (!reason || !reason.trim()) {
+      throw new Error('O motivo da reabertura é obrigatório.');
+    }
+
+    const admission = (this.data.admissions || []).find(a => a.approval?.id === approvalId);
+    if (!admission || !admission.approval) {
+      throw new Error('Aprovação não encontrada.');
+    }
+
+    const app = admission.approval;
+    if (app.status !== 'REPROVADA') {
+      throw new Error('Apenas aprovações com status "REPROVADA" podem ser reabertas para nova análise.');
+    }
+
+    const now = new Date().toISOString();
+    const prevStatus = app.status;
+
+    app.status = 'EM_ANALISE';
+    app.reopenedAt = now;
+    app.reopenedBy = userName;
+    app.reopenReason = reason.trim();
+    app.updatedAt = now;
+
+    app.history = app.history || [];
+    app.history.push({
+      id: 'hist-appr-' + crypto.randomUUID(),
+      action: 'REABERTA',
+      timestamp: now,
+      userName,
+      userRole,
+      previousStatus: prevStatus,
+      newStatus: 'EM_ANALISE',
+      reason: reason.trim(),
+      notes: `Aprovação reaberta para revisão por ${userName}.`
+    });
+
+    // Desbloqueia etapa APROVACAO
+    const step = (admission.processSteps || []).find(s => s.id === app.processStepId || s.stepKey === 'APROVACAO');
+    if (step) {
+      step.status = 'EM_ANDAMENTO';
+      step.blockReason = undefined;
+      step.history = step.history || [];
+      step.history.push({
+        action: 'iniciada',
+        timestamp: now,
+        userName,
+        details: `Etapa reaberta após revisão da reprovação por ${userName}. Motivo: "${reason.trim()}".`
+      });
+    }
+
+    this.evaluateAdmissionProcessSteps(admission, userName);
+    admission.updatedAt = now;
+    this.save();
+
+    this.addAuditLog({
+      userName,
+      action: 'approval_reopened',
+      entityType: 'admission_approval',
+      entityId: app.id,
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      fieldChanged: 'status da aprovação',
+      previousValue: 'REPROVADA',
+      newValue: 'EM_ANALISE',
+      details: `Aprovação interna (${app.approvalType}) reaberta por ${userName}. Motivo da reabertura: "${reason.trim()}".`
+    });
+
+    this.addNotification({
+      title: 'Aprovação interna reaberta',
+      message: `A aprovação de ${admission.employee.name} foi reaberta por ${userName} para nova análise.`,
+      type: 'pending',
+      admissionId: admission.id,
+      link: `/admissoes/${admission.id}`
+    });
+
+    return { approval: app, admission };
+  }
+
+  /**
+   * Cancela formalmente uma aprovação interna.
+   */
+  cancelAdmissionApproval(approvalId: string, userName: string, reason?: string): AdmissionApproval {
+    this.ensureApprovalsInitialized();
+    const admission = (this.data.admissions || []).find(a => a.approval?.id === approvalId);
+    if (!admission || !admission.approval) {
+      throw new Error('Aprovação não encontrada.');
+    }
+
+    const app = admission.approval;
+    const now = new Date().toISOString();
+    const prevStatus = app.status;
+
+    app.status = 'CANCELADA';
+    app.decidedAt = now;
+    app.decidedBy = userName;
+    app.decisionReason = reason ? reason.trim() : 'Cancelada pelo usuário';
+    app.updatedAt = now;
+
+    app.history = app.history || [];
+    app.history.push({
+      id: 'hist-appr-' + crypto.randomUUID(),
+      action: 'CANCELADA',
+      timestamp: now,
+      userName,
+      previousStatus: prevStatus,
+      newStatus: 'CANCELADA',
+      reason: reason ? reason.trim() : undefined,
+      notes: 'Aprovação cancelada formalmente.'
+    });
+
+    this.save();
+
+    this.addAuditLog({
+      userName,
+      action: 'approval_cancelled',
+      entityType: 'admission_approval',
+      entityId: app.id,
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Aprovação interna (${app.approvalType}) cancelada por ${userName}.${reason ? ` Motivo: "${reason.trim()}".` : ''}`
+    });
+
+    return app;
   }
 }
 

@@ -48,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, unreadNotific
   const mainMenuItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/admissoes', label: 'Admissões', icon: Users },
+    { to: '/aprovacoes', label: 'Aprovações Internas', icon: ShieldCheck },
     { to: '/checklist', label: 'Checklist Operacional', icon: CheckSquare },
     { to: '/funcionarios', label: 'Funcionários', icon: UserCheck },
     { to: '/pendencias', label: 'Central de Pendências', icon: AlertCircle },

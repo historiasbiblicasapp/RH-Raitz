@@ -174,6 +174,13 @@ export function buildOperationalChecklistItem(
     primaryPendingDesc = blockedStep.blockReason || 'Necessário desbloqueio para avançar o fluxo.';
     primaryPendingResp = (blockedStep.responsibleRole as OperationalResponsible) || 'RH';
     primaryPendingStepId = blockedStep.id;
+  } else if (adm.approval?.status === 'REPROVADA') {
+    primaryPendingType = 'BLOQUEIO';
+    primaryPendingTitle = 'Aprovação interna reprovada';
+    primaryPendingDesc = adm.approval.decisionReason 
+      ? `Parecer desfavorável: "${adm.approval.decisionReason}"` 
+      : 'Aprovação interna reprovada pela liderança.';
+    primaryPendingResp = 'GESTOR';
   } else if (rejectedDoc) {
     primaryPendingType = 'DOC_REJEITADO';
     primaryPendingTitle = `${rejectedDoc.documentType} rejeitado`;
@@ -356,21 +363,45 @@ export function buildOperationalChecklistItem(
     actionRequired: inReviewDocuments > 0 ? 'Finalizar conferência dos documentos em análise' : undefined
   });
 
-  // Tarefa de Aprovação do Gestor
+  // Tarefa de Aprovação Interna (Bloco 5.6)
   const approvalStep = steps.find(s => s.stepKey === 'APROVACAO');
+  const app = adm.approval;
+  let apprTaskStatus: OperationalTaskItem['status'] = 'PENDENTE';
+  let apprDesc = 'Parecer formal da liderança/gestão sobre o ingresso do colaborador.';
+  let apprPriority: OperationalPriority = 'NORMAL';
+  let apprAction: string | undefined = undefined;
+
+  if (app?.status === 'APROVADA' || approvalStep?.status === 'CONCLUIDA') {
+    apprTaskStatus = 'CONCLUIDA';
+    apprDesc = `Aprovado por ${app?.decidedBy || approvalStep?.completedBy || 'Gestão'}`;
+  } else if (app?.status === 'REPROVADA' || approvalStep?.status === 'BLOQUEADA') {
+    apprTaskStatus = 'REJEITADA';
+    apprDesc = `Reprovada: ${app?.decisionReason || approvalStep?.blockReason || 'Parecer desfavorável'}`;
+    apprPriority = 'CRITICA';
+    apprAction = 'Revisar apontamentos ou reabrir aprovação';
+  } else if (app?.status === 'EM_ANALISE' || approvalStep?.status === 'EM_ANDAMENTO') {
+    apprTaskStatus = 'EM_ANDAMENTO';
+    apprDesc = app?.assignedUserName ? `Em análise por ${app.assignedUserName}` : 'Em análise pela liderança.';
+    apprPriority = 'ALTA';
+    apprAction = 'Registrar parecer da liderança';
+  } else if (allDocsApproved) {
+    apprPriority = 'ALTA';
+    apprAction = 'Registrar parecer da liderança';
+  }
+
   tasks.push({
     id: `task-aprov-${adm.id}`,
-    title: 'Aprovação Final da Contratação (Liderança)',
-    description: approvalStep?.status === 'CONCLUIDA'
-      ? `Aprovado por ${approvalStep.completedBy || 'Gestão'}`
-      : 'Parecer da liderança para liberação da data de início.',
+    title: 'Aprovação Interna (Liderança / Gestão)',
+    description: apprDesc,
     category: 'APROVACAO',
     responsible: 'GESTOR',
-    status: approvalStep?.status === 'CONCLUIDA' ? 'CONCLUIDA' : (allDocsApproved ? 'EM_ANDAMENTO' : 'PENDENTE'),
-    priority: allDocsApproved && !isCompleted ? 'ALTA' : 'NORMAL',
+    status: apprTaskStatus,
+    priority: apprPriority,
     stepId: approvalStep?.id,
-    stepName: 'Aprovação',
-    actionRequired: allDocsApproved && approvalStep?.status !== 'CONCLUIDA' ? 'Registrar parecer da liderança' : undefined
+    stepName: approvalStep?.stepName || 'Aprovação',
+    actionRequired: apprAction,
+    completedAt: app?.decidedAt || approvalStep?.completedAt,
+    completedBy: app?.decidedBy || approvalStep?.completedBy
   });
 
   // Tarefa de Conclusão e Prontuário

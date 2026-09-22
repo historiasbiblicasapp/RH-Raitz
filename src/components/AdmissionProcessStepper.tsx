@@ -373,6 +373,29 @@ export const AdmissionProcessStepper: React.FC<AdmissionProcessStepperProps> = (
                         <span>Bloqueada: Esta etapa depende da conclusão das etapas anteriores obrigatórias.</span>
                       </div>
                     )}
+
+                    {/* Bloco 5.6: Indicador de Aprovação Interna Vinculada */}
+                    {(step.completionRule === 'APROVACAO_MANUAL' || step.stepName.toLowerCase().includes('aprova')) && admission.approval && (
+                      <div className={`mt-2.5 p-2 rounded-xl border text-[11px] flex flex-wrap items-center justify-between gap-2 ${
+                        admission.approval.status === 'APROVADA'
+                          ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                          : admission.approval.status === 'REPROVADA'
+                          ? 'bg-rose-50/80 border-rose-200 text-rose-900'
+                          : admission.approval.status === 'EM_ANALISE'
+                          ? 'bg-blue-50/80 border-blue-200 text-blue-900'
+                          : 'bg-amber-50/80 border-amber-200 text-amber-900'
+                      }`}>
+                        <div className="flex items-center gap-1.5 font-medium">
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                          <span>Aprovação Interna ({admission.approval.responsibleRole}): <strong>{admission.approval.status}</strong></span>
+                        </div>
+                        {admission.approval.decidedBy && (
+                          <span className="text-[10px] opacity-75">
+                            Deliberado por {admission.approval.decidedBy}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 

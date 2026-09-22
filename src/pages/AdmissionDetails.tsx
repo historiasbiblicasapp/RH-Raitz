@@ -39,7 +39,9 @@ import {
   Info,
   ArrowRight,
   MessageSquare,
-  CalendarClock
+  CalendarClock,
+  ShieldCheck,
+  RotateCcw
 } from 'lucide-react';
 import { Admission, AdmissionDocument, AuditLog, CommunicationLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -53,9 +55,11 @@ import { CommunicationModal } from '../components/CommunicationModal.tsx';
 import { AdmissionTimeline } from '../components/AdmissionTimeline.tsx';
 import { AdmissionProcessStepper } from '../components/AdmissionProcessStepper.tsx';
 import { AdmissionOperationalChecklistTab } from '../components/AdmissionOperationalChecklistTab.tsx';
+import { ApprovalDecisionModal } from '../components/ApprovalDecisionModal.tsx';
+import { UnifiedHistoryTimeline } from '../components/history/UnifiedHistoryTimeline.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
-type ActiveTab = 'resumo' | 'etapas' | 'checklist' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
+type ActiveTab = 'resumo' | 'etapas' | 'aprovacao' | 'checklist' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
 
 export const AdmissionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -120,6 +124,9 @@ export const AdmissionDetails: React.FC = () => {
   const [isCommunicationModalOpen, setIsCommunicationModalOpen] = useState(false);
   const [communicationReason, setCommunicationReason] = useState<any>(undefined);
   const [communicationLogs, setCommunicationLogs] = useState<CommunicationLog[]>([]);
+
+  // Bloco 5.6: Modal de Decisão da Aprovação Interna
+  const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
 
   // Feedback de link copiado
   const [copiedLink, setCopiedLink] = useState(false);
@@ -584,6 +591,33 @@ export const AdmissionDetails: React.FC = () => {
         </div>
       )}
 
+      {/* Alerta de Aprovação Reprovada se aplicável */}
+      {admission.approval?.status === 'REPROVADA' && !isCancelled && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-900">
+          <div className="flex items-start gap-3">
+            <Ban className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-xs font-bold uppercase tracking-wider text-rose-800">
+                Aprovação Interna Reprovada / Devolvida
+              </h3>
+              <p className="text-xs text-rose-950 mt-0.5">
+                Motivo: "{admission.approval.decisionReason || 'Sem justificativa informada'}"
+              </p>
+              <span className="text-[11px] text-rose-700 block mt-0.5">
+                Por {admission.approval.decidedBy || 'Liderança'} em {admission.approval.decidedAt ? new Date(admission.approval.decidedAt).toLocaleString('pt-BR') : ''}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsApprovalModalOpen(true)}
+            className="inline-flex items-center gap-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reabrir ou Deliberar</span>
+          </button>
+        </div>
+      )}
+
       {/* Alerta de Conclusão se 100% aprovado */}
       {canComplete && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-emerald-900">
@@ -696,6 +730,33 @@ export const AdmissionDetails: React.FC = () => {
                 activeTab === 'etapas' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
               }`}>
                 {admission.processSteps.filter(s => s.status === 'CONCLUIDA').length}/{admission.processSteps.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('aprovacao')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'aprovacao'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Aprovação Interna</span>
+            {admission.approval && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                admission.approval.status === 'APROVADA'
+                  ? (activeTab === 'aprovacao' ? 'bg-emerald-700 text-white' : 'bg-emerald-100 text-emerald-800')
+                  : admission.approval.status === 'REPROVADA'
+                  ? (activeTab === 'aprovacao' ? 'bg-rose-700 text-white' : 'bg-rose-100 text-rose-800')
+                  : admission.approval.status === 'EM_ANALISE'
+                  ? (activeTab === 'aprovacao' ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800')
+                  : (activeTab === 'aprovacao' ? 'bg-amber-700 text-white' : 'bg-amber-100 text-amber-800')
+              }`}>
+                {admission.approval.status === 'APROVADA' ? 'Aprovada' :
+                 admission.approval.status === 'REPROVADA' ? 'Reprovada' :
+                 admission.approval.status === 'EM_ANALISE' ? 'Em análise' : 'Pendente'}
               </span>
             )}
           </button>
@@ -1684,111 +1745,19 @@ export const AdmissionDetails: React.FC = () => {
         </div>
       )}
 
-      {/* ABA 5: HISTÓRICO COMPLETO (Item 26) */}
+      {/* ABA 5: HISTÓRICO COMPLETO (Bloco 5.7) */}
       {activeTab === 'historico' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-          <div className="pb-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <h2 className="text-sm font-bold text-slate-900">Histórico e Trilha de Auditoria</h2>
-              <p className="text-xs text-slate-500">
-                Linha do tempo imutável de todas as ações, envios, análises, versões e alterações com rastreabilidade completa (LGPD).
-              </p>
-            </div>
-            <span className="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full border border-slate-200 w-fit">
-              {auditLogs.length} registro{auditLogs.length === 1 ? '' : 's'}
-            </span>
-          </div>
-
-          {auditLogs.length === 0 ? (
-            <p className="text-xs text-slate-400 py-8 text-center">Nenhum evento registrado ainda.</p>
-          ) : (
-            <div className="relative pl-6 border-l-2 border-slate-200 space-y-6 my-4">
-              {auditLogs.map((log) => {
-                const isApproval = log.action.includes('aprovou') || log.action.includes('Aprovado');
-                const isRejection = log.action.includes('rejeitou') || log.action.includes('Rejeitado') || log.action.includes('cancelou');
-                const isUpload = log.action.includes('enviou') || log.action.includes('reenviou');
-
-                return (
-                  <div key={log.id} className="relative group">
-                    <div className={`w-3 h-3 rounded-full absolute -left-[31px] top-1 border-2 border-white ring-2 ${
-                      isApproval 
-                        ? 'bg-emerald-500 ring-emerald-100' 
-                        : isRejection 
-                        ? 'bg-rose-500 ring-rose-100' 
-                        : isUpload
-                        ? 'bg-blue-500 ring-blue-100'
-                        : 'bg-slate-400 ring-slate-100'
-                    }`} />
-                    
-                    <div className="bg-slate-50/70 hover:bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 transition-colors space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold text-slate-900">{log.action}</span>
-                          {log.documentType && (
-                            <span className="text-[10px] bg-white border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-md">
-                              {log.documentType}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-slate-400 font-mono">
-                          {new Date(log.timestamp).toLocaleString('pt-BR')}
-                        </span>
-                      </div>
-
-                      {/* De / Para Estruturado se houver */}
-                      {log.changes && log.changes.length > 0 ? (
-                        <div className="bg-white p-2.5 rounded-lg border border-slate-200 space-y-1.5">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase block">
-                            Alterações registradas ({log.changes.length}):
-                          </span>
-                          <div className="space-y-1">
-                            {log.changes.map((c, i) => (
-                              <div key={i} className="text-xs flex items-center gap-1.5 flex-wrap">
-                                <span className="font-semibold text-slate-700 text-[11px]">{c.label || c.field}:</span>
-                                <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-mono line-through">
-                                  {String(c.previousValue ?? 'Vazio')}
-                                </span>
-                                <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-mono font-bold">
-                                  {String(c.newValue ?? 'Vazio')}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : log.fieldChanged ? (
-                        <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center gap-2 text-xs flex-wrap">
-                          <span className="font-bold text-slate-600 text-[11px]">{log.fieldChanged}:</span>
-                          {log.previousValue !== undefined && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-mono line-through">
-                              {log.previousValue}
-                            </span>
-                          )}
-                          {log.previousValue !== undefined && log.newValue !== undefined && (
-                            <ArrowRight className="w-3 h-3 text-slate-400 shrink-0" />
-                          )}
-                          {log.newValue !== undefined && (
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-mono font-bold">
-                              {log.newValue}
-                            </span>
-                          )}
-                        </div>
-                      ) : null}
-
-                      <p className="text-xs text-slate-600 leading-relaxed">{log.details}</p>
-
-                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-200/60">
-                        <span>
-                          Responsável: <strong className="text-slate-700">{log.userName || log.performedBy}</strong>
-                        </span>
-                        {log.id && <span className="font-mono text-[10px]">ID: {log.id}</span>}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="space-y-4">
+          <UnifiedHistoryTimeline
+            logs={auditLogs}
+            title={`Histórico da Admissão — ${admission.employee.name}`}
+            subtitle="Trilha completa e imutável de auditoria com todas as ações, envios e versões de documentos, análises, aprovações, pendências e alterações ocorridas nesta admissão."
+            emptyMessage="Nenhum evento de histórico registrado ainda para esta admissão."
+            contextFilterLabel="da admissão"
+            showExport={true}
+            onRefresh={fetchAdmission}
+            isLoading={loading}
+          />
         </div>
       )}
 
@@ -1969,6 +1938,159 @@ export const AdmissionDetails: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ABA: APROVAÇÃO INTERNA (Bloco 5.6) */}
+      {activeTab === 'aprovacao' && admission && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      {admission.approval?.title || 'Aprovação Interna'}
+                    </h3>
+                    {admission.approval && (
+                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        admission.approval.status === 'APROVADA'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : admission.approval.status === 'REPROVADA'
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                          : admission.approval.status === 'EM_ANALISE'
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                          : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}>
+                        {admission.approval.status}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Papel responsável: <strong className="text-slate-700">{admission.approval?.responsibleRole || 'RH / Gestor'}</strong>
+                  </p>
+                </div>
+              </div>
+
+              {admission.approval && admission.approval.status !== 'CANCELADA' && (
+                <button
+                  onClick={() => setIsApprovalModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>
+                    {admission.approval.status === 'APROVADA'
+                      ? 'Ver Parecer Formal'
+                      : admission.approval.status === 'REPROVADA'
+                      ? 'Reavaliar / Reabrir'
+                      : 'Deliberar Aprovação'}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {/* Detalhes do Parecer Concedido ou Reprovado */}
+            {admission.approval?.status === 'APROVADA' && (
+              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-emerald-800 font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Aprovação Formal Concedida com Sucesso</span>
+                </div>
+                <p className="text-emerald-700">
+                  Deliberada por <strong className="text-emerald-950">{admission.approval.decidedBy || 'Liderança'}</strong> em{' '}
+                  {admission.approval.decidedAt ? new Date(admission.approval.decidedAt).toLocaleString('pt-BR') : 'Data registrada'}.
+                </p>
+                {admission.approval.decisionNotes && (
+                  <div className="mt-2 p-3 bg-white rounded-lg border border-emerald-200/60 text-slate-700">
+                    <span className="font-semibold text-emerald-800 block mb-1">Notas / Parecer:</span>
+                    "{admission.approval.decisionNotes}"
+                  </div>
+                )}
+              </div>
+            )}
+
+            {admission.approval?.status === 'REPROVADA' && (
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-rose-800 font-bold">
+                    <Ban className="w-4 h-4 text-rose-600" />
+                    <span>Admissão Reprovada na Análise Interna</span>
+                  </div>
+                  <button
+                    onClick={() => setIsApprovalModalOpen(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-rose-300 text-rose-700 font-semibold rounded-lg hover:bg-rose-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Reabrir Aprovação
+                  </button>
+                </div>
+                <p className="text-rose-700">
+                  Reprovada por <strong className="text-rose-950">{admission.approval.decidedBy || 'Liderança'}</strong> em{' '}
+                  {admission.approval.decidedAt ? new Date(admission.approval.decidedAt).toLocaleString('pt-BR') : 'Data registrada'}.
+                </p>
+                <div className="p-3 bg-white rounded-lg border border-rose-200 text-slate-800 space-y-1">
+                  <span className="font-semibold text-rose-800 block">Justificativa:</span>
+                  <p className="font-medium">"{admission.approval.decisionReason || 'Sem justificativa detalhada'}"</p>
+                  {admission.approval.decisionNotes && (
+                    <p className="text-slate-500 text-[11px] pt-1 border-t border-slate-100">
+                      Notas adicionais: {admission.approval.decisionNotes}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Trilha de Auditoria da Aprovação */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <History className="w-4 h-4 text-slate-400" />
+                <span>Trilha de Auditoria da Aprovação</span>
+              </h4>
+
+              {(!admission.approval?.history || admission.approval.history.length === 0) ? (
+                <div className="p-4 bg-slate-50 rounded-xl text-center text-xs text-slate-400 italic">
+                  Nenhum evento registrado nesta aprovação até o momento.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {admission.approval.history.map((h, i) => (
+                    <div key={h.id || i} className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs space-y-1">
+                      <div className="flex items-center justify-between text-slate-500">
+                        <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${
+                            h.action === 'APROVADA' ? 'bg-emerald-500' :
+                            h.action === 'REPROVADA' ? 'bg-rose-500' :
+                            h.action === 'REABERTA' ? 'bg-amber-500' :
+                            h.action === 'INICIADA' ? 'bg-blue-500' : 'bg-slate-400'
+                          }`} />
+                          {h.action}
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          {new Date(h.timestamp).toLocaleString('pt-BR')}
+                        </span>
+                      </div>
+                      <p className="text-slate-600">
+                        Registrado por: <strong className="text-slate-800">{h.userName}</strong>
+                        {h.userRole ? ` (${h.userRole})` : ''}
+                      </p>
+                      {h.reason && (
+                        <p className="text-slate-800 font-medium bg-white p-2 rounded-md border border-slate-200/60 mt-1">
+                          Motivo: "{h.reason}"
+                        </p>
+                      )}
+                      {h.notes && (
+                        <p className="text-slate-500 text-[11px] italic mt-0.5">
+                          Observação: "{h.notes}"
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -2201,6 +2323,23 @@ export const AdmissionDetails: React.FC = () => {
           isInviteValid={!admission.inviteRevoked}
           initialReason={communicationReason}
           onSuccess={() => {
+            fetchAdmission();
+          }}
+        />
+      )}
+
+      {/* Modal de Decisão da Aprovação Interna (Bloco 5.6) */}
+      {isApprovalModalOpen && admission && admission.approval && (
+        <ApprovalDecisionModal
+          isOpen={isApprovalModalOpen}
+          onClose={() => setIsApprovalModalOpen(false)}
+          approvalId={admission.approval.id}
+          candidateName={admission.employee.name}
+          role={admission.employee.role}
+          department={admission.employee.department}
+          currentStatus={admission.approval.status}
+          onSuccess={() => {
+            setIsApprovalModalOpen(false);
             fetchAdmission();
           }}
         />

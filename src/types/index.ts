@@ -426,6 +426,10 @@ export interface Admission {
   operationalPriorityReason?: string;
   operationalPriorityUpdatedAt?: string;
   operationalPriorityUpdatedBy?: string;
+
+  // Bloco 5.6: Aprovação Interna
+  approval?: AdmissionApproval;
+  approvals?: AdmissionApproval[];
 }
 
 // ------------------------------------------------------------------
@@ -583,7 +587,7 @@ export interface AuditLog {
   userName: string;
   performedBy?: string;
   action: string;
-  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step';
+  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step' | 'admission_approval';
   entityId?: string;
   entityName?: string;
   admissionId?: string;
@@ -1437,6 +1441,163 @@ export interface OperationalChecklistResponse {
     statuses: string[];
   };
 }
+
+// ------------------------------------------------------------------
+// BLOCO 5.6: APROVAÇÃO INTERNA
+// ------------------------------------------------------------------
+
+export type ApprovalStatus = 'PENDENTE' | 'EM_ANALISE' | 'APROVADA' | 'REPROVADA' | 'CANCELADA';
+
+export type ApprovalType = 'RH' | 'GESTOR' | 'ADMINISTRATIVA' | 'DIRETORIA' | string;
+
+export type ApprovalResponsibleRole = 'RH' | 'GESTOR' | 'ADMIN' | 'DP' | 'RH_CONFERENCIA';
+
+export const REJECTION_REASONS_APPROVAL = [
+  'Documentação insuficiente',
+  'Dados cadastrais divergentes',
+  'Pendência documental',
+  'Necessita correção cadastral',
+  'Necessita revisão do gestor',
+  'Incompatibilidade de perfil ou requisitos',
+  'Outro'
+] as const;
+
+export type RejectionReasonApproval = typeof REJECTION_REASONS_APPROVAL[number];
+
+export interface AdmissionApprovalHistoryItem {
+  id: string;
+  action: 'SOLICITADA' | 'INICIADA' | 'APROVADA' | 'REPROVADA' | 'REABERTA' | 'CANCELADA';
+  timestamp: string;
+  userName: string;
+  userRole?: string;
+  previousStatus?: ApprovalStatus;
+  newStatus: ApprovalStatus;
+  reason?: string;
+  notes?: string;
+}
+
+export interface AdmissionApproval {
+  id: string;
+  admissionId: string;
+  processStepId?: string;
+  approvalType: ApprovalType;
+  title: string;
+  description?: string;
+  status: ApprovalStatus;
+  required: boolean;
+  responsibleRole: ApprovalResponsibleRole;
+  assignedUserId?: string;
+  assignedUserName?: string;
+  requestedAt: string;
+  startedAt?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  decisionReason?: string;
+  decisionNotes?: string;
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
+  configurationSnapshot?: {
+    versionNumber?: number;
+    stepName?: string;
+    allowRejection?: boolean;
+    requireRejectionReason?: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+  history?: AdmissionApprovalHistoryItem[];
+}
+
+export interface ApprovalQueueItem {
+  approvalId: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpf: string;
+  employeeRole: string;
+  employeeDepartment: string;
+  employeeUnit: string;
+  expectedStartDate?: string;
+  admissionStatus: AdmissionStatus;
+  processStepName?: string;
+  approvalType: ApprovalType;
+  status: ApprovalStatus;
+  required: boolean;
+  responsibleRole: ApprovalResponsibleRole;
+  assignedUserName?: string;
+  priority: OperationalPriority;
+  priorityReason?: string;
+  requestedAt: string;
+  startedAt?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  decisionReason?: string;
+  decisionNotes?: string;
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
+  waitingDays: number;
+  approvedDocsCount: number;
+  requiredDocsCount: number;
+  pendingDocsCount: number;
+  totalDocsCount: number;
+  hasRejectedDocs: boolean;
+  canApprove: boolean;
+}
+
+export interface ApprovalQueueSummary {
+  total: number;
+  pending: number;
+  inReview: number;
+  approved: number;
+  rejected: number;
+  cancelled: number;
+  critical: number;
+}
+
+export interface ApprovalQueueFilters {
+  search?: string;
+  status?: string;
+  type?: string;
+  priority?: string;
+  responsible?: string;
+  unit?: string;
+  role?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface ApprovalQueueResponse {
+  items: ApprovalQueueItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: ApprovalQueueSummary;
+  filters: {
+    types: string[];
+    roles: string[];
+    units: string[];
+    responsibles: string[];
+    statuses: string[];
+  };
+}
+
+export interface ApprovalDetailResponse {
+  approval: AdmissionApproval;
+  admission: Admission;
+  employee: Employee;
+  documents: AdmissionDocument[];
+  processSteps: AdmissionProcessStepSnapshot[];
+  operationalTasks?: OperationalTaskItem[];
+  canDecide: boolean;
+}
+
 
 
 
