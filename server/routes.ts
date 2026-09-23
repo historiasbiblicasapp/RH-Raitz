@@ -3066,5 +3066,740 @@ router.post('/approvals/:id/cancel', (req: Request, res: Response) => {
   }
 });
 
+// =========================================================================
+// BLOCO 6.1 — CENTRAL DE OPERAÇÕES DO RH (ROTAS DA API)
+// =========================================================================
+
+/**
+ * GET /api/operations e /api/operacao
+ * Retorna os dados unificados da Central de Operações com resumo, filtros e itens de atenção.
+ */
+router.get(['/operations', '/operacao'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    search,
+    status,
+    situation,
+    role,
+    department,
+    unit,
+    responsible,
+    priority,
+    period,
+    startDate,
+    endDate,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  try {
+    const data = db.getOperationalHubData({
+      search: search as string | undefined,
+      status: status as string | undefined,
+      situation: situation as string | undefined,
+      role: role as string | undefined,
+      department: department as string | undefined,
+      unit: unit as string | undefined,
+      responsible: responsible as string | undefined,
+      priority: priority as string | undefined,
+      period: period as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      sortBy: sortBy as string | undefined,
+      sortOrder: sortOrder as 'asc' | 'desc' | undefined
+    });
+
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar dados da Central de Operações: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/operations/:id e /api/operacao/:id
+ * Retorna o diagnóstico operacional detalhado de uma admissão específica.
+ */
+router.get(['/operations/:id', '/operacao/:id'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+
+  try {
+    const admission = db.getAdmissionById(id);
+    if (!admission) {
+      return res.status(404).json({ error: 'Admissão não encontrada.' });
+    }
+
+    const hubData = db.getOperationalHubData({ search: admission.id });
+    const hubItem = hubData.items.find(i => i.admissionId === admission.id) || hubData.attentionItems.find(i => i.admissionId === admission.id);
+    const checklistData = db.getAdmissionOperationalChecklist(admission.id);
+
+    return res.json({
+      admission,
+      operationalItem: hubItem,
+      checklist: checklistData
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar detalhes operacionais: ' + error.message });
+  }
+});
+
+// =========================================================================
+// BLOCO 6.2 — INDICADORES E KPIS DE ADMISSÃO (ROTAS DA API)
+// =========================================================================
+
+/**
+ * GET /api/kpis e /api/indicadores
+ * Retorna os indicadores e KPIs analíticos do processo admissional baseados em dados reais.
+ */
+router.get(['/kpis', '/indicadores', '/indicators'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    period,
+    startDate,
+    endDate,
+    role,
+    department,
+    unit,
+    status,
+    situation,
+    responsible
+  } = req.query;
+
+  try {
+    const data = db.getAdmissionKpiData({
+      period: period as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      role: role as string | undefined,
+      department: department as string | undefined,
+      unit: unit as string | undefined,
+      status: status as string | undefined,
+      situation: situation as string | undefined,
+      responsible: responsible as string | undefined
+    });
+
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar indicadores e KPIs de admissão: ' + error.message });
+  }
+});
+
+// =========================================================================
+// BLOCO 6.3 — ANÁLISE DE GARGALOS DO PROCESSO ADMISSIONAL (ROTAS DA API)
+// =========================================================================
+
+/**
+ * GET /api/gargalos e /api/bottlenecks
+ * Retorna métricas descritivas de gargalos, tempos por etapa, rejeições, reenvios e processos sem movimentação.
+ */
+router.get(['/gargalos', '/bottlenecks', '/analise-gargalos'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    period,
+    startDate,
+    endDate,
+    role,
+    department,
+    unit,
+    status,
+    situation,
+    responsible
+  } = req.query;
+
+  try {
+    const data = db.getBottleneckAnalysisData({
+      period: period as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      role: role as string | undefined,
+      department: department as string | undefined,
+      unit: unit as string | undefined,
+      status: status as string | undefined,
+      situation: situation as string | undefined,
+      responsible: responsible as string | undefined
+    });
+
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar análise de gargalos: ' + error.message });
+  }
+});
+
+// =========================================================================
+// BLOCO 6.4 — GESTÃO DE RESPONSÁVEIS E DISTRIBUIÇÃO DE TRABALHO (ROTAS DA API)
+// =========================================================================
+
+/**
+ * GET /api/distribuicao & /api/responsaveis/distribuicao
+ * Retorna os dados operacionais de distribuição de trabalho, carga por responsável, fila própria e não atribuídos.
+ */
+router.get(['/distribuicao', '/distribuicao-trabalho', '/responsaveis/distribuicao'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    search,
+    responsible,
+    stepKey,
+    situation,
+    priority,
+    unit,
+    department,
+    role,
+    period,
+    startDate,
+    endDate,
+    viewMode,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  try {
+    const data = db.getWorkDistributionData({
+      search: search as string | undefined,
+      responsible: responsible as string | undefined,
+      stepKey: stepKey as string | undefined,
+      situation: situation as string | undefined,
+      priority: priority as string | undefined,
+      unit: unit as string | undefined,
+      department: department as string | undefined,
+      role: role as string | undefined,
+      period: period as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      viewMode: viewMode as any,
+      page: page ? Number(page) : 1,
+      limit: limit ? Number(limit) : 20,
+      sortBy: sortBy as any,
+      sortOrder: sortOrder as any,
+      currentUserId: auth.user.id
+    });
+
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar distribuição de trabalho: ' + error.message });
+  }
+});
+
+/**
+ * GET /api/responsaveis/elegiveis
+ * Retorna lista de usuários elegíveis para atribuição operacional
+ */
+router.get(['/responsaveis/elegiveis', '/users/assignable'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const eligibleRoles = ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'];
+    const users = db.getUsers()
+      .filter(u => eligibleRoles.includes(u.role))
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        department: u.department,
+        active: u.active !== false
+      }));
+
+    return res.json({ users });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao listar usuários elegíveis: ' + error.message });
+  }
+});
+
+/**
+ * POST /api/admissoes/:id/atribuir & /api/admissions/:id/assign
+ * Atribui, redistribui ou remove o responsável principal de uma admissão
+ */
+router.post(['/admissoes/:id/atribuir', '/admissions/:id/assign'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { responsibleUserId, stepKey, reason, versionTimestamp } = req.body;
+
+  try {
+    // Se foi fornecido stepKey, atribui a etapa específica
+    if (stepKey) {
+      const result = db.assignStepResponsible(
+        id,
+        stepKey,
+        responsibleUserId !== undefined ? responsibleUserId : null,
+        reason,
+        auth.user.name || 'RH',
+        versionTimestamp
+      );
+      return res.json({
+        success: true,
+        message: responsibleUserId ? 'Responsável da etapa atualizado com sucesso.' : 'Responsável da etapa removido.',
+        admission: result.admission,
+        historyItem: result.historyItem
+      });
+    }
+
+    // Caso contrário, atribui a admissão inteira
+    const result = db.assignAdmissionResponsible(
+      id,
+      responsibleUserId !== undefined ? responsibleUserId : null,
+      reason,
+      auth.user.name || 'RH',
+      versionTimestamp
+    );
+
+    return res.json({
+      success: true,
+      message: responsibleUserId ? 'Responsável da admissão atualizado com sucesso.' : 'Responsável da admissão removido.',
+      admission: result.admission,
+      historyItem: result.historyItem
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao atribuir responsável.' });
+  }
+});
+
+/**
+ * POST /api/admissoes/:id/etapas/:stepKey/atribuir
+ * Atribui ou remove responsável específico de uma etapa
+ */
+router.post(['/admissoes/:id/etapas/:stepKey/atribuir', '/admissions/:id/steps/:stepKey/assign'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id, stepKey } = req.params;
+  const { responsibleUserId, reason, versionTimestamp } = req.body;
+
+  try {
+    const result = db.assignStepResponsible(
+      id,
+      stepKey,
+      responsibleUserId !== undefined ? responsibleUserId : null,
+      reason,
+      auth.user.name || 'RH',
+      versionTimestamp
+    );
+
+    return res.json({
+      success: true,
+      message: responsibleUserId ? 'Responsável da etapa atualizado com sucesso.' : 'Responsável da etapa removido.',
+      admission: result.admission,
+      historyItem: result.historyItem
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao atribuir responsável da etapa.' });
+  }
+});
+
+/**
+ * GET /api/admissoes/:id/atribuicoes & /api/admissions/:id/assignments
+ * Retorna o histórico cronológico de atribuições e transferências da admissão
+ */
+router.get(['/admissoes/:id/atribuicoes', '/admissions/:id/assignments'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+
+  try {
+    const history = db.getAdmissionAssignments(id);
+    return res.json({ history });
+  } catch (error: any) {
+    return res.status(404).json({ error: error.message || 'Histórico de atribuições não encontrado.' });
+  }
+});
+
+// =========================================================================
+// BLOCO 6.5: TAREFAS OPERACIONAIS DO RH - ROTAS DE API
+// =========================================================================
+
+/**
+ * GET /api/tarefas & /api/tasks
+ * Consulta paginada, filtrada e resumida de tarefas operacionais do RH
+ */
+router.get(['/api/tarefas', '/api/tasks', '/tarefas', '/tasks'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    search,
+    status,
+    priority,
+    responsible,
+    sourceType,
+    unit,
+    department,
+    admissionId,
+    employeeId,
+    viewMode,
+    page,
+    limit,
+    sortBy,
+    sortOrder
+  } = req.query;
+
+  try {
+    const result = db.getOperationalTasks({
+      search: search ? String(search) : undefined,
+      status: status ? (String(status) as any) : undefined,
+      priority: priority ? (String(priority) as any) : undefined,
+      responsible: responsible ? String(responsible) : undefined,
+      sourceType: sourceType ? (String(sourceType) as any) : undefined,
+      unit: unit ? String(unit) : undefined,
+      department: department ? String(department) : undefined,
+      admissionId: admissionId ? String(admissionId) : undefined,
+      employeeId: employeeId ? String(employeeId) : undefined,
+      viewMode: viewMode ? (String(viewMode) as any) : undefined,
+      page: page ? parseInt(String(page), 10) : 1,
+      limit: limit ? parseInt(String(limit), 10) : 20,
+      sortBy: sortBy ? (String(sortBy) as any) : 'priority',
+      sortOrder: sortOrder ? (String(sortOrder) as any) : 'desc',
+      currentUserId: auth.user.id,
+      currentUserEmail: auth.user.email
+    });
+
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Erro ao carregar tarefas operacionais.' });
+  }
+});
+
+/**
+ * POST /api/tarefas & /api/tasks
+ * Cria uma nova tarefa operacional vinculada a uma admissão
+ */
+router.post(['/api/tarefas', '/api/tasks', '/tarefas', '/tasks'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const {
+    admissionId,
+    title,
+    description,
+    priority,
+    dueAt,
+    responsibleUserId,
+    sourceType,
+    sourceId,
+    sourceDescription,
+    stepKey,
+    documentId,
+    approvalId
+  } = req.body;
+
+  if (!admissionId) {
+    return res.status(400).json({ error: 'Identificador da admissão (admissionId) é obrigatório.' });
+  }
+  if (!title || title.trim().length < 3) {
+    return res.status(400).json({ error: 'O título da tarefa deve ter no mínimo 3 caracteres.' });
+  }
+
+  try {
+    const task = db.createOperationalTask(
+      {
+        admissionId,
+        title,
+        description,
+        priority: priority || 'NORMAL',
+        dueAt: dueAt || null,
+        responsibleUserId: responsibleUserId !== undefined ? responsibleUserId : null,
+        sourceType: sourceType || 'ADMISSAO',
+        sourceId,
+        sourceDescription,
+        stepKey,
+        documentId,
+        approvalId
+      },
+      {
+        id: auth.user.id,
+        name: auth.user.name || 'RH',
+        email: auth.user.email
+      }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tarefa criada com sucesso.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao criar tarefa operacional.' });
+  }
+});
+
+/**
+ * GET /api/tarefas/:id & /api/tasks/:id
+ * Retorna detalhes de uma tarefa operacional específica
+ */
+router.get(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+
+  try {
+    const task = db.getOperationalTaskById(id);
+    return res.json({ task });
+  } catch (error: any) {
+    return res.status(404).json({ error: error.message || 'Tarefa não encontrada.' });
+  }
+});
+
+/**
+ * PUT /api/tarefas/:id & /api/tasks/:id
+ * Atualiza campos gerais de uma tarefa operacional
+ */
+router.put(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { title, description, priority, dueAt, reason } = req.body;
+
+  try {
+    const task = db.updateOperationalTask(
+      id,
+      { title, description, priority, dueAt, reason },
+      { id: auth.user.id, name: auth.user.name || 'RH' }
+    );
+    return res.json({
+      success: true,
+      message: 'Tarefa atualizada com sucesso.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao atualizar tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/atribuir & /api/tasks/:id/assign
+ * Atribui, altera ou remove o responsável da tarefa operacional
+ */
+router.post(['/api/tarefas/:id/atribuir', '/api/tasks/:id/assign', '/tarefas/:id/atribuir', '/tasks/:id/assign'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { responsibleUserId, reason } = req.body;
+
+  try {
+    const task = db.assignOperationalTask(
+      id,
+      responsibleUserId !== undefined ? responsibleUserId : null,
+      { id: auth.user.id, name: auth.user.name || 'RH' },
+      reason
+    );
+
+    return res.json({
+      success: true,
+      message: responsibleUserId ? 'Responsável da tarefa atualizado com sucesso.' : 'Responsável da tarefa removido.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao atribuir responsável à tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/iniciar & /api/tasks/:id/start
+ * Inicia andamento da tarefa operacional
+ */
+router.post(['/api/tarefas/:id/iniciar', '/api/tasks/:id/start', '/tarefas/:id/iniciar', '/tasks/:id/start'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+
+  try {
+    const task = db.startOperationalTask(id, { id: auth.user.id, name: auth.user.name || 'RH' });
+    return res.json({
+      success: true,
+      message: 'Tarefa colocada em andamento.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao iniciar tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/concluir & /api/tasks/:id/complete
+ * Conclui tarefa operacional com notas opcionais
+ */
+router.post(['/api/tarefas/:id/concluir', '/api/tasks/:id/complete', '/tarefas/:id/concluir', '/tasks/:id/complete'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { completionNotes } = req.body;
+
+  try {
+    const task = db.completeOperationalTask(
+      id,
+      completionNotes,
+      { id: auth.user.id, name: auth.user.name || 'RH' }
+    );
+    return res.json({
+      success: true,
+      message: 'Tarefa concluída com sucesso.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao concluir tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/bloquear & /api/tasks/:id/block
+ * Bloqueia tarefa operacional com motivo obrigatório
+ */
+router.post(['/api/tarefas/:id/bloquear', '/api/tasks/:id/block', '/tarefas/:id/bloquear', '/tasks/:id/block'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { blockReason } = req.body;
+
+  if (!blockReason || blockReason.trim().length < 3) {
+    return res.status(400).json({ error: 'O motivo do bloqueio é obrigatório e deve ter no mínimo 3 caracteres.' });
+  }
+
+  try {
+    const task = db.blockOperationalTask(
+      id,
+      blockReason,
+      { id: auth.user.id, name: auth.user.name || 'RH' }
+    );
+    return res.json({
+      success: true,
+      message: 'Tarefa bloqueada.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao bloquear tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/desbloquear & /api/tasks/:id/unblock
+ * Desbloqueia tarefa operacional
+ */
+router.post(['/api/tarefas/:id/desbloquear', '/api/tasks/:id/unblock', '/tarefas/:id/desbloquear', '/tasks/:id/unblock'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { reason } = req.body;
+
+  try {
+    const task = db.unblockOperationalTask(
+      id,
+      reason,
+      { id: auth.user.id, name: auth.user.name || 'RH' }
+    );
+    return res.json({
+      success: true,
+      message: 'Tarefa desbloqueada com sucesso.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao desbloquear tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/reabrir & /api/tasks/:id/reopen
+ * Reabre tarefa operacional concluída ou cancelada
+ */
+router.post(['/api/tarefas/:id/reabrir', '/api/tasks/:id/reopen', '/tarefas/:id/reabrir', '/tasks/:id/reopen'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { reopenReason } = req.body;
+
+  if (!reopenReason || reopenReason.trim().length < 3) {
+    return res.status(400).json({ error: 'O motivo da reabertura é obrigatório e deve ter no mínimo 3 caracteres.' });
+  }
+
+  try {
+    const task = db.reopenOperationalTask(
+      id,
+      reopenReason,
+      { id: auth.user.id, name: auth.user.name || 'RH' }
+    );
+    return res.json({
+      success: true,
+      message: 'Tarefa reaberta com sucesso.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao reabrir tarefa.' });
+  }
+});
+
+/**
+ * POST /api/tarefas/:id/cancelar & /api/tasks/:id/cancel
+ * Cancela tarefa operacional com motivo obrigatório
+ */
+router.post(['/api/tarefas/:id/cancelar', '/api/tasks/:id/cancel', '/tarefas/:id/cancelar', '/tasks/:id/cancel'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+  const { cancelReason } = req.body;
+
+  if (!cancelReason || cancelReason.trim().length < 3) {
+    return res.status(400).json({ error: 'O motivo do cancelamento é obrigatório e deve ter no mínimo 3 caracteres.' });
+  }
+
+  try {
+    const task = db.cancelOperationalTask(
+      id,
+      cancelReason,
+      { id: auth.user.id, name: auth.user.name || 'RH' }
+    );
+    return res.json({
+      success: true,
+      message: 'Tarefa cancelada.',
+      task
+    });
+  } catch (error: any) {
+    return res.status(400).json({ error: error.message || 'Erro ao cancelar tarefa.' });
+  }
+});
+
+/**
+ * GET /api/admissoes/:id/tarefas & /api/admissions/:id/tasks
+ * Retorna as tarefas operacionais de uma admissão específica
+ */
+router.get(['/api/admissoes/:id/tarefas', '/api/admissions/:id/tasks', '/admissoes/:id/tarefas', '/admissions/:id/tasks'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { id } = req.params;
+
+  try {
+    const tasks = db.getAdmissionOperationalTasks(id);
+    return res.json({ tasks });
+  } catch (error: any) {
+    return res.status(404).json({ error: error.message || 'Admissão não encontrada.' });
+  }
+});
+
 export default router;
 

@@ -36,6 +36,7 @@ export interface User {
   department?: string;
   avatarUrl?: string;
   createdAt: string;
+  active?: boolean;
 }
 
 export interface JobPosition {
@@ -430,6 +431,15 @@ export interface Admission {
   // Bloco 5.6: Aprovação Interna
   approval?: AdmissionApproval;
   approvals?: AdmissionApproval[];
+
+  // Bloco 6.4: Gestão de Responsáveis e Distribuição de Trabalho
+  responsibleUserId?: string;
+  responsibleUserName?: string;
+  responsibleUserEmail?: string;
+  assignedAt?: string;
+  assignedBy?: string;
+  assignmentReason?: string;
+  assignmentsHistory?: AdmissionAssignmentHistoryItem[];
 }
 
 // ------------------------------------------------------------------
@@ -524,6 +534,14 @@ export interface AdmissionProcessStepSnapshot {
   completedBy?: string;
   notes?: string;
   history?: AdmissionProcessStepHistoryItem[];
+
+  // Bloco 6.4: Responsável específico pela etapa
+  responsibleUserId?: string;
+  responsibleUserName?: string;
+  responsibleUserEmail?: string;
+  stepAssignedAt?: string;
+  stepAssignedBy?: string;
+  stepAssignmentReason?: string;
 }
 
 export interface AdmissionProcessResponse {
@@ -587,7 +605,7 @@ export interface AuditLog {
   userName: string;
   performedBy?: string;
   action: string;
-  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step' | 'admission_approval';
+  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step' | 'admission_approval' | 'admission_assignment';
   entityId?: string;
   entityName?: string;
   admissionId?: string;
@@ -1597,6 +1615,795 @@ export interface ApprovalDetailResponse {
   operationalTasks?: OperationalTaskItem[];
   canDecide: boolean;
 }
+
+// =========================================================================
+// BLOCO 6.1: CENTRAL DE OPERAÇÕES DO RH
+// =========================================================================
+
+export type OperationalHubSituation =
+  | 'TODAS'
+  | 'AGUARDANDO_FUNCIONARIO'
+  | 'AGUARDANDO_RH'
+  | 'COM_PENDENCIA'
+  | 'APROVACAO_PENDENTE'
+  | 'PROXIMA_DO_PRAZO'
+  | 'ATRASADA'
+  | 'BLOQUEADA'
+  | 'EM_DIA';
+
+export interface OperationalHubSummary {
+  inProgress: number;          // Em andamento
+  waitingEmployee: number;     // Aguardando funcionário
+  waitingRh: number;           // Aguardando RH
+  withPendings: number;        // Com pendência
+  pendingApproval: number;     // Aprovação pendente
+  nearDeadline: number;        // Próximas do prazo
+  delayed: number;             // Atrasadas
+  blocked: number;             // Bloqueadas
+  total: number;
+}
+
+export interface OperationalHubItem {
+  id: string;
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  employeeRole: string;
+  employeeDepartment: string;
+  employeeUnit: string;
+  employeeEmail: string;
+  employeePhone: string;
+  
+  status: AdmissionStatus;
+  priority: OperationalPriority;
+  priorityScore: number;
+  situation: OperationalHubSituation;
+  situationLabel: string;
+  needsAttention: boolean;
+  attentionReasons: string[];
+  
+  // Etapa do processo
+  currentStepKey?: string;
+  currentStepName: string;
+  currentStepOrder: number;
+  totalSteps: number;
+  currentStepStatus: ProcessStepStatus;
+  currentStepResponsible: string;
+  
+  // Responsável operacional atual
+  responsible: string;
+  admissionResponsibleId?: string;
+  admissionResponsibleName?: string;
+  stepResponsibleId?: string;
+  stepResponsibleName?: string;
+  
+  // Prazos e datas
+  createdAt: string;
+  expectedStartDate?: string;
+  lastActivityAt: string;
+  daysSinceCreation: number;
+  daysWithoutMovement: number;
+  daysUntilDeadline?: number;
+  isOverdue: boolean;
+  isNearDeadline: boolean;
+  
+  // Documentos
+  documentsSummary: {
+    total: number;
+    approved: number;
+    inReview: number;
+    rejected: number;
+    notSent: number;
+    progressPercent: number;
+  };
+  
+  // Pendências
+  activePendingsCount: number;
+  primaryPendingTitle?: string;
+  
+  // Aprovação Interna
+  hasApproval: boolean;
+  approvalStatus?: ApprovalStatus;
+  approvalType?: string;
+}
+
+export interface OperationalHubFilters {
+  search?: string;
+  status?: string;
+  situation?: string;
+  role?: string;
+  department?: string;
+  unit?: string;
+  responsible?: string;
+  priority?: string;
+  period?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface OperationalHubResponse {
+  items: OperationalHubItem[];
+  attentionItems: OperationalHubItem[];
+  summary: OperationalHubSummary;
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  filters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    responsibles: string[];
+    statuses: string[];
+    situations: { key: string; label: string }[];
+  };
+}
+
+// =========================================================================
+// BLOCO 6.2 — INDICADORES E KPIS DE ADMISSÃO (TIPOS NATIVOS)
+// =========================================================================
+
+export type KpiPeriodType = 
+  | 'today' 
+  | '7d' 
+  | '30d' 
+  | '90d' 
+  | 'this_month' 
+  | 'last_month' 
+  | 'this_year' 
+  | 'custom';
+
+export interface KpiMainCards {
+  started: number;
+  inProgress: number;
+  completed: number;
+  cancelled: number;
+  waitingEmployee: number;
+  waitingRh: number;
+  withPendings: number;
+  pendingApproval: number;
+  delayed: number;
+}
+
+export interface KpiRates {
+  completionRate: number | null; // null quando iniciado for 0 (exibido como "—")
+  cancellationRate: number | null; // null quando iniciado for 0
+  approvedDocsRate: number | null; // null quando submetidos for 0
+  rejectionDocsRate: number | null; // null quando submetidos for 0
+}
+
+export interface KpiStepTimeItem {
+  stepKey: string;
+  stepName: string;
+  stepOrder: number;
+  avgDays: number | null;
+  avgHours: number | null;
+  sampleCount: number;
+  hasSufficientData: boolean;
+}
+
+export interface KpiTimeMetrics {
+  avgCompletionDays: number | null;
+  avgCompletionHours: number | null;
+  medianCompletionDays: number | null;
+  medianCompletionHours: number | null;
+  completedCount: number;
+  hasSufficientData: boolean;
+  stepAvgTimes: KpiStepTimeItem[];
+}
+
+export interface KpiDocumentsMetrics {
+  submitted: number;
+  inReview: number;
+  approved: number;
+  rejected: number;
+  resent: number; // Documentos que exigiram reenvio após rejeição
+  pendingOrNotSent: number;
+  mandatoryPending: number;
+}
+
+export interface KpiApprovalsMetrics {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  reopened: number;
+  avgDecisionHours: number | null;
+  hasSufficientData: boolean;
+}
+
+export interface KpiEvolutionPoint {
+  label: string;
+  date: string;
+  started: number;
+  completed: number;
+}
+
+export interface KpiDistributionItem {
+  category: string;
+  label: string;
+  count: number;
+  color: string;
+}
+
+export interface KpiByDimensionItem {
+  name: string;
+  started: number;
+  completed: number;
+  inProgress: number;
+  cancelled: number;
+  withPendings: number;
+  completionRate: number | null;
+}
+
+export interface KpiFilters {
+  period?: string;
+  startDate?: string;
+  endDate?: string;
+  role?: string;
+  department?: string;
+  unit?: string;
+  status?: string;
+  situation?: string;
+  responsible?: string;
+}
+
+export interface KpiDetailedAdmission {
+  id: string;
+  code: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  role: string;
+  department: string;
+  unit: string;
+  status: string;
+  situation: string;
+  situationLabel: string;
+  startedAt: string;
+  completedAt?: string;
+  cancelledAt?: string;
+  durationDays?: number;
+  pendingDocsCount: number;
+  hasApprovalPending: boolean;
+}
+
+export interface KpiHubResponse {
+  periodLabel: string;
+  dateRange: { start: string; end: string };
+  mainCards: KpiMainCards;
+  rates: KpiRates;
+  timeMetrics: KpiTimeMetrics;
+  documents: KpiDocumentsMetrics;
+  approvals: KpiApprovalsMetrics;
+  evolution: KpiEvolutionPoint[];
+  evolutionGrouping: 'day' | 'week' | 'month';
+  statusDistribution: KpiDistributionItem[];
+  situationDistribution: KpiDistributionItem[];
+  byRole: KpiByDimensionItem[];
+  byUnit: KpiByDimensionItem[];
+  byDepartment: KpiByDimensionItem[];
+  detailedAdmissions: KpiDetailedAdmission[];
+  totalDetailed: number;
+  page: number;
+  totalPages: number;
+  availableFilters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    statuses: string[];
+    situations: { key: string; label: string }[];
+    responsibles: string[];
+  };
+}
+
+// =========================================================================
+// BLOCO 6.3 — ANÁLISE DE GARGALOS DO PROCESSO ADMISSIONAL (TIPOS NATIVOS)
+// =========================================================================
+
+export interface BottleneckStepMetrics {
+  stepKey: string;
+  stepName: string;
+  stepOrder: number;
+  processCount: number;
+  inProgressCount: number;
+  avgDays: number | null;
+  avgHours: number | null;
+  medianDays: number | null;
+  medianHours: number | null;
+  maxDays: number | null;
+  maxHours: number | null;
+  stalledCount: number;
+  hasSufficientData: boolean;
+}
+
+export interface BottleneckStalledAdmission {
+  id: string;
+  code: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  role: string;
+  unit: string;
+  department: string;
+  currentStepKey: string;
+  currentStepName: string;
+  situation: string;
+  situationLabel: string;
+  lastMovementAt: string;
+  lastMovementAction: string;
+  lastMovementDetails?: string;
+  stalledDays: number;
+  stalledHours: number;
+  stalledFormatted: string;
+  responsible?: string;
+}
+
+export interface BottleneckPendingItem {
+  typeKey: string;
+  title: string;
+  count: number;
+  percent: number;
+  affectedAdmissionsCount: number;
+}
+
+export interface BottleneckRejectionReasonItem {
+  reason: string;
+  count: number;
+  affectedDocsCount: number;
+  affectedAdmissionsCount: number;
+  percent: number;
+}
+
+export interface BottleneckDocTypeRejectionItem {
+  documentTypeName: string;
+  submittedCount: number;
+  rejectedCount: number;
+  resentCount: number;
+  rejectionRate: number | null;
+}
+
+export interface BottleneckResentMetrics {
+  resentDocsCount: number;
+  waitingResendCount: number;
+  avgResendTimeHours: number | null;
+  medianResendTimeHours: number | null;
+  maxResendTimeHours: number | null;
+  hasSufficientResendData: boolean;
+}
+
+export interface BottleneckReviewTimeMetrics {
+  avgReviewHours: number | null;
+  medianReviewHours: number | null;
+  sampleCount: number;
+  hasSufficientData: boolean;
+}
+
+export interface BottleneckBlockedMetrics {
+  blockedCount: number;
+  items: {
+    admissionId: string;
+    employeeName: string;
+    stepName: string;
+    blockReason: string;
+    blockedSince?: string;
+  }[];
+}
+
+export interface BottleneckReopenedMetrics {
+  reopenedCount: number;
+  items: {
+    admissionId: string;
+    employeeName: string;
+    stepOrType: string;
+    reopenedAt: string;
+    reason?: string;
+  }[];
+}
+
+export interface BottleneckEvolutionPoint {
+  label: string;
+  date: string;
+  pendings: number;
+  rejections: number;
+  resends: number;
+  stalled: number;
+  completed: number;
+}
+
+export interface BottleneckDimensionItem {
+  name: string;
+  sampleCount: number;
+  avgCompletionDays: number | null;
+  pendingsCount: number;
+  rejectionsCount: number;
+  stalledCount: number;
+}
+
+export interface BottleneckAttentionPoint {
+  id: string;
+  type: 'stalled' | 'step_time' | 'rejection' | 'resend' | 'approval' | 'delay' | 'blocked';
+  title: string;
+  description: string;
+  count?: number;
+}
+
+export interface BottleneckMainCards {
+  stalledAdmissionsCount: number;
+  maxStalledFormatted: string;
+  avgProcessDays: number | null;
+  slowestStepName: string | null;
+  slowestStepAvgDays: number | null;
+  rejectedDocsCount: number;
+  resentDocsCount: number;
+  pendingApprovalsCount: number;
+  delayedCount: number;
+}
+
+export interface BottleneckHubResponse {
+  periodLabel: string;
+  dateRange: { start: string; end: string };
+  mainCards: BottleneckMainCards;
+  attentionPoints: BottleneckAttentionPoint[];
+  stepMetrics: BottleneckStepMetrics[];
+  stalledAdmissions: BottleneckStalledAdmission[];
+  totalStalled: number;
+  pendingsByType: BottleneckPendingItem[];
+  rejectionsByReason: BottleneckRejectionReasonItem[];
+  rejectionsByDocType: BottleneckDocTypeRejectionItem[];
+  resentMetrics: BottleneckResentMetrics;
+  reviewTimeMetrics: BottleneckReviewTimeMetrics;
+  approvals: KpiApprovalsMetrics;
+  blockedMetrics: BottleneckBlockedMetrics;
+  reopenedMetrics: BottleneckReopenedMetrics;
+  evolution: BottleneckEvolutionPoint[];
+  evolutionGrouping: 'day' | 'week' | 'month';
+  byRole: BottleneckDimensionItem[];
+  byUnit: BottleneckDimensionItem[];
+  byDepartment: BottleneckDimensionItem[];
+  availableFilters: {
+    roles: string[];
+    departments: string[];
+    units: string[];
+    statuses: string[];
+    situations: { key: string; label: string }[];
+    responsibles: string[];
+  };
+}
+
+// =========================================================================
+// BLOCO 6.4 — GESTÃO DE RESPONSÁVEIS E DISTRIBUIÇÃO DE TRABALHO (TIPOS NATIVOS)
+// =========================================================================
+
+export type AssignmentActionType = 'ASSIGNED' | 'REASSIGNED' | 'REMOVED';
+
+export interface AdmissionAssignmentHistoryItem {
+  id: string;
+  admissionId: string;
+  stepKey?: string;
+  stepName?: string;
+  action: AssignmentActionType;
+  previousUserId?: string;
+  previousUserName?: string;
+  newUserId?: string;
+  newUserName?: string;
+  assignedByUserId?: string;
+  assignedByUserName: string;
+  assignedAt: string;
+  reason?: string;
+}
+
+export interface WorkloadByResponsibleItem {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userRole: string;
+  department: string;
+  active: boolean;
+  admissionsCount: number; // Admissões ativas atribuídas como responsável principal
+  pendingStepsCount: number; // Etapas operacionais ativas atribuídas
+  activePendingsCount: number; // Pendências documentais ativas associadas
+  pendingApprovalsCount: number; // Aprovações internas pendentes associadas
+  totalWorkload: number; // Soma de itens sob responsabilidade atual
+  lastMovementAt?: string;
+}
+
+export interface WorkDistributionCards {
+  totalAssigned: number;
+  unassignedCount: number;
+  myQueueCount: number;
+  usersWithAssignmentsCount: number;
+  activeProcessesCount: number;
+}
+
+export interface WorkDistributionItem {
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpfMasked: string;
+  employeeRole: string;
+  employeeDepartment: string;
+  employeeUnit: string;
+  status: AdmissionStatus;
+  situation: OperationalHubSituation;
+  situationLabel: string;
+  priority: OperationalPriority;
+  currentStepKey: string;
+  currentStepName: string;
+  currentStepOrder: number;
+  totalSteps: number;
+  currentStepStatus: ProcessStepStatus;
+  // Responsabilidade da admissão
+  admissionResponsibleId?: string;
+  admissionResponsibleName: string;
+  admissionResponsibleEmail?: string;
+  admissionAssignedAt?: string;
+  admissionAssignedBy?: string;
+  // Responsabilidade da etapa atual
+  stepResponsibleId?: string;
+  stepResponsibleName: string;
+  stepResponsibleEmail?: string;
+  stepAssignedAt?: string;
+  stepAssignedBy?: string;
+  // Indicadores da fila
+  isMyAssignment: boolean;
+  isMyStepAssignment: boolean;
+  expectedStartDate?: string;
+  createdAt: string;
+  lastMovementAt: string;
+  daysSinceCreation: number;
+  daysWithoutMovement: number;
+  activePendingsCount: number;
+  hasApproval: boolean;
+  approvalStatus?: string;
+}
+
+export interface WorkDistributionFilters {
+  search?: string;
+  responsible?: string;
+  stepKey?: string;
+  situation?: string;
+  priority?: string;
+  unit?: string;
+  department?: string;
+  role?: string;
+  period?: string;
+  startDate?: string;
+  endDate?: string;
+  viewMode?: 'todas' | 'minha_fila' | 'sem_responsavel' | 'distribuicao';
+  page?: number;
+  limit?: number;
+  sortBy?: 'priority' | 'admissions' | 'steps' | 'pendings' | 'approvals' | 'lastMovement' | 'name';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface WorkDistributionResponse {
+  cards: WorkDistributionCards;
+  distributionByResponsible: WorkloadByResponsibleItem[];
+  items: WorkDistributionItem[];
+  unassignedItems: WorkDistributionItem[];
+  myQueueItems: WorkDistributionItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  filters: {
+    users: { id: string; name: string; email: string; role: string; department?: string; active: boolean }[];
+    units: string[];
+    departments: string[];
+    roles: string[];
+    steps: { stepKey: string; stepName: string }[];
+    situations: { key: string; label: string }[];
+    priorities: string[];
+    responsibles: string[];
+  };
+}
+
+export interface AssignResponsibleRequest {
+  responsibleUserId: string | null; // null se for remoção
+  stepKey?: string; // Se fornecido, atribui a etapa específica em vez da admissão inteira
+  reason?: string; // Justificativa / observação da atribuição ou redistribuição
+  versionTimestamp?: string; // Timestamp para controle de concorrência
+}
+
+// ------------------------------------------------------------------
+// BLOCO 6.5: TAREFAS OPERACIONAIS DO RH
+// ------------------------------------------------------------------
+
+export type OperationalTaskStatus = 
+  | 'PENDENTE' 
+  | 'EM_ANDAMENTO' 
+  | 'CONCLUIDA' 
+  | 'CANCELADA' 
+  | 'BLOQUEADA';
+
+export type OperationalTaskSourceType = 
+  | 'ADMISSAO' 
+  | 'ETAPA' 
+  | 'DOCUMENTO' 
+  | 'PENDENCIA' 
+  | 'APROVACAO' 
+  | 'CHECKLIST' 
+  | 'COMUNICACAO';
+
+export type OperationalTaskActionType =
+  | 'CREATED'
+  | 'ASSIGNED'
+  | 'REASSIGNED'
+  | 'UNASSIGNED'
+  | 'STARTED'
+  | 'COMPLETED'
+  | 'BLOCKED'
+  | 'UNBLOCKED'
+  | 'CANCELLED'
+  | 'REOPENED'
+  | 'UPDATED';
+
+export interface OperationalTaskHistoryItem {
+  id: string;
+  taskId: string;
+  action: OperationalTaskActionType;
+  performedBy: string;
+  performedByUserId?: string;
+  performedAt: string;
+  previousStatus?: OperationalTaskStatus;
+  newStatus?: OperationalTaskStatus;
+  previousUserId?: string;
+  previousUserName?: string;
+  newUserId?: string;
+  newUserName?: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface OperationalTask {
+  id: string;
+  tenantId?: string;
+  
+  // Vinculação Obrigatória à Admissão e Funcionário
+  admissionId: string;
+  admissionCode: string;
+  employeeId: string;
+  employeeName: string;
+  employeeCpfMasked?: string;
+  employeeRole?: string;
+  employeeDepartment?: string;
+  employeeUnit?: string;
+
+  // Vinculação Específica à Origem Operacional
+  sourceType: OperationalTaskSourceType;
+  sourceId?: string;
+  sourceDescription?: string;
+  stepKey?: string;
+  stepName?: string;
+  documentId?: string;
+  documentName?: string;
+  approvalId?: string;
+
+  // Identificação e Detalhes da Tarefa
+  title: string;
+  description?: string;
+  priority: OperationalPriority; // 'NORMAL' | 'ALTA' | 'CRITICA'
+  status: OperationalTaskStatus; // 'PENDENTE' | 'EM_ANDAMENTO' | 'CONCLUIDA' | 'CANCELADA' | 'BLOQUEADA'
+
+  // Responsável Operacional (Alinhado ao Bloco 6.4)
+  responsibleUserId?: string | null;
+  responsibleUserName?: string;
+  responsibleUserEmail?: string;
+  assignedAt?: string;
+  assignedBy?: string;
+
+  // Prazo Operacional
+  dueAt?: string | null; // Data e hora limite operacional ou null se sem prazo
+  isOverdue?: boolean;
+
+  // Ciclo de Vida: Conclusão
+  completedAt?: string;
+  completedBy?: string;
+  completionNotes?: string;
+
+  // Ciclo de Vida: Bloqueio
+  blockedAt?: string;
+  blockedBy?: string;
+  blockReason?: string;
+
+  // Ciclo de Vida: Cancelamento
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelReason?: string;
+
+  // Ciclo de Vida: Reabertura
+  reopenedAt?: string;
+  reopenedBy?: string;
+  reopenReason?: string;
+
+  // Auditoria e Rastreabilidade
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  history: OperationalTaskHistoryItem[];
+}
+
+export interface OperationalTaskSummary {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+  blocked: number;
+  cancelled: number;
+  unassigned: number;
+  myTasks: number;
+  critical: number;
+  overdue: number;
+}
+
+export interface OperationalTaskFilters {
+  search?: string;
+  status?: OperationalTaskStatus | 'TODOS' | 'all';
+  priority?: OperationalPriority | 'TODAS' | 'all';
+  responsible?: string;
+  sourceType?: OperationalTaskSourceType | 'TODAS' | 'all';
+  unit?: string;
+  department?: string;
+  admissionId?: string;
+  employeeId?: string;
+  viewMode?: 'todas' | 'minhas' | 'sem_responsavel' | 'criticas' | 'vencidas' | 'concluidas';
+  page?: number;
+  limit?: number;
+  sortBy?: 'priority' | 'dueAt' | 'createdAt' | 'updatedAt' | 'status' | 'title';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface OperationalTasksResponse {
+  summary: OperationalTaskSummary;
+  items: OperationalTask[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  filters: {
+    users: { id: string; name: string; email: string; role: string; department?: string; active: boolean }[];
+    sources: { key: string; label: string }[];
+    units: string[];
+    departments: string[];
+    statuses: { key: string; label: string }[];
+    priorities: string[];
+  };
+}
+
+export interface CreateOperationalTaskInput {
+  admissionId: string;
+  title: string;
+  description?: string;
+  priority: OperationalPriority;
+  dueAt?: string | null;
+  responsibleUserId?: string | null;
+  sourceType?: OperationalTaskSourceType;
+  sourceId?: string;
+  sourceDescription?: string;
+  stepKey?: string;
+  documentId?: string;
+  approvalId?: string;
+}
+
+export interface UpdateOperationalTaskInput {
+  title?: string;
+  description?: string;
+  priority?: OperationalPriority;
+  dueAt?: string | null;
+  responsibleUserId?: string | null;
+  reason?: string;
+}
+
+
+
+
+
 
 
 

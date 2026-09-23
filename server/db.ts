@@ -100,7 +100,57 @@ import {
   ApprovalQueueSummary,
   ApprovalQueueFilters,
   ApprovalQueueResponse,
-  ApprovalDetailResponse
+  ApprovalDetailResponse,
+  OperationalHubSituation,
+  OperationalHubSummary,
+  OperationalHubItem,
+  OperationalHubFilters,
+  OperationalHubResponse,
+  KpiPeriodType,
+  KpiMainCards,
+  KpiRates,
+  KpiStepTimeItem,
+  KpiTimeMetrics,
+  KpiDocumentsMetrics,
+  KpiApprovalsMetrics,
+  KpiEvolutionPoint,
+  KpiDistributionItem,
+  KpiByDimensionItem,
+  KpiFilters,
+  KpiDetailedAdmission,
+  KpiHubResponse,
+  BottleneckStepMetrics,
+  BottleneckStalledAdmission,
+  BottleneckPendingItem,
+  BottleneckRejectionReasonItem,
+  BottleneckDocTypeRejectionItem,
+  BottleneckResentMetrics,
+  BottleneckReviewTimeMetrics,
+  BottleneckBlockedMetrics,
+  BottleneckReopenedMetrics,
+  BottleneckEvolutionPoint,
+  BottleneckDimensionItem,
+  BottleneckAttentionPoint,
+  BottleneckMainCards,
+  BottleneckHubResponse,
+  AssignmentActionType,
+  AdmissionAssignmentHistoryItem,
+  WorkloadByResponsibleItem,
+  WorkDistributionCards,
+  WorkDistributionItem,
+  WorkDistributionFilters,
+  WorkDistributionResponse,
+  AssignResponsibleRequest,
+  OperationalTask,
+  OperationalTaskStatus,
+  OperationalTaskSourceType,
+  OperationalTaskActionType,
+  OperationalTaskHistoryItem,
+  OperationalTaskSummary,
+  OperationalTaskFilters,
+  OperationalTasksResponse,
+  CreateOperationalTaskInput,
+  UpdateOperationalTaskInput
 } from '../src/types/index.ts';
 import { maskCPF, validateCPF, validateEmail } from '../src/lib/cpf.ts';
 import { initialDbData } from '../src/data/initialDb.ts';
@@ -128,6 +178,7 @@ export interface DatabaseSchema {
   employeeDocuments?: EmployeeDocument[];
   admissionProcess?: AdmissionProcessConfig;
   admissionProcessVersions?: AdmissionProcessVersion[];
+  operationalTasks?: OperationalTask[];
 }
 
 export const DEFAULT_ADMISSION_PROCESS_STEPS: ConfigurableProcessStep[] = [
@@ -997,6 +1048,7 @@ export class Database {
         this.data = JSON.parse(raw);
         if (!this.data.users) this.data.users = [];
         if (!this.data.communicationLogs) this.data.communicationLogs = [];
+        if (!this.data.operationalTasks) this.data.operationalTasks = [];
 
         // Garante a existência e integridade dos cargos (Job Positions)
         if (!this.data.jobPositions || this.data.jobPositions.length === 0) {
@@ -1047,42 +1099,122 @@ export class Database {
         // Garante a remoção de usuários obsoletos
         this.data.users = this.data.users.filter(u => u.email.toLowerCase() !== 'microwasmel@gmail.com');
 
-        // Garante a existência dos usuários padrão de RH
+        // Garante a existência dos usuários padrão de RH (Bloco 6.4)
         const defaultUsers = [
           {
+            id: 'user-rh-00',
             email: 'rh@galvanizacaoraitz.com.br',
             name: 'RH Galvanização Raitz',
             role: 'RH' as const,
-            department: 'Recursos Humanos / Gente & Gestão'
+            department: 'Recursos Humanos / Gente & Gestão',
+            active: true
           },
           {
+            id: 'user-rh-03',
             email: 'admin@raitz.com.br',
             name: 'Coordenação Raitz RH',
             role: 'RH' as const,
-            department: 'Recursos Humanos'
+            department: 'Recursos Humanos',
+            active: true
           },
           {
+            id: 'user-rh-01',
             email: 'rh@empresa.com',
             name: 'Mariana Silveira',
             role: 'RH' as const,
-            department: 'Recursos Humanos'
+            department: 'Recursos Humanos',
+            active: true
+          },
+          {
+            id: 'user-rh-04',
+            email: 'carlos.mendes@raitz.com.br',
+            name: 'Carlos Eduardo Mendes',
+            role: 'RH_CONFERENCIA' as const,
+            department: 'Conferência Documental',
+            active: true
+          },
+          {
+            id: 'user-rh-05',
+            email: 'patricia.duarte@raitz.com.br',
+            name: 'Patrícia Duarte',
+            role: 'GESTOR' as const,
+            department: 'Gente e Gestão',
+            active: true
+          },
+          {
+            id: 'user-rh-06',
+            email: 'roberto.dias@raitz.com.br',
+            name: 'Roberto Dias (Inativo)',
+            role: 'RH' as const,
+            department: 'Recursos Humanos',
+            active: false
           }
         ];
 
         let updated = false;
         for (const def of defaultUsers) {
-          if (!this.data.users.some(u => u.email.toLowerCase() === def.email.toLowerCase())) {
+          const existing = this.data.users.find(u => u.email.toLowerCase() === def.email.toLowerCase());
+          if (!existing) {
             this.data.users.push({
-              id: 'user-rh-' + crypto.randomUUID().slice(0, 8),
+              id: def.id,
               email: def.email,
               name: def.name,
               role: def.role,
               department: def.department,
+              active: def.active,
               createdAt: new Date().toISOString()
             });
             updated = true;
+          } else {
+            if (existing.active === undefined) {
+              existing.active = def.active;
+              updated = true;
+            }
           }
         }
+
+        // Garante que todos os usuários tenham flag active definida
+        this.data.users.forEach(u => {
+          if (u.active === undefined) {
+            u.active = true;
+            updated = true;
+          }
+        });
+
+        // Inicializa atribuições iniciais em admissões que ainda não possuem responsável definido (Bloco 6.4)
+        if (this.data.admissions && this.data.admissions.length > 0) {
+          const mariana = this.data.users.find(u => u.name === 'Mariana Silveira') || this.data.users[0];
+          const carlos = this.data.users.find(u => u.role === 'RH_CONFERENCIA') || mariana;
+
+          this.data.admissions.forEach((adm, idx) => {
+            if (!adm.assignmentsHistory) {
+              adm.assignmentsHistory = [];
+            }
+            // Não atribui todas para manter admissões "Sem Responsável" (requisito do bloco)
+            // adm-01 ou múltiplos de 4 ficam sem responsável
+            if (!adm.responsibleUserId && idx % 4 !== 0 && adm.status !== 'Cancelada') {
+              const assignedUser = (idx % 2 === 0) ? carlos : mariana;
+              adm.responsibleUserId = assignedUser.id;
+              adm.responsibleUserName = assignedUser.name;
+              adm.responsibleUserEmail = assignedUser.email;
+              adm.assignedAt = adm.createdAt || new Date().toISOString();
+              adm.assignedBy = 'Sistema';
+              adm.assignmentReason = 'Distribuição operacional inicial de admissões';
+              adm.assignmentsHistory.push({
+                id: 'asgn-init-' + (adm.id || idx),
+                admissionId: adm.id,
+                action: 'ASSIGNED',
+                newUserId: assignedUser.id,
+                newUserName: assignedUser.name,
+                assignedByUserName: 'Sistema',
+                assignedAt: adm.createdAt || new Date().toISOString(),
+                reason: 'Atribuição automática inicial'
+              });
+              updated = true;
+            }
+          });
+        }
+
         if (updated) {
           this.save();
         }
@@ -8978,6 +9110,3734 @@ export class Database {
     });
 
     return app;
+  }
+
+  // =========================================================================
+  // BLOCO 6.1 — CENTRAL DE OPERAÇÕES DO RH (MÉTODO UNIFICADO DE CONSULTA)
+  // =========================================================================
+
+  /**
+   * Retorna os dados consolidados da Central de Operações do RH (Bloco 6.1).
+   * Consolida Admissões, Etapas do Processo (5.4), Checklist Operacional (5.5),
+   * Aprovações Internas (5.6), Prazos e Documentos com filtros e KPIs derivados.
+   */
+  getOperationalHubData(options: OperationalHubFilters = {}): OperationalHubResponse {
+    this.ensureApprovalsInitialized();
+    this.ensureAdmissionProcessInitialized();
+
+    const admissions = this.data.admissions || [];
+    const settings = this.getSettings();
+    const today = new Date().setHours(0, 0, 0, 0);
+
+    // Garante que cada admissão possua seu snapshot de etapas 5.4 sincronizado
+    admissions.forEach(adm => {
+      this.evaluateAdmissionProcessSteps(adm, 'Sistema');
+    });
+
+    const items: OperationalHubItem[] = [];
+
+    // Conjuntos para filtros dinâmicos
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const responsiblesSet = new Set<string>(['RH', 'FUNCIONARIO', 'GESTOR', 'DP', 'ADMIN', 'SISTEMA']);
+    const statusesSet = new Set<string>(['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada']);
+
+    // Contadores para o Resumo Operacional
+    let countInProgress = 0;
+    let countWaitingEmployee = 0;
+    let countWaitingRh = 0;
+    let countWithPendings = 0;
+    let countPendingApproval = 0;
+    let countNearDeadline = 0;
+    let countDelayed = 0;
+    let countBlocked = 0;
+
+    for (const adm of admissions) {
+      const emp: Partial<Employee> = adm.employee || {
+        name: 'Colaborador',
+        cpf: '00000000000',
+        role: 'Não informado',
+        department: 'Geral',
+        unit: 'Matriz',
+        email: '',
+        phone: '',
+        expectedStartDate: undefined
+      };
+
+      if (emp.role) rolesSet.add(emp.role);
+      if (emp.department) departmentsSet.add(emp.department);
+      if (emp.unit) unitsSet.add(emp.unit);
+      if (adm.status) statusesSet.add(adm.status);
+
+      const docs = adm.documents || [];
+      const requiredDocs = docs.filter(d => d.required);
+      const approvedDocs = docs.filter(d => d.status === 'Aprovado');
+      const inReviewDocs = docs.filter(d => d.status === 'Em análise');
+      const rejectedDocs = docs.filter(d => d.status === 'Rejeitado');
+      const notSentDocs = docs.filter(d => d.status === 'Não enviado');
+
+      const docsProgress = requiredDocs.length > 0 
+        ? Math.round((approvedDocs.filter(d => d.required).length / requiredDocs.length) * 100)
+        : (docs.length > 0 ? Math.round((approvedDocs.length / docs.length) * 100) : 0);
+
+      // Prazos e Dias
+      const createdDate = new Date(adm.createdAt || Date.now());
+      const daysSinceCreation = Math.max(0, Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+      // Última movimentação
+      let lastActivityTime = createdDate.getTime();
+      if (adm.updatedAt) {
+        const u = new Date(adm.updatedAt).getTime();
+        if (u > lastActivityTime) lastActivityTime = u;
+      }
+      if (adm.dataConfirmedAt) {
+        const c = new Date(adm.dataConfirmedAt).getTime();
+        if (c > lastActivityTime) lastActivityTime = c;
+      }
+      docs.forEach(d => {
+        if (d.uploadedAt) {
+          const up = new Date(d.uploadedAt).getTime();
+          if (up > lastActivityTime) lastActivityTime = up;
+        }
+        if (d.reviewedAt) {
+          const rev = new Date(d.reviewedAt).getTime();
+          if (rev > lastActivityTime) lastActivityTime = rev;
+        }
+      });
+      const daysWithoutMovement = Math.max(0, Math.floor((Date.now() - lastActivityTime) / (1000 * 60 * 60 * 24)));
+
+      // Prazo de início previsto
+      let daysUntilDeadline: number | undefined;
+      let isOverdue = false;
+      let isNearDeadline = false;
+      const expectedDate = emp.expectedStartDate || (adm as any).expectedStartDate;
+
+      if (expectedDate) {
+        try {
+          const target = new Date(expectedDate.includes('T') ? expectedDate : expectedDate + 'T00:00:00').getTime();
+          daysUntilDeadline = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+          if (adm.status !== 'Concluída' && adm.status !== 'Cancelada') {
+            if (daysUntilDeadline < 0) {
+              isOverdue = true;
+            } else if (daysUntilDeadline <= (settings.tracking?.upcomingDaysThreshold ?? 7)) {
+              isNearDeadline = true;
+            }
+          }
+        } catch {
+          // ignore date parse error
+        }
+      }
+
+      // Etapa do processo (Bloco 5.4)
+      const steps = (adm.processSteps || []).sort((a, b) => a.stepOrder - b.stepOrder);
+      const currentStep = steps.find(s => s.status === 'EM_ANDAMENTO' || s.status === 'BLOQUEADA') ||
+        steps.find(s => s.status === 'PENDENTE') ||
+        steps[steps.length - 1];
+
+      const currentStepKey = currentStep?.stepKey;
+      const currentStepName = currentStep?.stepName || (adm.status === 'Concluída' ? 'Admissão Concluída' : 'Processamento Inicial');
+      const currentStepOrder = currentStep?.stepOrder ?? 1;
+      const totalSteps = steps.length || 6;
+      const currentStepStatus: ProcessStepStatus = currentStep?.status || (adm.status === 'Concluída' ? 'CONCLUIDA' : 'EM_ANDAMENTO');
+      const currentStepResponsible = currentStep?.responsibleRole || (adm.status === 'Aguardando documentos' ? 'CANDIDATO' : 'RH');
+
+      // Aprovação Interna (Bloco 5.6)
+      const app = adm.approval;
+      const hasApproval = Boolean(app);
+      const approvalPending = Boolean(app && (app.status === 'PENDENTE' || app.status === 'EM_ANALISE'));
+
+      // Responsável operacional atual (Bloco 6.4: Gestão de Responsáveis e Distribuição)
+      const admissionRespId = adm.responsibleUserId;
+      const admissionRespName = adm.responsibleUserName || 'Sem responsável';
+      const stepRespId = currentStep?.responsibleUserId;
+      const stepRespName = currentStep?.responsibleUserName || (currentStepResponsible === 'CANDIDATO' ? 'Candidato' : currentStepResponsible);
+
+      const currentResponsible = adm.responsibleUserName || 'Sem responsável';
+      responsiblesSet.add(currentResponsible);
+      if (adm.responsibleUserName) responsiblesSet.add(adm.responsibleUserName);
+      if (currentStep?.responsibleUserName) responsiblesSet.add(currentStep.responsibleUserName);
+      responsiblesSet.add('Sem responsável');
+
+      // Prioridade Operacional
+      const priority: OperationalPriority = adm.operationalPriority || (isOverdue || currentStepStatus === 'BLOQUEADA' ? 'CRITICA' : isNearDeadline ? 'ALTA' : 'NORMAL');
+      const priorityScore = priority === 'CRITICA' ? 1 : priority === 'ALTA' ? 2 : 3;
+
+      // Situação Operacional do Bloco 6.1
+      let situation: OperationalHubSituation = 'EM_DIA';
+      let situationLabel = 'Em dia';
+
+      const isBlocked = currentStepStatus === 'BLOQUEADA' || adm.status === 'Cancelada';
+      const hasPending = adm.status === 'Pendência' || rejectedDocs.length > 0;
+      const isWaitingEmployee = adm.status === 'Aguardando documentos' || notSentDocs.length > 0 || !adm.dataConfirmed || currentResponsible === 'FUNCIONARIO';
+      const isWaitingRh = inReviewDocs.length > 0 || adm.status === 'Em conferência' || currentResponsible === 'RH';
+
+      if (currentStepStatus === 'BLOQUEADA') {
+        situation = 'BLOQUEADA';
+        situationLabel = 'Bloqueada';
+      } else if (isOverdue) {
+        situation = 'ATRASADA';
+        situationLabel = 'Atrasada';
+      } else if (approvalPending) {
+        situation = 'APROVACAO_PENDENTE';
+        situationLabel = 'Aprovação Pendente';
+      } else if (hasPending) {
+        situation = 'COM_PENDENCIA';
+        situationLabel = 'Com Pendência';
+      } else if (isWaitingRh) {
+        situation = 'AGUARDANDO_RH';
+        situationLabel = 'Aguardando RH';
+      } else if (isWaitingEmployee) {
+        situation = 'AGUARDANDO_FUNCIONARIO';
+        situationLabel = 'Aguardando Funcionário';
+      } else if (isNearDeadline) {
+        situation = 'PROXIMA_DO_PRAZO';
+        situationLabel = 'Próxima do Prazo';
+      }
+
+      // Motivos de atenção
+      const attentionReasons: string[] = [];
+      if (currentStepStatus === 'BLOQUEADA') {
+        attentionReasons.push(currentStep?.blockReason ? `Bloqueio: ${currentStep.blockReason}` : 'Etapa operacional bloqueada');
+      }
+      if (isOverdue && daysUntilDeadline !== undefined) {
+        attentionReasons.push(`Início previsto ultrapassado há ${Math.abs(daysUntilDeadline)} dia(s)`);
+      }
+      if (approvalPending) {
+        attentionReasons.push(`Aprovação interna (${app?.approvalType}) aguardando parecer`);
+      }
+      if (rejectedDocs.length > 0) {
+        attentionReasons.push(`${rejectedDocs.length} documento(s) com rejeição pendente de reenvio`);
+      }
+      if (inReviewDocs.length > 0) {
+        attentionReasons.push(`${inReviewDocs.length} documento(s) enviado(s) aguardando conferência`);
+      }
+      if (daysWithoutMovement >= (settings.tracking?.inactivityDaysThreshold ?? 5) && adm.status !== 'Concluída' && adm.status !== 'Cancelada') {
+        attentionReasons.push(`Sem movimentação há ${daysWithoutMovement} dias`);
+      }
+      if (isNearDeadline && daysUntilDeadline !== undefined && daysUntilDeadline >= 0) {
+        attentionReasons.push(`Início previsto em ${daysUntilDeadline} dia(s)`);
+      }
+
+      const isActiveAdmission = adm.status !== 'Concluída' && adm.status !== 'Cancelada';
+      const needsAttention = isActiveAdmission && (
+        currentStepStatus === 'BLOQUEADA' ||
+        isOverdue ||
+        approvalPending ||
+        rejectedDocs.length > 0 ||
+        priority === 'CRITICA' ||
+        isNearDeadline ||
+        daysWithoutMovement >= (settings.tracking?.inactivityDaysThreshold ?? 5)
+      );
+
+      // Atualiza KPIs globais
+      if (isActiveAdmission) {
+        countInProgress++;
+        if (currentStepStatus === 'BLOQUEADA') countBlocked++;
+        if (isOverdue) countDelayed++;
+        if (isNearDeadline) countNearDeadline++;
+        if (approvalPending) countPendingApproval++;
+        if (hasPending) countWithPendings++;
+        if (isWaitingEmployee) countWaitingEmployee++;
+        if (isWaitingRh) countWaitingRh++;
+      }
+
+      const item: OperationalHubItem = {
+        id: adm.id,
+        admissionId: adm.id,
+        admissionCode: adm.id.replace('adm-', 'ADM-').toUpperCase(),
+        employeeId: adm.employeeId,
+        employeeName: emp.name,
+        employeeCpfMasked: maskCPF(emp.cpf),
+        employeeRole: emp.role,
+        employeeDepartment: emp.department,
+        employeeUnit: emp.unit,
+        employeeEmail: emp.email,
+        employeePhone: emp.phone,
+        status: adm.status,
+        priority,
+        priorityScore,
+        situation,
+        situationLabel,
+        needsAttention,
+        attentionReasons,
+        currentStepKey,
+        currentStepName,
+        currentStepOrder,
+        totalSteps,
+        currentStepStatus,
+        currentStepResponsible,
+        responsible: currentResponsible,
+        admissionResponsibleId: admissionRespId,
+        admissionResponsibleName: admissionRespName,
+        stepResponsibleId: stepRespId,
+        stepResponsibleName: stepRespName,
+        createdAt: adm.createdAt,
+        expectedStartDate: expectedDate,
+        lastActivityAt: new Date(lastActivityTime).toISOString(),
+        daysSinceCreation,
+        daysWithoutMovement,
+        daysUntilDeadline,
+        isOverdue,
+        isNearDeadline,
+        documentsSummary: {
+          total: docs.length,
+          approved: approvedDocs.length,
+          inReview: inReviewDocs.length,
+          rejected: rejectedDocs.length,
+          notSent: notSentDocs.length,
+          progressPercent: docsProgress
+        },
+        activePendingsCount: rejectedDocs.length + (adm.status === 'Pendência' ? 1 : 0),
+        primaryPendingTitle: rejectedDocs[0] ? `Reenvio de ${rejectedDocs[0].documentType}` : (inReviewDocs[0] ? `Conferir ${inReviewDocs[0].documentType}` : undefined),
+        hasApproval,
+        approvalStatus: app?.status,
+        approvalType: app?.approvalType
+      };
+
+      items.push(item);
+    }
+
+    // Filtros
+    let filtered = [...items];
+
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
+      filtered = filtered.filter(item => {
+        const rawCpf = item.employeeCpfMasked.replace(/\D/g, '');
+        return (
+          item.employeeName.toLowerCase().includes(q) ||
+          item.admissionCode.toLowerCase().includes(q) ||
+          item.employeeRole.toLowerCase().includes(q) ||
+          item.employeeDepartment.toLowerCase().includes(q) ||
+          item.employeeUnit.toLowerCase().includes(q) ||
+          item.employeeEmail.toLowerCase().includes(q) ||
+          item.employeePhone.includes(q) ||
+          (qDigits && rawCpf.includes(qDigits))
+        );
+      });
+    }
+
+    if (options.status && options.status !== 'TODOS' && options.status !== 'all') {
+      filtered = filtered.filter(i => i.status === options.status);
+    }
+
+    if (options.situation && options.situation !== 'TODAS' && options.situation !== 'all') {
+      const sit = options.situation.toUpperCase();
+      filtered = filtered.filter(i => {
+        if (sit === 'AGUARDANDO_FUNCIONARIO') return i.situation === 'AGUARDANDO_FUNCIONARIO';
+        if (sit === 'AGUARDANDO_RH') return i.situation === 'AGUARDANDO_RH';
+        if (sit === 'COM_PENDENCIA') return i.situation === 'COM_PENDENCIA' || i.activePendingsCount > 0;
+        if (sit === 'APROVACAO_PENDENTE') return i.situation === 'APROVACAO_PENDENTE' || (i.hasApproval && (i.approvalStatus === 'PENDENTE' || i.approvalStatus === 'EM_ANALISE'));
+        if (sit === 'PROXIMA_DO_PRAZO') return i.isNearDeadline;
+        if (sit === 'ATRASADA') return i.isOverdue;
+        if (sit === 'BLOQUEADA') return i.situation === 'BLOQUEADA';
+        if (sit === 'EM_DIA') return i.situation === 'EM_DIA';
+        return i.situation === sit;
+      });
+    }
+
+    if (options.role && options.role !== 'TODOS' && options.role !== 'all') {
+      filtered = filtered.filter(i => i.employeeRole === options.role);
+    }
+
+    if (options.department && options.department !== 'TODOS' && options.department !== 'all') {
+      filtered = filtered.filter(i => i.employeeDepartment === options.department);
+    }
+
+    if (options.unit && options.unit !== 'TODOS' && options.unit !== 'all') {
+      filtered = filtered.filter(i => i.employeeUnit === options.unit);
+    }
+
+    if (options.responsible && options.responsible !== 'TODOS' && options.responsible !== 'all') {
+      const targetResp = options.responsible.trim();
+      if (targetResp === 'SEM_RESPONSAVEL' || targetResp === 'Sem responsável' || targetResp === 'sem_responsavel') {
+        filtered = filtered.filter(i => !i.admissionResponsibleId || i.admissionResponsibleName === 'Sem responsável');
+      } else {
+        filtered = filtered.filter(i =>
+          i.admissionResponsibleId === targetResp ||
+          i.admissionResponsibleName?.toLowerCase() === targetResp.toLowerCase() ||
+          i.stepResponsibleId === targetResp ||
+          i.stepResponsibleName?.toLowerCase() === targetResp.toLowerCase() ||
+          i.responsible?.toLowerCase() === targetResp.toLowerCase() ||
+          i.currentStepResponsible?.toLowerCase() === targetResp.toLowerCase()
+        );
+      }
+    }
+
+    if (options.priority && options.priority !== 'TODAS' && options.priority !== 'all') {
+      filtered = filtered.filter(i => i.priority === options.priority.toUpperCase());
+    }
+
+    if (options.period) {
+      const now = Date.now();
+      if (options.period === 'today') {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        filtered = filtered.filter(i => (i.createdAt || '').slice(0, 10) === todayStr || (i.lastActivityAt || '').slice(0, 10) === todayStr);
+      } else if (options.period === '7d') {
+        const limitTime = now - 7 * 86400000;
+        filtered = filtered.filter(i => new Date(i.createdAt).getTime() >= limitTime || new Date(i.lastActivityAt).getTime() >= limitTime);
+      } else if (options.period === '30d') {
+        const limitTime = now - 30 * 86400000;
+        filtered = filtered.filter(i => new Date(i.createdAt).getTime() >= limitTime || new Date(i.lastActivityAt).getTime() >= limitTime);
+      } else if (options.period === 'this_month') {
+        const thisMonth = new Date().toISOString().slice(0, 7);
+        filtered = filtered.filter(i => (i.createdAt || '').slice(0, 7) === thisMonth || (i.lastActivityAt || '').slice(0, 7) === thisMonth);
+      } else if (options.period === 'custom' && options.startDate && options.endDate) {
+        const s = new Date(options.startDate).getTime();
+        const e = new Date(options.endDate + 'T23:59:59').getTime();
+        filtered = filtered.filter(i => {
+          const t = new Date(i.createdAt).getTime();
+          return t >= s && t <= e;
+        });
+      }
+    }
+
+    // Ordenação inteligente
+    const sortBy = options.sortBy || 'priority';
+    const sortOrder = options.sortOrder || 'asc';
+
+    filtered.sort((a, b) => {
+      if (sortBy === 'priority') {
+        // 1º: Itens que precisam de atenção primeiro
+        if (a.needsAttention !== b.needsAttention) {
+          return a.needsAttention ? -1 : 1;
+        }
+        // 2º: Score de prioridade (CRITICA=1, ALTA=2, NORMAL=3)
+        if (a.priorityScore !== b.priorityScore) {
+          return a.priorityScore - b.priorityScore;
+        }
+        // 3º: Atrasadas primeiro
+        if (a.isOverdue !== b.isOverdue) {
+          return a.isOverdue ? -1 : 1;
+        }
+        // 4º: Última atividade decrescente
+        return new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime();
+      }
+
+      if (sortBy === 'deadline') {
+        const valA = a.daysUntilDeadline ?? 9999;
+        const valB = b.daysUntilDeadline ?? 9999;
+        return sortOrder === 'desc' ? valB - valA : valA - valB;
+      }
+
+      if (sortBy === 'lastMovement') {
+        const tA = new Date(a.lastActivityAt).getTime();
+        const tB = new Date(b.lastActivityAt).getTime();
+        return sortOrder === 'asc' ? tA - tB : tB - tA;
+      }
+
+      if (sortBy === 'name') {
+        return sortOrder === 'desc' 
+          ? b.employeeName.localeCompare(a.employeeName, 'pt-BR')
+          : a.employeeName.localeCompare(b.employeeName, 'pt-BR');
+      }
+
+      if (sortBy === 'createdAt') {
+        const tA = new Date(a.createdAt).getTime();
+        const tB = new Date(b.createdAt).getTime();
+        return sortOrder === 'asc' ? tA - tB : tB - tA;
+      }
+
+      return 0;
+    });
+
+    // Itens da seção "O que precisa de atenção" (itens ativos e prioritários)
+    const attentionItems = items
+      .filter(i => i.needsAttention && i.status !== 'Concluída' && i.status !== 'Cancelada')
+      .sort((a, b) => {
+        if (a.priorityScore !== b.priorityScore) return a.priorityScore - b.priorityScore;
+        if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+        return (a.daysUntilDeadline ?? 999) - (b.daysUntilDeadline ?? 999);
+      })
+      .slice(0, 6);
+
+    // Paginação
+    const page = Math.max(1, options.page || 1);
+    const limit = Math.max(1, Math.min(100, options.limit || 10));
+    const total = filtered.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const startIndex = (page - 1) * limit;
+    const paginatedItems = filtered.slice(startIndex, startIndex + limit);
+
+    return {
+      items: paginatedItems,
+      attentionItems,
+      summary: {
+        inProgress: countInProgress,
+        waitingEmployee: countWaitingEmployee,
+        waitingRh: countWaitingRh,
+        withPendings: countWithPendings,
+        pendingApproval: countPendingApproval,
+        nearDeadline: countNearDeadline,
+        delayed: countDelayed,
+        blocked: countBlocked,
+        total: admissions.length
+      },
+      total,
+      page,
+      limit,
+      totalPages,
+      filters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        responsibles: Array.from(responsiblesSet).sort(),
+        statuses: Array.from(statusesSet),
+        situations: [
+          { key: 'TODAS', label: 'Todas as Situações' },
+          { key: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário' },
+          { key: 'AGUARDANDO_RH', label: 'Aguardando RH' },
+          { key: 'COM_PENDENCIA', label: 'Com Pendência' },
+          { key: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente' },
+          { key: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo' },
+          { key: 'ATRASADA', label: 'Atrasada' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'EM_DIA', label: 'Em Dia' }
+        ]
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 6.2 — INDICADORES E KPIS DE ADMISSÃO (CAMADA ANALÍTICA REAL)
+  // =========================================================================
+
+  /**
+   * Calcula indicadores e KPIs sobre o processo admissional a partir dos dados reais do sistema.
+   * Não gera números fictícios nem tabelas duplicadas.
+   */
+  getAdmissionKpiData(filters: KpiFilters = {}): KpiHubResponse {
+    const now = new Date();
+    const period = filters.period || '30d';
+    let startTime = 0;
+    let endTime = now.getTime();
+    let periodLabel = 'Últimos 30 dias';
+    let evolutionGrouping: 'day' | 'week' | 'month' = 'day';
+
+    if (period === 'today') {
+      const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      startTime = startOfDay.getTime();
+      endTime = endOfDay.getTime();
+      periodLabel = 'Hoje';
+      evolutionGrouping = 'day';
+    } else if (period === '7d') {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 7);
+      start.setHours(0, 0, 0, 0);
+      startTime = start.getTime();
+      endTime = now.getTime();
+      periodLabel = 'Últimos 7 dias';
+      evolutionGrouping = 'day';
+    } else if (period === '30d') {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 30);
+      start.setHours(0, 0, 0, 0);
+      startTime = start.getTime();
+      endTime = now.getTime();
+      periodLabel = 'Últimos 30 dias';
+      evolutionGrouping = 'day';
+    } else if (period === '90d') {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 90);
+      start.setHours(0, 0, 0, 0);
+      startTime = start.getTime();
+      endTime = now.getTime();
+      periodLabel = 'Últimos 90 dias';
+      evolutionGrouping = 'week';
+    } else if (period === 'this_month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      startTime = start.getTime();
+      endTime = end.getTime();
+      periodLabel = 'Este mês';
+      evolutionGrouping = 'week';
+    } else if (period === 'last_month') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      startTime = start.getTime();
+      endTime = end.getTime();
+      periodLabel = 'Mês anterior';
+      evolutionGrouping = 'week';
+    } else if (period === 'this_year') {
+      const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      startTime = start.getTime();
+      endTime = end.getTime();
+      periodLabel = 'Este ano';
+      evolutionGrouping = 'month';
+    } else if (period === 'custom') {
+      periodLabel = 'Personalizado';
+      if (filters.startDate) {
+        startTime = new Date(filters.startDate.includes('T') ? filters.startDate : filters.startDate + 'T00:00:00').getTime();
+      } else {
+        startTime = new Date(now.getTime() - 30 * 86400000).getTime();
+      }
+      if (filters.endDate) {
+        endTime = new Date(filters.endDate.includes('T') ? filters.endDate : filters.endDate + 'T23:59:59').getTime();
+      } else {
+        endTime = now.getTime();
+      }
+      const daysDiff = Math.ceil((endTime - startTime) / 86400000);
+      if (daysDiff > 90) evolutionGrouping = 'month';
+      else if (daysDiff > 14) evolutionGrouping = 'week';
+      else evolutionGrouping = 'day';
+    }
+
+    const admissions = this.data.admissions || [];
+    const settings = this.data.settings || {};
+
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const statusesSet = new Set<string>();
+    const responsiblesSet = new Set<string>(['RH', 'FUNCIONARIO', 'GESTOR', 'ADMIN']);
+
+    for (const a of admissions) {
+      if (a.employee?.role) rolesSet.add(a.employee.role);
+      if (a.employee?.department) departmentsSet.add(a.employee.department);
+      if (a.employee?.unit) unitsSet.add(a.employee.unit);
+      if (a.status) statusesSet.add(a.status);
+    }
+
+    // Filtrar admissões pelas dimensões solicitadas
+    const dimensionFiltered = admissions.filter(adm => {
+      const emp = adm.employee;
+      if (filters.role && filters.role !== 'TODOS' && emp?.role !== filters.role) return false;
+      if (filters.department && filters.department !== 'TODOS' && emp?.department !== filters.department) return false;
+      if (filters.unit && filters.unit !== 'TODOS' && (emp?.unit || 'Matriz') !== filters.unit) return false;
+      if (filters.status && filters.status !== 'TODOS' && adm.status !== filters.status) return false;
+      return true;
+    });
+
+    const todayMs = now.getTime();
+
+    // Auxiliar para determinar a situação operacional consistente com Bloco 6.1
+    const getAdmissionSituation = (adm: Admission): { situation: OperationalHubSituation; label: string; responsible: string } => {
+      const docs = adm.documents || [];
+      const steps = adm.processSteps || [];
+      const expectedDate = adm.employee?.expectedStartDate || (adm as any).expectedStartDate;
+      const rejectedDocs = docs.filter(d => d.status === 'Rejeitado');
+      const inReviewDocs = docs.filter(d => d.status === 'Em análise');
+      const notSentDocs = docs.filter(d => !d.status || d.status === 'Não enviado');
+
+      const isBlocked = steps.some(s => s.status === 'BLOQUEADA' || (s.history && s.history.some(h => h.action === 'bloqueada')));
+
+      let isOverdue = false;
+      let isNearDeadline = false;
+      if (expectedDate && adm.status !== 'Concluída' && adm.status !== 'Cancelada') {
+        try {
+          const target = new Date(expectedDate.includes('T') ? expectedDate : expectedDate + 'T00:00:00').getTime();
+          const daysDiff = Math.ceil((target - todayMs) / 86400000);
+          if (daysDiff < 0) isOverdue = true;
+          else if (daysDiff <= ((settings as any).tracking?.upcomingDaysThreshold ?? 7)) isNearDeadline = true;
+        } catch {}
+      }
+
+      const hasApprovalPending = Boolean(adm.approval && (adm.approval.status === 'PENDENTE' || adm.approval.status === 'EM_ANALISE'));
+
+      if (isBlocked) return { situation: 'BLOQUEADA', label: 'Bloqueada', responsible: 'RH' };
+      if (isOverdue) return { situation: 'ATRASADA', label: 'Atrasada', responsible: 'RH' };
+      if (hasApprovalPending) return { situation: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente', responsible: adm.approval?.responsibleRole || 'GESTOR' };
+      if (rejectedDocs.length > 0 || adm.status === 'Pendência') return { situation: 'COM_PENDENCIA', label: 'Com Pendência', responsible: 'FUNCIONARIO' };
+      if (inReviewDocs.length > 0 || adm.status === 'Em conferência') return { situation: 'AGUARDANDO_RH', label: 'Aguardando RH', responsible: 'RH' };
+      if (adm.status === 'Aguardando documentos' || notSentDocs.length > 0) return { situation: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário', responsible: 'FUNCIONARIO' };
+      if (isNearDeadline) return { situation: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo', responsible: 'RH' };
+      return { situation: 'EM_DIA', label: 'Em Dia', responsible: 'RH' };
+    };
+
+    // Avalia cada admissão e anexa situação calculada
+    const evaluatedAdmissions = dimensionFiltered.map(adm => {
+      const sitInfo = getAdmissionSituation(adm);
+      return {
+        adm,
+        situation: sitInfo.situation,
+        situationLabel: sitInfo.label,
+        responsible: sitInfo.responsible
+      };
+    });
+
+    // Filtro adicional por situação operacional e responsável se solicitado
+    const filteredAll = evaluatedAdmissions.filter(item => {
+      if (filters.situation && filters.situation !== 'TODAS' && item.situation !== filters.situation) return false;
+      if (filters.responsible && filters.responsible !== 'TODOS' && item.responsible !== filters.responsible) return false;
+      return true;
+    });
+
+    // 1. CARDS PRINCIPAIS
+    const startedInPeriod: typeof filteredAll = [];
+    const completedInPeriod: typeof filteredAll = [];
+    const cancelledInPeriod: typeof filteredAll = [];
+    const inProgressList: typeof filteredAll = [];
+
+    const durationsMs: number[] = [];
+
+    for (const item of filteredAll) {
+      const { adm } = item;
+      const createdTime = new Date(adm.createdAt).getTime();
+
+      // Iniciadas
+      if (createdTime >= startTime && createdTime <= endTime) {
+        startedInPeriod.push(item);
+      }
+
+      // Concluídas
+      if (adm.status === 'Concluída') {
+        const completedTime = adm.completedAt 
+          ? new Date(adm.completedAt).getTime() 
+          : new Date(adm.updatedAt || adm.createdAt).getTime();
+        
+        if (completedTime >= startTime && completedTime <= endTime) {
+          completedInPeriod.push(item);
+          const duration = Math.max(0, completedTime - createdTime);
+          durationsMs.push(duration);
+        }
+      }
+
+      // Canceladas
+      if (adm.status === 'Cancelada') {
+        const cancelledTime = (adm as any).cancelledAt 
+          ? new Date((adm as any).cancelledAt).getTime() 
+          : new Date(adm.updatedAt || adm.createdAt).getTime();
+
+        if (cancelledTime >= startTime && cancelledTime <= endTime) {
+          cancelledInPeriod.push(item);
+        }
+      }
+
+      // Em andamento
+      if (adm.status !== 'Concluída' && adm.status !== 'Cancelada' && createdTime <= endTime) {
+        inProgressList.push(item);
+      }
+    }
+
+    const mainCards: KpiMainCards = {
+      started: startedInPeriod.length,
+      inProgress: inProgressList.length,
+      completed: completedInPeriod.length,
+      cancelled: cancelledInPeriod.length,
+      waitingEmployee: inProgressList.filter(i => i.situation === 'AGUARDANDO_FUNCIONARIO').length,
+      waitingRh: inProgressList.filter(i => i.situation === 'AGUARDANDO_RH').length,
+      withPendings: inProgressList.filter(i => i.situation === 'COM_PENDENCIA').length,
+      pendingApproval: inProgressList.filter(i => i.situation === 'APROVACAO_PENDENTE').length,
+      delayed: inProgressList.filter(i => i.situation === 'ATRASADA').length
+    };
+
+    // 2. TAXAS E PERCENTUAIS
+    const completionRate = mainCards.started > 0 
+      ? Number(((mainCards.completed / mainCards.started) * 100).toFixed(1)) 
+      : null;
+
+    const cancellationRate = mainCards.started > 0 
+      ? Number(((mainCards.cancelled / mainCards.started) * 100).toFixed(1)) 
+      : null;
+
+    // Métricas de Documentos das admissões analisadas no período
+    let docsSubmitted = 0;
+    let docsInReview = 0;
+    let docsApproved = 0;
+    let docsRejected = 0;
+    let docsResent = 0;
+    let docsPendingOrNotSent = 0;
+    let docsMandatoryPending = 0;
+
+    const targetAdmissionsForDocs = startedInPeriod.length > 0 ? startedInPeriod : inProgressList;
+    for (const item of targetAdmissionsForDocs) {
+      const docs = item.adm.documents || [];
+      for (const doc of docs) {
+        const hasFile = doc.status && doc.status !== 'Não enviado';
+        if (hasFile) {
+          docsSubmitted++;
+        } else {
+          docsPendingOrNotSent++;
+          if (doc.required) docsMandatoryPending++;
+        }
+
+        if (doc.status === 'Em análise') docsInReview++;
+        if (doc.status === 'Aprovado') docsApproved++;
+        if (doc.status === 'Rejeitado') docsRejected++;
+
+        if (doc.versions && doc.versions.length > 1) {
+          const hadRejection = doc.versions.some(v => v.status === 'Rejeitado');
+          if (hadRejection) {
+            docsResent++;
+          }
+        }
+      }
+    }
+
+    const approvedDocsRate = docsSubmitted > 0 
+      ? Number(((docsApproved / docsSubmitted) * 100).toFixed(1)) 
+      : null;
+
+    const rejectionDocsRate = docsSubmitted > 0 
+      ? Number(((docsRejected / docsSubmitted) * 100).toFixed(1)) 
+      : null;
+
+    const rates: KpiRates = {
+      completionRate,
+      cancellationRate,
+      approvedDocsRate,
+      rejectionDocsRate
+    };
+
+    // 3. MÉTRICAS DE TEMPO & MEDIANA REAIS
+    let avgCompletionDays: number | null = null;
+    let avgCompletionHours: number | null = null;
+    let medianCompletionDays: number | null = null;
+    let medianCompletionHours: number | null = null;
+    const hasSufficientTimeData = durationsMs.length > 0;
+
+    if (hasSufficientTimeData) {
+      const sumMs = durationsMs.reduce((acc, d) => acc + d, 0);
+      const avgMs = sumMs / durationsMs.length;
+      avgCompletionDays = Number((avgMs / 86400000).toFixed(1));
+      avgCompletionHours = Math.round(avgMs / 3600000);
+
+      const sorted = [...durationsMs].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const medianMs = sorted.length % 2 !== 0 
+        ? sorted[mid] 
+        : (sorted[mid - 1] + sorted[mid]) / 2;
+      medianCompletionDays = Number((medianMs / 86400000).toFixed(1));
+      medianCompletionHours = Math.round(medianMs / 3600000);
+    }
+
+    const standardSteps: { key: string; name: string; order: number }[] = [
+      { key: 'CADASTRO', name: 'Cadastro da Admissão', order: 1 },
+      { key: 'DADOS_PESSOAIS', name: 'Dados do Funcionário', order: 2 },
+      { key: 'DOCUMENTOS', name: 'Envio de Documentos', order: 3 },
+      { key: 'CONFERENCIA', name: 'Conferência do RH', order: 4 },
+      { key: 'APROVACAO', name: 'Aprovação Interna', order: 5 },
+      { key: 'CONCLUSAO', name: 'Conclusão & Prontuário', order: 6 }
+    ];
+
+    const stepAvgTimes: KpiStepTimeItem[] = standardSteps.map(stepDef => {
+      const stepDurationsMs: number[] = [];
+      for (const item of filteredAll) {
+        const steps = item.adm.processSteps || [];
+        const step = steps.find(s => s.stepKey === stepDef.key);
+        if (step && step.startedAt && step.completedAt) {
+          const sTime = new Date(step.startedAt).getTime();
+          const cTime = new Date(step.completedAt).getTime();
+          if (cTime >= sTime) {
+            stepDurationsMs.push(cTime - sTime);
+          }
+        }
+      }
+
+      if (stepDurationsMs.length > 0) {
+        const sumStepMs = stepDurationsMs.reduce((acc, v) => acc + v, 0);
+        const avgStepMs = sumStepMs / stepDurationsMs.length;
+        return {
+          stepKey: stepDef.key,
+          stepName: stepDef.name,
+          stepOrder: stepDef.order,
+          avgDays: Number((avgStepMs / 86400000).toFixed(1)),
+          avgHours: Math.round(avgStepMs / 3600000),
+          sampleCount: stepDurationsMs.length,
+          hasSufficientData: true
+        };
+      }
+
+      return {
+        stepKey: stepDef.key,
+        stepName: stepDef.name,
+        stepOrder: stepDef.order,
+        avgDays: null,
+        avgHours: null,
+        sampleCount: 0,
+        hasSufficientData: false
+      };
+    });
+
+    const timeMetrics: KpiTimeMetrics = {
+      avgCompletionDays,
+      avgCompletionHours,
+      medianCompletionDays,
+      medianCompletionHours,
+      completedCount: durationsMs.length,
+      hasSufficientData: hasSufficientTimeData,
+      stepAvgTimes
+    };
+
+    // 4. DOCUMENTOS
+    const documentsMetrics: KpiDocumentsMetrics = {
+      submitted: docsSubmitted,
+      inReview: docsInReview,
+      approved: docsApproved,
+      rejected: docsRejected,
+      resent: docsResent,
+      pendingOrNotSent: docsPendingOrNotSent,
+      mandatoryPending: docsMandatoryPending
+    };
+
+    // 5. APROVAÇÕES (Bloco 5.6)
+    let appTotal = 0;
+    let appPending = 0;
+    let appApproved = 0;
+    let appRejected = 0;
+    let appReopened = 0;
+    const appDurationsMs: number[] = [];
+
+    for (const item of filteredAll) {
+      if (item.adm.approval) {
+        appTotal++;
+        const st = item.adm.approval.status;
+        if (st === 'PENDENTE' || st === 'EM_ANALISE') appPending++;
+        if (st === 'APROVADA') appApproved++;
+        if (st === 'REPROVADA') appRejected++;
+        if (item.adm.approval.history && item.adm.approval.history.some(h => h.action === 'CANCELADA' || h.action === 'REABERTA')) {
+          appReopened++;
+        }
+        if (item.adm.approval.requestedAt && item.adm.approval.decidedAt) {
+          const reqTime = new Date(item.adm.approval.requestedAt).getTime();
+          const decTime = new Date(item.adm.approval.decidedAt).getTime();
+          if (decTime >= reqTime) {
+            appDurationsMs.push(decTime - reqTime);
+          }
+        }
+      }
+    }
+
+    const avgDecisionHours = appDurationsMs.length > 0 
+      ? Math.round(appDurationsMs.reduce((acc, v) => acc + v, 0) / appDurationsMs.length / 3600000) 
+      : null;
+
+    const approvalsMetrics: KpiApprovalsMetrics = {
+      total: appTotal,
+      pending: appPending,
+      approved: appApproved,
+      rejected: appRejected,
+      reopened: appReopened,
+      avgDecisionHours,
+      hasSufficientData: appDurationsMs.length > 0
+    };
+
+    // 6. EVOLUÇÃO TEMPORAL (GRÁFICO)
+    const evolutionPoints: KpiEvolutionPoint[] = [];
+
+    if (evolutionGrouping === 'day') {
+      const daysCount = Math.max(1, Math.min(31, Math.ceil((endTime - startTime) / 86400000)));
+      for (let i = 0; i < daysCount; i++) {
+        const bucketStart = new Date(startTime + i * 86400000);
+        bucketStart.setHours(0, 0, 0, 0);
+        const bucketEnd = new Date(startTime + (i + 1) * 86400000 - 1);
+        const bStartMs = bucketStart.getTime();
+        const bEndMs = bucketEnd.getTime();
+
+        const sCount = startedInPeriod.filter(item => {
+          const t = new Date(item.adm.createdAt).getTime();
+          return t >= bStartMs && t <= bEndMs;
+        }).length;
+
+        const cCount = completedInPeriod.filter(item => {
+          const t = item.adm.completedAt 
+            ? new Date(item.adm.completedAt).getTime() 
+            : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          return t >= bStartMs && t <= bEndMs;
+        }).length;
+
+        evolutionPoints.push({
+          label: `${String(bucketStart.getDate()).padStart(2, '0')}/${String(bucketStart.getMonth() + 1).padStart(2, '0')}`,
+          date: bucketStart.toISOString().split('T')[0],
+          started: sCount,
+          completed: cCount
+        });
+      }
+    } else if (evolutionGrouping === 'week') {
+      const totalWeeks = Math.max(1, Math.ceil((endTime - startTime) / (7 * 86400000)));
+      for (let w = 0; w < totalWeeks; w++) {
+        const wStartMs = startTime + w * 7 * 86400000;
+        const wEndMs = Math.min(endTime, startTime + (w + 1) * 7 * 86400000 - 1);
+        const wDate = new Date(wStartMs);
+
+        const sCount = startedInPeriod.filter(item => {
+          const t = new Date(item.adm.createdAt).getTime();
+          return t >= wStartMs && t <= wEndMs;
+        }).length;
+
+        const cCount = completedInPeriod.filter(item => {
+          const t = item.adm.completedAt 
+            ? new Date(item.adm.completedAt).getTime() 
+            : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          return t >= wStartMs && t <= wEndMs;
+        }).length;
+
+        evolutionPoints.push({
+          label: `Semana ${w + 1}`,
+          date: wDate.toISOString().split('T')[0],
+          started: sCount,
+          completed: cCount
+        });
+      }
+    } else {
+      const startD = new Date(startTime);
+      const endD = new Date(endTime);
+      const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      
+      let cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
+      while (cur.getTime() <= endD.getTime()) {
+        const mStart = new Date(cur.getFullYear(), cur.getMonth(), 1, 0, 0, 0, 0).getTime();
+        const mEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+
+        const sCount = startedInPeriod.filter(item => {
+          const t = new Date(item.adm.createdAt).getTime();
+          return t >= mStart && t <= mEnd;
+        }).length;
+
+        const cCount = completedInPeriod.filter(item => {
+          const t = item.adm.completedAt 
+            ? new Date(item.adm.completedAt).getTime() 
+            : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          return t >= mStart && t <= mEnd;
+        }).length;
+
+        evolutionPoints.push({
+          label: `${months[cur.getMonth()]}/${String(cur.getFullYear()).slice(2)}`,
+          date: cur.toISOString().split('T')[0],
+          started: sCount,
+          completed: cCount
+        });
+
+        cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      }
+    }
+
+    // 7. DISTRIBUIÇÃO POR STATUS E SITUAÇÃO OPERACIONAL
+    const statusCounts: Record<string, number> = {};
+    for (const item of filteredAll) {
+      const st = item.adm.status || 'Rascunho';
+      statusCounts[st] = (statusCounts[st] || 0) + 1;
+    }
+
+    const statusColors: Record<string, string> = {
+      'Concluída': '#059669',
+      'Em conferência': '#2563eb',
+      'Aguardando documentos': '#ea580c',
+      'Pendência': '#e11d48',
+      'Cancelada': '#64748b',
+      'Rascunho': '#94a3b8'
+    };
+
+    const statusDistribution: KpiDistributionItem[] = Object.keys(statusCounts).map(st => ({
+      category: st,
+      label: st,
+      count: statusCounts[st],
+      color: statusColors[st] || '#64748b'
+    }));
+
+    const situationCounts: Record<string, { label: string; count: number; color: string }> = {
+      'AGUARDANDO_FUNCIONARIO': { label: 'Aguardando Funcionário', count: 0, color: '#ea580c' },
+      'AGUARDANDO_RH': { label: 'Aguardando RH', count: 0, color: '#2563eb' },
+      'COM_PENDENCIA': { label: 'Com Pendência', count: 0, color: '#e11d48' },
+      'APROVACAO_PENDENTE': { label: 'Aprovação Pendente', count: 0, color: '#7c3aed' },
+      'PROXIMA_DO_PRAZO': { label: 'Próxima do Prazo', count: 0, color: '#d97706' },
+      'ATRASADA': { label: 'Atrasada', count: 0, color: '#dc2626' },
+      'BLOQUEADA': { label: 'Bloqueada', count: 0, color: '#475569' },
+      'EM_DIA': { label: 'Em Dia', count: 0, color: '#059669' }
+    };
+
+    for (const item of inProgressList) {
+      if (situationCounts[item.situation]) {
+        situationCounts[item.situation].count++;
+      }
+    }
+
+    const situationDistribution: KpiDistributionItem[] = Object.keys(situationCounts)
+      .filter(k => situationCounts[k].count > 0)
+      .map(k => ({
+        category: k,
+        label: situationCounts[k].label,
+        count: situationCounts[k].count,
+        color: situationCounts[k].color
+      }));
+
+    // 8. INDICADORES POR CARGO, UNIDADE E SETOR
+    const buildDimensionMetrics = (keyExtractor: (item: typeof filteredAll[0]) => string): KpiByDimensionItem[] => {
+      const map: Record<string, { started: number; completed: number; inProgress: number; cancelled: number; withPendings: number }> = {};
+
+      for (const item of filteredAll) {
+        const key = keyExtractor(item) || 'Não informado';
+        if (!map[key]) {
+          map[key] = { started: 0, completed: 0, inProgress: 0, cancelled: 0, withPendings: 0 };
+        }
+
+        const cTime = new Date(item.adm.createdAt).getTime();
+        if (cTime >= startTime && cTime <= endTime) {
+          map[key].started++;
+        }
+
+        if (item.adm.status === 'Concluída') {
+          const compTime = item.adm.completedAt 
+            ? new Date(item.adm.completedAt).getTime() 
+            : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          if (compTime >= startTime && compTime <= endTime) {
+            map[key].completed++;
+          }
+        } else if (item.adm.status === 'Cancelada') {
+          map[key].cancelled++;
+        } else {
+          map[key].inProgress++;
+        }
+
+        if (item.situation === 'COM_PENDENCIA') {
+          map[key].withPendings++;
+        }
+      }
+
+      return Object.keys(map).map(name => {
+        const d = map[name];
+        const rate = d.started > 0 ? Number(((d.completed / d.started) * 100).toFixed(1)) : null;
+        return {
+          name,
+          started: d.started,
+          completed: d.completed,
+          inProgress: d.inProgress,
+          cancelled: d.cancelled,
+          withPendings: d.withPendings,
+          completionRate: rate
+        };
+      }).sort((a, b) => (b.started + b.inProgress) - (a.started + a.inProgress));
+    };
+
+    const byRole = buildDimensionMetrics(i => i.adm.employee?.role || 'Não informado');
+    const byUnit = buildDimensionMetrics(i => i.adm.employee?.unit || 'Matriz');
+    const byDepartment = buildDimensionMetrics(i => i.adm.employee?.department || 'Geral');
+
+    // 9. TABELA DETALHADA COM DRILL-DOWN (LIMITADA A 50 ITENS PARA PERFORMANCE)
+    const detailedAdmissions: KpiDetailedAdmission[] = filteredAll.slice(0, 50).map(item => {
+      const { adm } = item;
+      const cTime = new Date(adm.createdAt).getTime();
+      let durationDays: number | undefined;
+
+      if (adm.status === 'Concluída') {
+        const compTime = adm.completedAt 
+          ? new Date(adm.completedAt).getTime() 
+          : new Date(adm.updatedAt || adm.createdAt).getTime();
+        durationDays = Number((Math.max(0, compTime - cTime) / 86400000).toFixed(1));
+      }
+
+      const pendingDocs = (adm.documents || []).filter(d => d.status === 'Rejeitado' || d.status === 'Não enviado').length;
+      const hasApprovalPending = Boolean(adm.approval && (adm.approval.status === 'PENDENTE' || adm.approval.status === 'EM_ANALISE'));
+
+      return {
+        id: adm.id,
+        code: `ADM-${adm.id.substring(0, 8).toUpperCase()}`,
+        employeeName: adm.employee?.name || 'Não informado',
+        employeeCpfMasked: adm.employee?.cpf ? maskCPF(adm.employee.cpf) : '***.***.***-**',
+        role: adm.employee?.role || 'Não informado',
+        department: adm.employee?.department || 'Geral',
+        unit: adm.employee?.unit || 'Matriz',
+        status: adm.status,
+        situation: item.situation,
+        situationLabel: item.situationLabel,
+        startedAt: adm.createdAt,
+        completedAt: adm.completedAt,
+        cancelledAt: (adm as any).cancelledAt,
+        durationDays,
+        pendingDocsCount: pendingDocs,
+        hasApprovalPending
+      };
+    });
+
+    return {
+      periodLabel,
+      dateRange: {
+        start: new Date(startTime).toISOString(),
+        end: new Date(endTime).toISOString()
+      },
+      mainCards,
+      rates,
+      timeMetrics,
+      documents: documentsMetrics,
+      approvals: approvalsMetrics,
+      evolution: evolutionPoints,
+      evolutionGrouping,
+      statusDistribution,
+      situationDistribution,
+      byRole,
+      byUnit,
+      byDepartment,
+      detailedAdmissions,
+      totalDetailed: filteredAll.length,
+      page: 1,
+      totalPages: Math.max(1, Math.ceil(filteredAll.length / 50)),
+      availableFilters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        statuses: Array.from(statusesSet),
+        situations: [
+          { key: 'TODAS', label: 'Todas as Situações' },
+          { key: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário' },
+          { key: 'AGUARDANDO_RH', label: 'Aguardando RH' },
+          { key: 'COM_PENDENCIA', label: 'Com Pendência' },
+          { key: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente' },
+          { key: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo' },
+          { key: 'ATRASADA', label: 'Atrasada' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'EM_DIA', label: 'Em Dia' }
+        ],
+        responsibles: Array.from(responsiblesSet).sort()
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 6.3 — ANÁLISE DE GARGALOS DO PROCESSO ADMISSIONAL
+  // =========================================================================
+
+  getBottleneckAnalysisData(filters: {
+    period?: string;
+    startDate?: string;
+    endDate?: string;
+    role?: string;
+    department?: string;
+    unit?: string;
+    status?: string;
+    situation?: string;
+    responsible?: string;
+  }): BottleneckHubResponse {
+    const now = new Date();
+    const period = filters.period || '30d';
+
+    let startTime = 0;
+    let endTime = now.getTime();
+    let periodLabel = 'Últimos 30 dias';
+    let evolutionGrouping: 'day' | 'week' | 'month' = 'day';
+
+    if (period === 'today') {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      startTime = todayStart.getTime();
+      periodLabel = 'Hoje';
+      evolutionGrouping = 'day';
+    } else if (period === '7d') {
+      startTime = now.getTime() - 7 * 86400000;
+      periodLabel = 'Últimos 7 dias';
+      evolutionGrouping = 'day';
+    } else if (period === '30d') {
+      startTime = now.getTime() - 30 * 86400000;
+      periodLabel = 'Últimos 30 dias';
+      evolutionGrouping = 'week';
+    } else if (period === '90d') {
+      startTime = now.getTime() - 90 * 86400000;
+      periodLabel = 'Últimos 90 dias';
+      evolutionGrouping = 'week';
+    } else if (period === 'this_month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      startTime = start.getTime();
+      endTime = end.getTime();
+      periodLabel = 'Este mês';
+      evolutionGrouping = 'week';
+    } else if (period === 'last_month') {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      startTime = start.getTime();
+      endTime = end.getTime();
+      periodLabel = 'Mês anterior';
+      evolutionGrouping = 'week';
+    } else if (period === 'this_year') {
+      const start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      const end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      startTime = start.getTime();
+      endTime = end.getTime();
+      periodLabel = 'Este ano';
+      evolutionGrouping = 'month';
+    } else if (period === 'custom') {
+      periodLabel = 'Personalizado';
+      if (filters.startDate) {
+        startTime = new Date(filters.startDate.includes('T') ? filters.startDate : filters.startDate + 'T00:00:00').getTime();
+      } else {
+        startTime = new Date(now.getTime() - 30 * 86400000).getTime();
+      }
+      if (filters.endDate) {
+        endTime = new Date(filters.endDate.includes('T') ? filters.endDate : filters.endDate + 'T23:59:59').getTime();
+      } else {
+        endTime = now.getTime();
+      }
+      const daysDiff = Math.ceil((endTime - startTime) / 86400000);
+      if (daysDiff > 90) evolutionGrouping = 'month';
+      else if (daysDiff > 14) evolutionGrouping = 'week';
+      else evolutionGrouping = 'day';
+    }
+
+    const admissions = this.data.admissions || [];
+    const settings = this.data.settings || {};
+    const auditLogs = this.data.auditLogs || [];
+
+    const rolesSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const unitsSet = new Set<string>();
+    const statusesSet = new Set<string>();
+    const responsiblesSet = new Set<string>(['RH', 'FUNCIONARIO', 'GESTOR', 'ADMIN']);
+
+    for (const a of admissions) {
+      if (a.employee?.role) rolesSet.add(a.employee.role);
+      if (a.employee?.department) departmentsSet.add(a.employee.department);
+      if (a.employee?.unit) unitsSet.add(a.employee.unit);
+      if (a.status) statusesSet.add(a.status);
+    }
+
+    const todayMs = now.getTime();
+
+    // Situação operacional alinhada ao Bloco 6.1
+    const getAdmissionSituation = (adm: Admission): { situation: OperationalHubSituation; label: string; responsible: string } => {
+      const docs = adm.documents || [];
+      const steps = adm.processSteps || [];
+      const expectedDate = adm.employee?.expectedStartDate || (adm as any).expectedStartDate;
+      const rejectedDocs = docs.filter(d => d.status === 'Rejeitado');
+      const inReviewDocs = docs.filter(d => d.status === 'Em análise');
+      const notSentDocs = docs.filter(d => !d.status || d.status === 'Não enviado');
+
+      const isBlocked = steps.some(s => s.status === 'BLOQUEADA' || (s.history && s.history.some(h => h.action === 'bloqueada')));
+
+      let isOverdue = false;
+      let isNearDeadline = false;
+      if (expectedDate && adm.status !== 'Concluída' && adm.status !== 'Cancelada') {
+        try {
+          const target = new Date(expectedDate.includes('T') ? expectedDate : expectedDate + 'T00:00:00').getTime();
+          const daysDiff = Math.ceil((target - todayMs) / 86400000);
+          if (daysDiff < 0) isOverdue = true;
+          else if (daysDiff <= ((settings as any).tracking?.upcomingDaysThreshold ?? 7)) isNearDeadline = true;
+        } catch {}
+      }
+
+      const hasApprovalPending = Boolean(adm.approval && (adm.approval.status === 'PENDENTE' || adm.approval.status === 'EM_ANALISE'));
+
+      if (isBlocked) return { situation: 'BLOQUEADA', label: 'Bloqueada', responsible: 'RH' };
+      if (isOverdue) return { situation: 'ATRASADA', label: 'Atrasada', responsible: 'RH' };
+      if (hasApprovalPending) return { situation: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente', responsible: adm.approval?.responsibleRole || 'GESTOR' };
+      if (rejectedDocs.length > 0 || adm.status === 'Pendência') return { situation: 'COM_PENDENCIA', label: 'Com Pendência', responsible: 'FUNCIONARIO' };
+      if (inReviewDocs.length > 0 || adm.status === 'Em conferência') return { situation: 'AGUARDANDO_RH', label: 'Aguardando RH', responsible: 'RH' };
+      if (adm.status === 'Aguardando documentos' || notSentDocs.length > 0) return { situation: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário', responsible: 'FUNCIONARIO' };
+      if (isNearDeadline) return { situation: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo', responsible: 'RH' };
+      return { situation: 'EM_DIA', label: 'Em Dia', responsible: 'RH' };
+    };
+
+    // Filtros dimensionais
+    const dimensionFiltered = admissions.filter(adm => {
+      const emp = adm.employee;
+      if (filters.role && filters.role !== 'TODOS' && emp?.role !== filters.role) return false;
+      if (filters.department && filters.department !== 'TODOS' && emp?.department !== filters.department) return false;
+      if (filters.unit && filters.unit !== 'TODOS' && (emp?.unit || 'Matriz') !== filters.unit) return false;
+      if (filters.status && filters.status !== 'TODOS' && adm.status !== filters.status) return false;
+      return true;
+    });
+
+    const evaluated = dimensionFiltered.map(adm => {
+      const sit = getAdmissionSituation(adm);
+      return { adm, situation: sit.situation, situationLabel: sit.label, responsible: sit.responsible };
+    }).filter(item => {
+      if (filters.situation && filters.situation !== 'TODAS' && item.situation !== filters.situation) return false;
+      if (filters.responsible && filters.responsible !== 'TODOS' && item.responsible !== filters.responsible) return false;
+      return true;
+    });
+
+    // Helper de Mediana
+    const calculateMedian = (values: number[]): number | null => {
+      if (!values || values.length === 0) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      if (sorted.length % 2 === 1) {
+        return Math.round(sorted[mid] * 10) / 10;
+      } else {
+        return Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+      }
+    };
+
+    // 1. DETERMINAÇÃO DA ÚLTIMA MOVIMENTAÇÃO REAL DE CADA ADMISSÃO
+    const findLastMovement = (adm: Admission) => {
+      let maxTime = new Date(adm.createdAt).getTime();
+      let action = 'Criação do processo admissional';
+      let details: string | undefined = `Processo iniciado para ${adm.employee?.name || 'colaborador'}`;
+
+      if (adm.updatedAt) {
+        const u = new Date(adm.updatedAt).getTime();
+        if (u > maxTime && u <= todayMs) {
+          maxTime = u;
+          action = 'Atualização cadastral do processo';
+        }
+      }
+      if (adm.dataConfirmedAt) {
+        const d = new Date(adm.dataConfirmedAt).getTime();
+        if (d > maxTime && d <= todayMs) {
+          maxTime = d;
+          action = 'Confirmação de dados cadastrais';
+          details = 'Colaborador validou seus dados pessoais no portal';
+        }
+      }
+      if (adm.consentDate) {
+        const c = new Date(adm.consentDate).getTime();
+        if (c > maxTime && c <= todayMs) {
+          maxTime = c;
+          action = 'Aceite do termo de consentimento LGPD';
+        }
+      }
+      if (adm.inviteLastAccessedAt) {
+        const a = new Date(adm.inviteLastAccessedAt).getTime();
+        if (a > maxTime && a <= todayMs) {
+          maxTime = a;
+          action = 'Acesso do colaborador ao portal';
+        }
+      }
+
+      // Documentos
+      for (const doc of (adm.documents || [])) {
+        if (doc.uploadedAt) {
+          const up = new Date(doc.uploadedAt).getTime();
+          if (up > maxTime && up <= todayMs) {
+            maxTime = up;
+            action = `Envio de documento: ${doc.documentType}`;
+            details = doc.fileName ? `Arquivo: ${doc.fileName}` : undefined;
+          }
+        }
+        if (doc.reviewedAt) {
+          const rev = new Date(doc.reviewedAt).getTime();
+          if (rev > maxTime && rev <= todayMs) {
+            maxTime = rev;
+            action = `Avaliação de documento: ${doc.documentType} (${doc.status})`;
+            details = doc.rejectionReason ? `Motivo: ${doc.rejectionReason}` : undefined;
+          }
+        }
+        for (const v of (doc.versions || [])) {
+          if (v.uploadedAt) {
+            const vUp = new Date(v.uploadedAt).getTime();
+            if (vUp > maxTime && vUp <= todayMs) {
+              maxTime = vUp;
+              action = `Reenvio de documento: ${doc.documentType} (v${v.version})`;
+              details = v.fileName;
+            }
+          }
+          if (v.reviewedAt) {
+            const vRev = new Date(v.reviewedAt).getTime();
+            if (vRev > maxTime && vRev <= todayMs) {
+              maxTime = vRev;
+              action = `Avaliação de versão: ${doc.documentType} (v${v.version} - ${v.status})`;
+            }
+          }
+        }
+      }
+
+      // Etapas de processo
+      for (const step of (adm.processSteps || [])) {
+        if (step.startedAt) {
+          const s = new Date(step.startedAt).getTime();
+          if (s > maxTime && s <= todayMs) {
+            maxTime = s;
+            action = `Início da etapa: ${step.stepName}`;
+          }
+        }
+        if (step.completedAt) {
+          const c = new Date(step.completedAt).getTime();
+          if (c > maxTime && c <= todayMs) {
+            maxTime = c;
+            action = `Conclusão da etapa: ${step.stepName}`;
+          }
+        }
+        for (const h of (step.history || [])) {
+          if (h.timestamp) {
+            const ht = new Date(h.timestamp).getTime();
+            if (ht > maxTime && ht <= todayMs) {
+              maxTime = ht;
+              action = `Etapa ${step.stepName}: ${h.action}`;
+              details = h.details || h.reason;
+            }
+          }
+        }
+      }
+
+      // Aprovação
+      if (adm.approval) {
+        if (adm.approval.requestedAt) {
+          const r = new Date(adm.approval.requestedAt).getTime();
+          if (r > maxTime && r <= todayMs) {
+            maxTime = r;
+            action = 'Aprovação interna solicitada';
+          }
+        }
+        if (adm.approval.decidedAt) {
+          const d = new Date(adm.approval.decidedAt).getTime();
+          if (d > maxTime && d <= todayMs) {
+            maxTime = d;
+            action = `Decisão de aprovação: ${adm.approval.status}`;
+            details = adm.approval.decisionReason;
+          }
+        }
+      }
+
+      // Logs de Auditoria
+      for (const log of auditLogs) {
+        if (log.admissionId === adm.id && log.timestamp) {
+          const lt = new Date(log.timestamp).getTime();
+          if (lt > maxTime && lt <= todayMs) {
+            maxTime = lt;
+            action = log.action;
+            details = log.details;
+          }
+        }
+      }
+
+      return {
+        timestamp: new Date(maxTime).toISOString(),
+        action,
+        details
+      };
+    };
+
+    // 2. ADMISSÕES ATIVAS E SEM MOVIMENTAÇÃO RECENTE
+    const activeAdmissions = evaluated.filter(item => item.adm.status !== 'Concluída' && item.adm.status !== 'Cancelada');
+
+    const stalledAdmissions: BottleneckStalledAdmission[] = [];
+
+    for (const item of activeAdmissions) {
+      const adm = item.adm;
+      const lastMove = findLastMovement(adm);
+      const lastMoveMs = new Date(lastMove.timestamp).getTime();
+      const diffMs = Math.max(0, todayMs - lastMoveMs);
+      const stalledDays = Math.floor(diffMs / 86400000);
+      const stalledHours = Math.floor((diffMs % 86400000) / 3600000);
+
+      let stalledFormatted = '';
+      if (stalledDays > 0) {
+        stalledFormatted = stalledHours > 0 ? `${stalledDays}d ${stalledHours}h` : `${stalledDays} dia${stalledDays > 1 ? 's' : ''}`;
+      } else {
+        stalledFormatted = `${stalledHours} hora${stalledHours !== 1 ? 's' : ''}`;
+      }
+
+      const currentStep = (adm.processSteps || []).find(s => s.status === 'EM_ANDAMENTO') || (adm.processSteps || [])[0];
+
+      stalledAdmissions.push({
+        id: adm.id,
+        code: adm.id.replace('adm-', 'ADM-').slice(0, 10).toUpperCase(),
+        employeeName: adm.employee?.name || 'Não informado',
+        employeeCpfMasked: adm.employee?.cpf ? maskCPF(adm.employee.cpf) : '***.***.***-**',
+        role: adm.employee?.role || 'Não informado',
+        unit: adm.employee?.unit || 'Matriz',
+        department: adm.employee?.department || 'Geral',
+        currentStepKey: currentStep?.stepKey || 'CADASTRO',
+        currentStepName: currentStep?.stepName || 'Cadastro Inicial',
+        situation: item.situation,
+        situationLabel: item.situationLabel,
+        lastMovementAt: lastMove.timestamp,
+        lastMovementAction: lastMove.action,
+        lastMovementDetails: lastMove.details,
+        stalledDays,
+        stalledHours,
+        stalledFormatted,
+        responsible: adm.responsibleUserName || 'Sem responsável'
+      });
+    }
+
+    // Ordenar admissões paradas do maior tempo para o menor
+    stalledAdmissions.sort((a, b) => {
+      const msA = (a.stalledDays * 86400000) + (a.stalledHours * 3600000);
+      const msB = (b.stalledDays * 86400000) + (b.stalledHours * 3600000);
+      return msB - msA;
+    });
+
+    // Maior tempo observado
+    const maxStalledFormatted = stalledAdmissions.length > 0 ? stalledAdmissions[0].stalledFormatted : 'Dados insuficientes';
+
+    // 3. TEMPO MÉDIO DE PROCESSO (Reutilizando 6.2)
+    const completedAdmissions = evaluated.filter(item => {
+      if (item.adm.status !== 'Concluída') return false;
+      const t = item.adm.completedAt 
+        ? new Date(item.adm.completedAt).getTime() 
+        : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+      return t >= startTime && t <= endTime;
+    });
+
+    const completionDurationsMs: number[] = [];
+    for (const item of completedAdmissions) {
+      const c = item.adm.completedAt 
+        ? new Date(item.adm.completedAt).getTime() 
+        : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+      const s = new Date(item.adm.createdAt).getTime();
+      if (c >= s) completionDurationsMs.push(c - s);
+    }
+
+    const avgProcessDays = completionDurationsMs.length > 0 
+      ? Math.round((completionDurationsMs.reduce((a, b) => a + b, 0) / completionDurationsMs.length / 86400000) * 10) / 10 
+      : null;
+
+    // 4. ANÁLISE POR ETAPA DO PROCESSO
+    const stepsList = [
+      { key: 'CADASTRO', name: 'Cadastro Inicial', order: 1 },
+      { key: 'DADOS_PESSOAIS', name: 'Dados Pessoais', order: 2 },
+      { key: 'DOCUMENTOS', name: 'Documentos', order: 3 },
+      { key: 'CONFERENCIA', name: 'Conferência RH', order: 4 },
+      { key: 'APROVACAO', name: 'Aprovação Interna', order: 5 },
+      { key: 'CONCLUSAO', name: 'Conclusão & Prontuário', order: 6 }
+    ];
+
+    const stepMetrics: BottleneckStepMetrics[] = [];
+    let slowestStepName: string | null = null;
+    let slowestStepAvgDays: number | null = null;
+
+    for (const stepDef of stepsList) {
+      const durationsHours: number[] = [];
+      let processCount = 0;
+      let inProgressCount = 0;
+      let stalledInStep = 0;
+
+      for (const item of evaluated) {
+        const step = (item.adm.processSteps || []).find(s => s.stepKey === stepDef.key);
+        if (step) {
+          processCount++;
+          if (step.status === 'EM_ANDAMENTO') {
+            inProgressCount++;
+            // Verifica se está parada nesta etapa
+            const isStalled = stalledAdmissions.some(sa => sa.id === item.adm.id && sa.stalledDays >= 1);
+            if (isStalled) stalledInStep++;
+          }
+
+          if (step.startedAt && step.completedAt) {
+            const st = new Date(step.startedAt).getTime();
+            const ct = new Date(step.completedAt).getTime();
+            if (ct >= st) durationsHours.push((ct - st) / 3600000);
+          } else if (step.history && step.history.length > 1) {
+            const startHist = step.history.find(h => h.action === 'iniciada');
+            const endHist = step.history.find(h => h.action === 'concluida');
+            if (startHist && endHist) {
+              const st = new Date(startHist.timestamp).getTime();
+              const ct = new Date(endHist.timestamp).getTime();
+              if (ct >= st) durationsHours.push((ct - st) / 3600000);
+            }
+          }
+        }
+      }
+
+      const hasSufficientData = durationsHours.length > 0;
+      let avgHours: number | null = null;
+      let avgDays: number | null = null;
+      let medianHours: number | null = null;
+      let medianDays: number | null = null;
+      let maxHours: number | null = null;
+      let maxDays: number | null = null;
+
+      if (hasSufficientData) {
+        avgHours = Math.round((durationsHours.reduce((a, b) => a + b, 0) / durationsHours.length) * 10) / 10;
+        avgDays = Math.round((avgHours / 24) * 10) / 10;
+        medianHours = calculateMedian(durationsHours);
+        medianDays = medianHours !== null ? Math.round((medianHours / 24) * 10) / 10 : null;
+        maxHours = Math.round(Math.max(...durationsHours) * 10) / 10;
+        maxDays = Math.round((maxHours / 24) * 10) / 10;
+
+        if (slowestStepAvgDays === null || (avgDays !== null && avgDays > slowestStepAvgDays)) {
+          slowestStepAvgDays = avgDays;
+          slowestStepName = stepDef.name;
+        }
+      }
+
+      stepMetrics.push({
+        stepKey: stepDef.key,
+        stepName: stepDef.name,
+        stepOrder: stepDef.order,
+        processCount,
+        inProgressCount,
+        avgDays,
+        avgHours,
+        medianDays,
+        medianHours,
+        maxDays,
+        maxHours,
+        stalledCount: stalledInStep,
+        hasSufficientData
+      });
+    }
+
+    // 5. DOCUMENTOS, REJEIÇÕES E REENVIOS
+    let rejectedDocsCount = 0;
+    let resentDocsCount = 0;
+    let waitingResendCount = 0;
+
+    const rejectionReasonsMap = new Map<string, { count: number; docIds: Set<string>; admIds: Set<string> }>();
+    const docTypesMap = new Map<string, { submitted: number; rejected: number; resent: number }>();
+    const resendTimesHours: number[] = [];
+    const reviewTimesHours: number[] = [];
+
+    for (const item of evaluated) {
+      const adm = item.adm;
+      for (const doc of (adm.documents || [])) {
+        const docName = (doc.documentType || doc.document_type_name || 'Documento Geral').trim();
+        const typeStats = docTypesMap.get(docName) || { submitted: 0, rejected: 0, resent: 0 };
+
+        const hasFile = Boolean(doc.status && doc.status !== 'Não enviado');
+        if (hasFile) {
+          typeStats.submitted++;
+        }
+
+        if (doc.status === 'Rejeitado') {
+          rejectedDocsCount++;
+          typeStats.rejected++;
+
+          const rReason = (doc.rejectionReason || 'Não especificado').trim();
+          const rStats = rejectionReasonsMap.get(rReason) || { count: 0, docIds: new Set<string>(), admIds: new Set<string>() };
+          rStats.count++;
+          rStats.docIds.add(doc.id);
+          rStats.admIds.add(adm.id);
+          rejectionReasonsMap.set(rReason, rStats);
+
+          if (!doc.versions || doc.versions.length <= 1) {
+            waitingResendCount++;
+          }
+        }
+
+        if (doc.versions && doc.versions.length > 1) {
+          resentDocsCount++;
+          typeStats.resent++;
+
+          // Calcular tempo de reenvio entre a versão 1 rejeitada e a versão 2 enviada
+          for (let i = 1; i < doc.versions.length; i++) {
+            const prevV = doc.versions[i - 1];
+            const currV = doc.versions[i];
+            if (prevV.reviewedAt && currV.uploadedAt) {
+              const revT = new Date(prevV.reviewedAt).getTime();
+              const upT = new Date(currV.uploadedAt).getTime();
+              if (upT >= revT) {
+                resendTimesHours.push((upT - revT) / 3600000);
+              }
+            }
+          }
+        }
+
+        // Tempo de conferência (entre envio e aprovação)
+        if (doc.status === 'Aprovado' && doc.uploadedAt && doc.reviewedAt) {
+          const upT = new Date(doc.uploadedAt).getTime();
+          const revT = new Date(doc.reviewedAt).getTime();
+          if (revT >= upT) {
+            reviewTimesHours.push((revT - upT) / 3600000);
+          }
+        }
+
+        docTypesMap.set(docName, typeStats);
+      }
+    }
+
+    // Tabela de Rejeições por Motivo
+    const rejectionsByReason: BottleneckRejectionReasonItem[] = [];
+    const totalRejectionOccurrences = Array.from(rejectionReasonsMap.values()).reduce((sum, v) => sum + v.count, 0);
+
+    for (const [reason, stats] of rejectionReasonsMap.entries()) {
+      rejectionsByReason.push({
+        reason,
+        count: stats.count,
+        affectedDocsCount: stats.docIds.size,
+        affectedAdmissionsCount: stats.admIds.size,
+        percent: totalRejectionOccurrences > 0 ? Math.round((stats.count / totalRejectionOccurrences) * 100) : 0
+      });
+    }
+    rejectionsByReason.sort((a, b) => b.count - a.count);
+
+    // Tabela de Rejeições por Tipo de Documento
+    const rejectionsByDocType: BottleneckDocTypeRejectionItem[] = [];
+    for (const [docName, stats] of docTypesMap.entries()) {
+      rejectionsByDocType.push({
+        documentTypeName: docName,
+        submittedCount: stats.submitted,
+        rejectedCount: stats.rejected,
+        resentCount: stats.resent,
+        rejectionRate: stats.submitted > 0 ? Math.round((stats.rejected / stats.submitted) * 1000) / 10 : null
+      });
+    }
+    rejectionsByDocType.sort((a, b) => (b.rejectedCount || 0) - (a.rejectedCount || 0));
+
+    // Métricas de Reenvio
+    const avgResendTimeHours = resendTimesHours.length > 0 
+      ? Math.round((resendTimesHours.reduce((a, b) => a + b, 0) / resendTimesHours.length) * 10) / 10 
+      : null;
+    const medianResendTimeHours = calculateMedian(resendTimesHours);
+    const maxResendTimeHours = resendTimesHours.length > 0 
+      ? Math.round(Math.max(...resendTimesHours) * 10) / 10 
+      : null;
+
+    const resentMetrics: BottleneckResentMetrics = {
+      resentDocsCount,
+      waitingResendCount,
+      avgResendTimeHours,
+      medianResendTimeHours,
+      maxResendTimeHours,
+      hasSufficientResendData: resendTimesHours.length > 0
+    };
+
+    // Métricas de Tempo de Conferência
+    const avgReviewHours = reviewTimesHours.length > 0
+      ? Math.round((reviewTimesHours.reduce((a, b) => a + b, 0) / reviewTimesHours.length) * 10) / 10
+      : null;
+    const medianReviewHours = calculateMedian(reviewTimesHours);
+
+    const reviewTimeMetrics: BottleneckReviewTimeMetrics = {
+      avgReviewHours,
+      medianReviewHours,
+      sampleCount: reviewTimesHours.length,
+      hasSufficientData: reviewTimesHours.length > 0
+    };
+
+    // 6. PENDÊNCIAS OBSERVADAS
+    const pendingCategories: Record<string, { title: string; count: number; admIds: Set<string> }> = {
+      NOT_SENT: { title: 'Documentos não enviados', count: 0, admIds: new Set<string>() },
+      IN_REVIEW: { title: 'Aguardando conferência RH', count: 0, admIds: new Set<string>() },
+      REJECTED: { title: 'Documentos rejeitados', count: 0, admIds: new Set<string>() },
+      RESEND_WAITING: { title: 'Aguardando reenvio pelo colaborador', count: 0, admIds: new Set<string>() },
+      APPROVAL_WAITING: { title: 'Aprovação interna pendente', count: 0, admIds: new Set<string>() },
+      NEAR_DEADLINE: { title: 'Próxima do início previsto', count: 0, admIds: new Set<string>() },
+      OVERDUE: { title: 'Início previsto ultrapassado', count: 0, admIds: new Set<string>() }
+    };
+
+    for (const item of evaluated) {
+      const adm = item.adm;
+      for (const doc of (adm.documents || [])) {
+        if (doc.required && (!doc.status || doc.status === 'Não enviado')) {
+          pendingCategories.NOT_SENT.count++;
+          pendingCategories.NOT_SENT.admIds.add(adm.id);
+        }
+        if (doc.status === 'Em análise') {
+          pendingCategories.IN_REVIEW.count++;
+          pendingCategories.IN_REVIEW.admIds.add(adm.id);
+        }
+        if (doc.status === 'Rejeitado') {
+          pendingCategories.REJECTED.count++;
+          pendingCategories.REJECTED.admIds.add(adm.id);
+          if (!doc.versions || doc.versions.length <= 1) {
+            pendingCategories.RESEND_WAITING.count++;
+            pendingCategories.RESEND_WAITING.admIds.add(adm.id);
+          }
+        }
+      }
+
+      if (adm.approval && (adm.approval.status === 'PENDENTE' || adm.approval.status === 'EM_ANALISE')) {
+        pendingCategories.APPROVAL_WAITING.count++;
+        pendingCategories.APPROVAL_WAITING.admIds.add(adm.id);
+      }
+      if (item.situation === 'PROXIMA_DO_PRAZO') {
+        pendingCategories.NEAR_DEADLINE.count++;
+        pendingCategories.NEAR_DEADLINE.admIds.add(adm.id);
+      }
+      if (item.situation === 'ATRASADA') {
+        pendingCategories.OVERDUE.count++;
+        pendingCategories.OVERDUE.admIds.add(adm.id);
+      }
+    }
+
+    const totalPendingsCount = Object.values(pendingCategories).reduce((s, p) => s + p.count, 0);
+    const pendingsByType: BottleneckPendingItem[] = Object.entries(pendingCategories).map(([key, data]) => ({
+      typeKey: key,
+      title: data.title,
+      count: data.count,
+      percent: totalPendingsCount > 0 ? Math.round((data.count / totalPendingsCount) * 100) : 0,
+      affectedAdmissionsCount: data.admIds.size
+    })).sort((a, b) => b.count - a.count);
+
+    // 7. APROVAÇÕES INTERNAS
+    let pendingApprovalsCount = 0;
+    let approvedApprovalsCount = 0;
+    let rejectedApprovalsCount = 0;
+    let reopenedApprovalsCount = 0;
+    const approvalDecisionTimesHours: number[] = [];
+
+    for (const item of evaluated) {
+      const appr = item.adm.approval;
+      if (appr) {
+        if (appr.status === 'PENDENTE' || appr.status === 'EM_ANALISE') pendingApprovalsCount++;
+        if (appr.status === 'APROVADA') approvedApprovalsCount++;
+        if (appr.status === 'REPROVADA') rejectedApprovalsCount++;
+        if (appr.history && appr.history.some(h => h.action === 'CANCELADA' || h.action === 'REABERTA')) {
+          reopenedApprovalsCount++;
+        }
+        if (appr.requestedAt && appr.decidedAt) {
+          const reqT = new Date(appr.requestedAt).getTime();
+          const decT = new Date(appr.decidedAt).getTime();
+          if (decT >= reqT) approvalDecisionTimesHours.push((decT - reqT) / 3600000);
+        }
+      }
+    }
+
+    const approvals: KpiApprovalsMetrics = {
+      total: pendingApprovalsCount + approvedApprovalsCount + rejectedApprovalsCount,
+      pending: pendingApprovalsCount,
+      approved: approvedApprovalsCount,
+      rejected: rejectedApprovalsCount,
+      reopened: reopenedApprovalsCount,
+      avgDecisionHours: approvalDecisionTimesHours.length > 0 
+        ? Math.round((approvalDecisionTimesHours.reduce((a, b) => a + b, 0) / approvalDecisionTimesHours.length) * 10) / 10 
+        : null,
+      hasSufficientData: approvalDecisionTimesHours.length > 0
+    };
+
+    // 8. PROCESSOS BLOQUEADOS E REABERTOS
+    const blockedItems: BottleneckBlockedMetrics['items'] = [];
+    const reopenedItems: BottleneckReopenedMetrics['items'] = [];
+
+    for (const item of evaluated) {
+      const adm = item.adm;
+      for (const step of (adm.processSteps || [])) {
+        if (step.status === 'BLOQUEADA' || step.blockReason) {
+          blockedItems.push({
+            admissionId: adm.id,
+            employeeName: adm.employee?.name || 'Não informado',
+            stepName: step.stepName,
+            blockReason: step.blockReason || 'Bloqueio operacional registrado',
+            blockedSince: step.history?.[step.history.length - 1]?.timestamp
+          });
+        }
+        if (step.history && step.history.some(h => h.action === 'reaberta')) {
+          reopenedItems.push({
+            admissionId: adm.id,
+            employeeName: adm.employee?.name || 'Não informado',
+            stepOrType: step.stepName,
+            reopenedAt: step.history.find(h => h.action === 'reaberta')?.timestamp || adm.updatedAt,
+            reason: step.history.find(h => h.action === 'reaberta')?.reason
+          });
+        }
+      }
+    }
+
+    const blockedMetrics: BottleneckBlockedMetrics = {
+      blockedCount: blockedItems.length,
+      items: blockedItems
+    };
+
+    const reopenedMetrics: BottleneckReopenedMetrics = {
+      reopenedCount: reopenedItems.length,
+      items: reopenedItems
+    };
+
+    // 9. PROCESSOS ATRASADOS
+    const delayedCount = evaluated.filter(i => i.situation === 'ATRASADA').length;
+
+    // 10. EVOLUÇÃO TEMPORAL DOS PONTOS DE ATENÇÃO
+    const evolutionPoints: BottleneckEvolutionPoint[] = [];
+
+    if (evolutionGrouping === 'day') {
+      const numDays = Math.max(1, Math.min(31, Math.ceil((endTime - startTime) / 86400000)));
+      for (let i = 0; i < numDays; i++) {
+        const dStart = new Date(startTime + i * 86400000);
+        const dayLabel = `${String(dStart.getDate()).padStart(2, '0')}/${String(dStart.getMonth() + 1).padStart(2, '0')}`;
+        const dayStartMs = new Date(dStart.getFullYear(), dStart.getMonth(), dStart.getDate(), 0, 0, 0, 0).getTime();
+        const dayEndMs = new Date(dStart.getFullYear(), dStart.getMonth(), dStart.getDate(), 23, 59, 59, 999).getTime();
+
+        const completedCount = completedAdmissions.filter(item => {
+          const t = item.adm.completedAt ? new Date(item.adm.completedAt).getTime() : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          return t >= dayStartMs && t <= dayEndMs;
+        }).length;
+
+        // Contagem proporcional de rejeições e movimentações no dia
+        const rejCount = rejectionsByReason.reduce((sum, r) => sum + r.count, 0);
+        const dailyRej = Math.round(rejCount / numDays);
+        const dailyResend = Math.round(resentDocsCount / numDays);
+        const dailyStalled = stalledAdmissions.filter(s => s.stalledDays >= 1).length;
+
+        evolutionPoints.push({
+          label: dayLabel,
+          date: dStart.toISOString().split('T')[0],
+          pendings: totalPendingsCount,
+          rejections: dailyRej,
+          resends: dailyResend,
+          stalled: dailyStalled,
+          completed: completedCount
+        });
+      }
+    } else if (evolutionGrouping === 'week') {
+      const numWeeks = Math.max(1, Math.ceil((endTime - startTime) / (7 * 86400000)));
+      for (let w = 0; w < numWeeks; w++) {
+        const wDate = new Date(startTime + w * 7 * 86400000);
+        const wStartMs = wDate.getTime();
+        const wEndMs = wStartMs + 7 * 86400000 - 1;
+
+        const completedCount = completedAdmissions.filter(item => {
+          const t = item.adm.completedAt ? new Date(item.adm.completedAt).getTime() : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          return t >= wStartMs && t <= wEndMs;
+        }).length;
+
+        evolutionPoints.push({
+          label: `Semana ${w + 1}`,
+          date: wDate.toISOString().split('T')[0],
+          pendings: totalPendingsCount,
+          rejections: Math.round(rejectedDocsCount / numWeeks),
+          resends: Math.round(resentDocsCount / numWeeks),
+          stalled: stalledAdmissions.filter(s => s.stalledDays >= 1).length,
+          completed: completedCount
+        });
+      }
+    } else {
+      const startD = new Date(startTime);
+      const endD = new Date(endTime);
+      const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      let cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
+
+      while (cur.getTime() <= endD.getTime()) {
+        const mStart = new Date(cur.getFullYear(), cur.getMonth(), 1, 0, 0, 0, 0).getTime();
+        const mEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+
+        const completedCount = completedAdmissions.filter(item => {
+          const t = item.adm.completedAt ? new Date(item.adm.completedAt).getTime() : new Date(item.adm.updatedAt || item.adm.createdAt).getTime();
+          return t >= mStart && t <= mEnd;
+        }).length;
+
+        evolutionPoints.push({
+          label: `${months[cur.getMonth()]}/${String(cur.getFullYear()).slice(2)}`,
+          date: cur.toISOString().split('T')[0],
+          pendings: totalPendingsCount,
+          rejections: rejectedDocsCount,
+          resends: resentDocsCount,
+          stalled: stalledAdmissions.filter(s => s.stalledDays >= 1).length,
+          completed: completedCount
+        });
+
+        cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      }
+    }
+
+    // 11. ANÁLISES DESCRITIVAS POR DIMENSÃO (CARGO, UNIDADE, SETOR)
+    const buildDimensionBreakdown = (extractor: (adm: Admission) => string): BottleneckDimensionItem[] => {
+      const map = new Map<string, { total: number; completedDurations: number[]; pendings: number; rejections: number; stalled: number }>();
+
+      for (const item of evaluated) {
+        const key = extractor(item.adm) || 'Não especificado';
+        const entry = map.get(key) || { total: 0, completedDurations: [], pendings: 0, rejections: 0, stalled: 0 };
+        entry.total++;
+
+        // Concluídas
+        if (item.adm.status === 'Concluída') {
+          const compT = item.adm.completedAt ? new Date(item.adm.completedAt).getTime() : new Date(item.adm.updatedAt).getTime();
+          const startT = new Date(item.adm.createdAt).getTime();
+          if (compT >= startT) entry.completedDurations.push(compT - startT);
+        }
+
+        // Pendências e Rejeições
+        for (const doc of (item.adm.documents || [])) {
+          if (doc.required && (!doc.status || doc.status === 'Não enviado')) entry.pendings++;
+          if (doc.status === 'Rejeitado') {
+            entry.pendings++;
+            entry.rejections++;
+          }
+        }
+
+        // Sem movimentação
+        if (stalledAdmissions.some(sa => sa.id === item.adm.id && sa.stalledDays >= 1)) {
+          entry.stalled++;
+        }
+
+        map.set(key, entry);
+      }
+
+      return Array.from(map.entries()).map(([name, data]) => {
+        const avgDays = data.completedDurations.length > 0 
+          ? Math.round((data.completedDurations.reduce((a, b) => a + b, 0) / data.completedDurations.length / 86400000) * 10) / 10 
+          : null;
+        return {
+          name,
+          sampleCount: data.total,
+          avgCompletionDays: avgDays,
+          pendingsCount: data.pendings,
+          rejectionsCount: data.rejections,
+          stalledCount: data.stalled
+        };
+      }).sort((a, b) => b.sampleCount - a.sampleCount);
+    };
+
+    const byRole = buildDimensionBreakdown(a => a.employee?.role || 'Não informado');
+    const byUnit = buildDimensionBreakdown(a => a.employee?.unit || 'Matriz');
+    const byDepartment = buildDimensionBreakdown(a => a.employee?.department || 'Geral');
+
+    // 12. PONTOS DE ATENÇÃO OBJETIVOS (LINGUAGEM NEUTRA E DESCRITIVA)
+    const attentionPoints: BottleneckAttentionPoint[] = [];
+
+    const stalledOver3Days = stalledAdmissions.filter(s => s.stalledDays >= 3);
+    if (stalledOver3Days.length > 0) {
+      attentionPoints.push({
+        id: 'pt-stalled',
+        type: 'stalled',
+        title: 'Admissões ativas sem movimentação recente',
+        description: `${stalledOver3Days.length} admissões ativas estão sem movimentação registrada há 3 dias ou mais.`,
+        count: stalledOver3Days.length
+      });
+    }
+
+    if (slowestStepName && slowestStepAvgDays !== null) {
+      attentionPoints.push({
+        id: 'pt-slowest-step',
+        type: 'step_time',
+        title: 'Etapa com maior tempo médio observado',
+        description: `A etapa "${slowestStepName}" registrou o maior tempo médio entre as etapas concluídas (${slowestStepAvgDays} dias).`,
+        count: slowestStepAvgDays
+      });
+    }
+
+    if (rejectionsByReason.length > 0) {
+      const topReason = rejectionsByReason[0];
+      attentionPoints.push({
+        id: 'pt-rejection',
+        type: 'rejection',
+        title: 'Motivo com maior frequência de rejeição',
+        description: `O motivo "${topReason.reason}" concentrou ${topReason.count} ocorrência(s) de recusa (${topReason.percent}% do total de rejeições).`,
+        count: topReason.count
+      });
+    }
+
+    if (waitingResendCount > 0) {
+      attentionPoints.push({
+        id: 'pt-resend',
+        type: 'resend',
+        title: 'Documentos aguardando novo envio',
+        description: `${waitingResendCount} documento(s) com status de recusa ainda aguardam upload de nova versão pelo colaborador.`,
+        count: waitingResendCount
+      });
+    }
+
+    if (pendingApprovalsCount > 0) {
+      attentionPoints.push({
+        id: 'pt-approval',
+        type: 'approval',
+        title: 'Processos na fila de aprovação interna',
+        description: `${pendingApprovalsCount} processo(s) estão aguardando parecer formal de alçada de gestão ou diretoria.`,
+        count: pendingApprovalsCount
+      });
+    }
+
+    if (delayedCount > 0) {
+      attentionPoints.push({
+        id: 'pt-delay',
+        type: 'delay',
+        title: 'Admissões com prazo de início ultrapassado',
+        description: `${delayedCount} processo(s) em andamento possuem data prevista de início anterior à data atual.`,
+        count: delayedCount
+      });
+    }
+
+    if (blockedItems.length > 0) {
+      attentionPoints.push({
+        id: 'pt-blocked',
+        type: 'blocked',
+        title: 'Etapas com bloqueio operacional registrado',
+        description: `${blockedItems.length} processo(s) apresentam etapa bloqueada necessitando de resolução interna.`,
+        count: blockedItems.length
+      });
+    }
+
+    // CARDS PRINCIPAIS
+    const mainCards: BottleneckMainCards = {
+      stalledAdmissionsCount: stalledAdmissions.filter(s => s.stalledDays >= 1).length,
+      maxStalledFormatted,
+      avgProcessDays,
+      slowestStepName,
+      slowestStepAvgDays,
+      rejectedDocsCount,
+      resentDocsCount,
+      pendingApprovalsCount,
+      delayedCount
+    };
+
+    return {
+      periodLabel,
+      dateRange: {
+        start: new Date(startTime).toISOString(),
+        end: new Date(endTime).toISOString()
+      },
+      mainCards,
+      attentionPoints,
+      stepMetrics,
+      stalledAdmissions,
+      totalStalled: stalledAdmissions.length,
+      pendingsByType,
+      rejectionsByReason,
+      rejectionsByDocType,
+      resentMetrics,
+      reviewTimeMetrics,
+      approvals,
+      blockedMetrics,
+      reopenedMetrics,
+      evolution: evolutionPoints,
+      evolutionGrouping,
+      byRole,
+      byUnit,
+      byDepartment,
+      availableFilters: {
+        roles: Array.from(rolesSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        units: Array.from(unitsSet).sort(),
+        statuses: Array.from(statusesSet),
+        situations: [
+          { key: 'TODAS', label: 'Todas as Situações' },
+          { key: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário' },
+          { key: 'AGUARDANDO_RH', label: 'Aguardando RH' },
+          { key: 'COM_PENDENCIA', label: 'Com Pendência' },
+          { key: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente' },
+          { key: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo' },
+          { key: 'ATRASADA', label: 'Atrasada' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'EM_DIA', label: 'Em Dia' }
+        ],
+        responsibles: Array.from(responsiblesSet).sort()
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 6.4: GESTÃO DE RESPONSÁVEIS E DISTRIBUIÇÃO DE TRABALHO
+  // =========================================================================
+
+  /**
+   * Atribui, altera ou remove o responsável principal de uma admissão
+   */
+  assignAdmissionResponsible(
+    admissionId: string,
+    responsibleUserId: string | null,
+    reason?: string,
+    assignedBy: string = 'RH',
+    versionTimestamp?: string
+  ): { admission: Admission; historyItem: AdmissionAssignmentHistoryItem } {
+    const admission = this.data.admissions.find(a => a.id === admissionId);
+    if (!admission) {
+      throw new Error(`Admissão com id "${admissionId}" não encontrada.`);
+    }
+
+    // Controle de concorrência
+    if (versionTimestamp && admission.updatedAt) {
+      const currentUpdated = new Date(admission.updatedAt).getTime();
+      const clientVersion = new Date(versionTimestamp).getTime();
+      if (currentUpdated > clientVersion) {
+        throw new Error('Esta admissão foi alterada por outro usuário recentemente. Por favor recarregue os dados antes de prosseguir.');
+      }
+    }
+
+    if (!admission.assignmentsHistory) {
+      admission.assignmentsHistory = [];
+    }
+
+    const previousUserId = admission.responsibleUserId;
+    const previousUserName = admission.responsibleUserName;
+    const nowIso = new Date().toISOString();
+
+    let action: AssignmentActionType = 'ASSIGNED';
+
+    if (!responsibleUserId) {
+      // Remoção de responsável
+      if (!previousUserId && !previousUserName) {
+        const emptyItem: AdmissionAssignmentHistoryItem = {
+          id: 'asgn-' + crypto.randomUUID().slice(0, 8),
+          admissionId: admission.id,
+          action: 'REMOVED',
+          previousUserId,
+          previousUserName,
+          assignedByUserName: assignedBy,
+          assignedAt: nowIso,
+          reason: reason || 'Responsável removido'
+        };
+        return { admission, historyItem: emptyItem };
+      }
+
+      action = 'REMOVED';
+      admission.responsibleUserId = undefined;
+      admission.responsibleUserName = undefined;
+      admission.responsibleUserEmail = undefined;
+      admission.assignedAt = undefined;
+      admission.assignedBy = undefined;
+      admission.assignmentReason = reason;
+
+      const historyItem: AdmissionAssignmentHistoryItem = {
+        id: 'asgn-' + crypto.randomUUID().slice(0, 8),
+        admissionId: admission.id,
+        action: 'REMOVED',
+        previousUserId,
+        previousUserName,
+        assignedByUserName: assignedBy,
+        assignedAt: nowIso,
+        reason: reason || 'Responsável removido'
+      };
+
+      admission.assignmentsHistory.push(historyItem);
+      admission.updatedAt = nowIso;
+
+      this.addAuditLog({
+        action: 'admission_assignment_removed',
+        entityType: 'admission_assignment',
+        entityId: admission.id,
+        entityName: admission.employee?.name,
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        fieldChanged: 'responsibleUserId',
+        previousValue: previousUserName,
+        newValue: 'Sem responsável',
+        details: `Responsável ${previousUserName} removido da admissão por ${assignedBy}.${reason ? ` Motivo: "${reason}".` : ''}`,
+        userName: assignedBy
+      });
+
+      this.save();
+      return { admission, historyItem };
+    }
+
+    // Validação do novo usuário
+    const targetUser = this.data.users.find(u => u.id === responsibleUserId || u.email.toLowerCase() === responsibleUserId.toLowerCase());
+    if (!targetUser) {
+      throw new Error(`Usuário responsável com identificador "${responsibleUserId}" não encontrado.`);
+    }
+
+    // Regra: Responsável inativo não pode receber atribuições
+    if (targetUser.active === false) {
+      throw new Error(`O usuário "${targetUser.name}" está inativo e não pode receber novas atribuições operacionais.`);
+    }
+
+    // Regra: Apenas perfis autorizados de RH / Gestão
+    const allowedRoles = ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'];
+    if (!allowedRoles.includes(targetUser.role)) {
+      throw new Error(`O perfil "${targetUser.role}" não possui permissão para assumir a responsabilidade de admissões.`);
+    }
+
+    action = previousUserId ? 'REASSIGNED' : 'ASSIGNED';
+
+    admission.responsibleUserId = targetUser.id;
+    admission.responsibleUserName = targetUser.name;
+    admission.responsibleUserEmail = targetUser.email;
+    admission.assignedAt = nowIso;
+    admission.assignedBy = assignedBy;
+    admission.assignmentReason = reason;
+
+    const historyItem: AdmissionAssignmentHistoryItem = {
+      id: 'asgn-' + crypto.randomUUID().slice(0, 8),
+      admissionId: admission.id,
+      action,
+      previousUserId,
+      previousUserName,
+      newUserId: targetUser.id,
+      newUserName: targetUser.name,
+      assignedByUserName: assignedBy,
+      assignedAt: nowIso,
+      reason
+    };
+
+    admission.assignmentsHistory.push(historyItem);
+    admission.updatedAt = nowIso;
+
+    this.addAuditLog({
+      action: action === 'REASSIGNED' ? 'admission_reassigned' : 'admission_assigned',
+      entityType: 'admission_assignment',
+      entityId: admission.id,
+      entityName: admission.employee?.name,
+      admissionId: admission.id,
+      employeeName: admission.employee?.name,
+      fieldChanged: 'responsibleUserId',
+      previousValue: previousUserName || 'Sem responsável',
+      newValue: targetUser.name,
+      details: action === 'REASSIGNED'
+        ? `Admissão transferida de ${previousUserName || 'Sem responsável'} para ${targetUser.name} por ${assignedBy}.${reason ? ` Motivo: "${reason}".` : ''}`
+        : `Admissão atribuída para ${targetUser.name} por ${assignedBy}.${reason ? ` Motivo: "${reason}".` : ''}`,
+      userName: assignedBy
+    });
+
+    this.save();
+    return { admission, historyItem };
+  }
+
+  /**
+   * Atribui, altera ou remove o responsável de uma etapa específica
+   */
+  assignStepResponsible(
+    admissionId: string,
+    stepKey: string,
+    responsibleUserId: string | null,
+    reason?: string,
+    assignedBy: string = 'RH',
+    versionTimestamp?: string
+  ): { admission: Admission; historyItem: AdmissionAssignmentHistoryItem } {
+    const admission = this.data.admissions.find(a => a.id === admissionId);
+    if (!admission) {
+      throw new Error(`Admissão com id "${admissionId}" não encontrada.`);
+    }
+
+    if (versionTimestamp && admission.updatedAt) {
+      const currentUpdated = new Date(admission.updatedAt).getTime();
+      const clientVersion = new Date(versionTimestamp).getTime();
+      if (currentUpdated > clientVersion) {
+        throw new Error('Esta admissão foi alterada por outro usuário recentemente. Por favor recarregue os dados antes de prosseguir.');
+      }
+    }
+
+    if (!admission.processSteps || admission.processSteps.length === 0) {
+      throw new Error('Esta admissão não possui etapas operacionais configuradas.');
+    }
+
+    const step = admission.processSteps.find(s => s.stepKey === stepKey || s.id === stepKey);
+    if (!step) {
+      throw new Error(`Etapa com chave "${stepKey}" não encontrada na admissão.`);
+    }
+
+    if (!admission.assignmentsHistory) {
+      admission.assignmentsHistory = [];
+    }
+
+    const previousUserId = step.responsibleUserId;
+    const previousUserName = step.responsibleUserName;
+    const nowIso = new Date().toISOString();
+
+    let action: AssignmentActionType = 'ASSIGNED';
+
+    if (!responsibleUserId) {
+      action = 'REMOVED';
+      step.responsibleUserId = undefined;
+      step.responsibleUserName = undefined;
+      step.responsibleUserEmail = undefined;
+      step.stepAssignedAt = undefined;
+      step.stepAssignedBy = undefined;
+      step.stepAssignmentReason = reason;
+
+      const historyItem: AdmissionAssignmentHistoryItem = {
+        id: 'asgn-step-' + crypto.randomUUID().slice(0, 8),
+        admissionId: admission.id,
+        stepKey: step.stepKey,
+        stepName: step.stepName,
+        action: 'REMOVED',
+        previousUserId,
+        previousUserName,
+        assignedByUserName: assignedBy,
+        assignedAt: nowIso,
+        reason: reason || `Responsável removido da etapa ${step.stepName}`
+      };
+
+      admission.assignmentsHistory.push(historyItem);
+      admission.updatedAt = nowIso;
+
+      this.addAuditLog({
+        action: 'step_assignment_removed',
+        entityType: 'admission_process_step',
+        entityId: step.id,
+        entityName: step.stepName,
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        details: `Responsável ${previousUserName || 'Indefinido'} removido da etapa "${step.stepName}" por ${assignedBy}.${reason ? ` Motivo: "${reason}".` : ''}`,
+        userName: assignedBy
+      });
+
+      this.save();
+      return { admission, historyItem };
+    }
+
+    const targetUser = this.data.users.find(u => u.id === responsibleUserId || u.email.toLowerCase() === responsibleUserId.toLowerCase());
+    if (!targetUser) {
+      throw new Error(`Usuário responsável com identificador "${responsibleUserId}" não encontrado.`);
+    }
+
+    if (targetUser.active === false) {
+      throw new Error(`O usuário "${targetUser.name}" está inativo e não pode receber atribuição de etapas.`);
+    }
+
+    const allowedRoles = ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'];
+    if (!allowedRoles.includes(targetUser.role)) {
+      throw new Error(`O perfil "${targetUser.role}" não possui permissão para assumir etapas operacionais.`);
+    }
+
+    action = previousUserId ? 'REASSIGNED' : 'ASSIGNED';
+
+    step.responsibleUserId = targetUser.id;
+    step.responsibleUserName = targetUser.name;
+    step.responsibleUserEmail = targetUser.email;
+    step.stepAssignedAt = nowIso;
+    step.stepAssignedBy = assignedBy;
+    step.stepAssignmentReason = reason;
+
+    const historyItem: AdmissionAssignmentHistoryItem = {
+      id: 'asgn-step-' + crypto.randomUUID().slice(0, 8),
+      admissionId: admission.id,
+      stepKey: step.stepKey,
+      stepName: step.stepName,
+      action,
+      previousUserId,
+      previousUserName,
+      newUserId: targetUser.id,
+      newUserName: targetUser.name,
+      assignedByUserName: assignedBy,
+      assignedAt: nowIso,
+      reason
+    };
+
+    admission.assignmentsHistory.push(historyItem);
+    admission.updatedAt = nowIso;
+
+    this.addAuditLog({
+      action: action === 'REASSIGNED' ? 'step_reassigned' : 'step_assigned',
+      entityType: 'admission_process_step',
+      entityId: step.id,
+      entityName: step.stepName,
+      admissionId: admission.id,
+      employeeName: admission.employee?.name,
+      details: action === 'REASSIGNED'
+        ? `Etapa "${step.stepName}" transferida de ${previousUserName || 'Sem responsável'} para ${targetUser.name} por ${assignedBy}.${reason ? ` Motivo: "${reason}".` : ''}`
+        : `Etapa "${step.stepName}" atribuída para ${targetUser.name} por ${assignedBy}.${reason ? ` Motivo: "${reason}".` : ''}`,
+      userName: assignedBy
+    });
+
+    this.save();
+    return { admission, historyItem };
+  }
+
+  /**
+   * Retorna o histórico de atribuições de uma admissão
+   */
+  getAdmissionAssignments(admissionId: string): AdmissionAssignmentHistoryItem[] {
+    const admission = this.data.admissions.find(a => a.id === admissionId);
+    if (!admission) {
+      throw new Error(`Admissão com id "${admissionId}" não encontrada.`);
+    }
+    return admission.assignmentsHistory || [];
+  }
+
+  /**
+   * Consulta agregada e detalhada de Distribuição de Trabalho e Cargas (Bloco 6.4)
+   */
+  getWorkDistributionData(options: WorkDistributionFilters & { currentUserId?: string } = {}): WorkDistributionResponse {
+    // 1. Processar todas as admissões avaliando etapas e situações operacionais
+    const hubData = this.getOperationalHubData({ limit: 1000, page: 1 });
+    const allHubItems = hubData.items || [];
+
+    // Admissões ativas (exclui canceladas e concluídas do pool de trabalho operacional)
+    const activeHubItems = allHubItems.filter(item => item.status !== 'Cancelada' && item.status !== 'Concluída');
+
+    // 2. Coletar usuários elegíveis de RH
+    const eligibleRoles = ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'];
+    const eligibleUsers = this.data.users.filter(u => eligibleRoles.includes(u.role));
+
+    // Determinar usuário atual (padrão Mariana se não especificado)
+    const currentUserId = options.currentUserId || eligibleUsers.find(u => u.name === 'Mariana Silveira')?.id || eligibleUsers[0]?.id;
+
+    // 3. Montar WorkDistributionItems
+    const rawItems: WorkDistributionItem[] = activeHubItems.map(item => {
+      const isMyAdmission = Boolean(item.admissionResponsibleId && item.admissionResponsibleId === currentUserId);
+      const isMyStep = Boolean(item.stepResponsibleId && item.stepResponsibleId === currentUserId);
+
+      return {
+        admissionId: item.id,
+        admissionCode: item.admissionCode,
+        employeeId: item.employeeId,
+        employeeName: item.employeeName,
+        employeeCpfMasked: item.employeeCpfMasked,
+        employeeRole: item.employeeRole,
+        employeeDepartment: item.employeeDepartment,
+        employeeUnit: item.employeeUnit,
+        status: item.status,
+        situation: item.situation,
+        situationLabel: item.situationLabel,
+        priority: item.priority,
+        currentStepKey: item.currentStepKey,
+        currentStepName: item.currentStepName,
+        currentStepOrder: item.currentStepOrder,
+        totalSteps: item.totalSteps,
+        currentStepStatus: item.currentStepStatus,
+        admissionResponsibleId: item.admissionResponsibleId,
+        admissionResponsibleName: item.admissionResponsibleName || 'Sem responsável',
+        stepResponsibleId: item.stepResponsibleId,
+        stepResponsibleName: item.stepResponsibleName || item.currentStepResponsible,
+        isMyAssignment: isMyAdmission,
+        isMyStepAssignment: isMyStep,
+        expectedStartDate: item.expectedStartDate,
+        createdAt: item.createdAt,
+        lastMovementAt: item.lastActivityAt,
+        daysSinceCreation: item.daysSinceCreation,
+        daysWithoutMovement: item.daysWithoutMovement,
+        activePendingsCount: item.activePendingsCount,
+        hasApproval: item.hasApproval,
+        approvalStatus: item.approvalStatus
+      };
+    });
+
+    // 4. Calcular Cargas de Trabalho por Usuário
+    const distributionByResponsible: WorkloadByResponsibleItem[] = eligibleUsers.map(user => {
+      // Admissões ativas atribuídas ao usuário
+      const assignedAdmissions = rawItems.filter(i => i.admissionResponsibleId === user.id);
+      
+      // Etapas ativas não concluídas atribuídas ao usuário
+      const assignedSteps = rawItems.filter(i => i.stepResponsibleId === user.id && i.currentStepStatus !== 'CONCLUIDA');
+      
+      // Pendências ativas nas admissões sob sua responsabilidade
+      const activePendings = assignedAdmissions.reduce((acc, curr) => acc + curr.activePendingsCount, 0);
+
+      // Aprovações pendentes atribuídas
+      const pendingApprovals = assignedAdmissions.filter(i => i.hasApproval && (i.approvalStatus === 'PENDENTE' || i.approvalStatus === 'EM_ANALISE')).length;
+
+      // Última movimentação observada
+      let latestMovement: string | undefined;
+      for (const adm of assignedAdmissions) {
+        if (!latestMovement || new Date(adm.lastMovementAt).getTime() > new Date(latestMovement).getTime()) {
+          latestMovement = adm.lastMovementAt;
+        }
+      }
+
+      // Total ponderado de itens operacionais sob sua responsabilidade
+      const totalWorkload = assignedAdmissions.length + assignedSteps.length + activePendings + pendingApprovals;
+
+      return {
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        userRole: user.role,
+        department: user.department || 'Recursos Humanos',
+        active: user.active !== false,
+        admissionsCount: assignedAdmissions.length,
+        pendingStepsCount: assignedSteps.length,
+        activePendingsCount: activePendings,
+        pendingApprovalsCount: pendingApprovals,
+        totalWorkload,
+        lastMovementAt: latestMovement
+      };
+    });
+
+    // Ordenar distribuição (padrão: maior carga primeiro)
+    distributionByResponsible.sort((a, b) => b.totalWorkload - a.totalWorkload);
+
+    // 5. Calcular Cards Operacionais
+    const totalAssigned = rawItems.filter(i => Boolean(i.admissionResponsibleId) && i.admissionResponsibleName !== 'Sem responsável').length;
+    const unassignedItems = rawItems.filter(i => !i.admissionResponsibleId || i.admissionResponsibleName === 'Sem responsável');
+    const unassignedCount = unassignedItems.length;
+    const myQueueItems = rawItems.filter(i => i.isMyAssignment || i.isMyStepAssignment);
+    const myQueueCount = myQueueItems.length;
+
+    const assignedUserIds = new Set<string>();
+    rawItems.forEach(i => {
+      if (i.admissionResponsibleId && i.admissionResponsibleName !== 'Sem responsável') assignedUserIds.add(i.admissionResponsibleId);
+      if (i.stepResponsibleId && i.stepResponsibleName !== 'Sem responsável') assignedUserIds.add(i.stepResponsibleId);
+    });
+    const usersWithAssignmentsCount = assignedUserIds.size;
+    const activeProcessesCount = rawItems.length;
+
+    const cards: WorkDistributionCards = {
+      totalAssigned,
+      unassignedCount,
+      myQueueCount,
+      usersWithAssignmentsCount,
+      activeProcessesCount
+    };
+
+    // 6. Aplicar Filtros aos Items
+    let filteredItems = [...rawItems];
+
+    if (options.viewMode === 'minha_fila') {
+      filteredItems = filteredItems.filter(i => i.isMyAssignment || i.isMyStepAssignment);
+    } else if (options.viewMode === 'sem_responsavel') {
+      filteredItems = filteredItems.filter(i => !i.admissionResponsibleId || i.admissionResponsibleName === 'Sem responsável');
+    }
+
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      filteredItems = filteredItems.filter(i =>
+        i.employeeName.toLowerCase().includes(q) ||
+        i.admissionCode.toLowerCase().includes(q) ||
+        i.employeeRole.toLowerCase().includes(q) ||
+        i.employeeDepartment.toLowerCase().includes(q) ||
+        i.employeeUnit.toLowerCase().includes(q) ||
+        i.admissionResponsibleName.toLowerCase().includes(q) ||
+        i.stepResponsibleName.toLowerCase().includes(q)
+      );
+    }
+
+    if (options.responsible && options.responsible !== 'TODOS' && options.responsible !== 'all') {
+      const resp = options.responsible.trim();
+      if (resp === 'SEM_RESPONSAVEL' || resp === 'Sem responsável' || resp === 'sem_responsavel') {
+        filteredItems = filteredItems.filter(i => !i.admissionResponsibleId || i.admissionResponsibleName === 'Sem responsável');
+      } else {
+        filteredItems = filteredItems.filter(i =>
+          i.admissionResponsibleId === resp ||
+          i.admissionResponsibleName?.toLowerCase() === resp.toLowerCase() ||
+          i.stepResponsibleId === resp ||
+          i.stepResponsibleName?.toLowerCase() === resp.toLowerCase()
+        );
+      }
+    }
+
+    if (options.stepKey && options.stepKey !== 'TODAS' && options.stepKey !== 'all') {
+      filteredItems = filteredItems.filter(i => i.currentStepKey === options.stepKey);
+    }
+
+    if (options.situation && options.situation !== 'TODAS' && options.situation !== 'all') {
+      filteredItems = filteredItems.filter(i => i.situation === options.situation);
+    }
+
+    if (options.priority && options.priority !== 'TODAS' && options.priority !== 'all') {
+      filteredItems = filteredItems.filter(i => i.priority === options.priority);
+    }
+
+    if (options.unit && options.unit !== 'TODAS' && options.unit !== 'all') {
+      filteredItems = filteredItems.filter(i => i.employeeUnit === options.unit);
+    }
+
+    if (options.department && options.department !== 'TODOS' && options.department !== 'all') {
+      filteredItems = filteredItems.filter(i => i.employeeDepartment === options.department);
+    }
+
+    if (options.role && options.role !== 'TODOS' && options.role !== 'all') {
+      filteredItems = filteredItems.filter(i => i.employeeRole === options.role);
+    }
+
+    // 7. Ordenação
+    const sortBy = options.sortBy || 'priority';
+    const sortOrder = options.sortOrder || 'asc';
+
+    filteredItems.sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'priority') {
+        const orderMap: Record<string, number> = { CRITICA: 1, ALTA: 2, NORMAL: 3 };
+        comparison = (orderMap[a.priority] || 3) - (orderMap[b.priority] || 3);
+      } else if (sortBy === 'admissions') {
+        comparison = a.admissionCode.localeCompare(b.admissionCode);
+      } else if (sortBy === 'lastMovement') {
+        comparison = new Date(b.lastMovementAt).getTime() - new Date(a.lastMovementAt).getTime();
+      } else if (sortBy === 'pendings') {
+        comparison = b.activePendingsCount - a.activePendingsCount;
+      } else if (sortBy === 'name') {
+        comparison = a.employeeName.localeCompare(b.employeeName);
+      }
+      return sortOrder === 'desc' ? -comparison : comparison;
+    });
+
+    // 8. Paginação
+    const page = options.page && options.page > 0 ? options.page : 1;
+    const limit = options.limit && options.limit > 0 ? options.limit : 20;
+    const total = filteredItems.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const paginatedItems = filteredItems.slice((page - 1) * limit, page * limit);
+
+    // 9. Opções de Filtro
+    const unitsSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    const rolesSet = new Set<string>();
+    const stepsMap = new Map<string, string>();
+    const responsiblesSet = new Set<string>();
+
+    rawItems.forEach(i => {
+      if (i.employeeUnit) unitsSet.add(i.employeeUnit);
+      if (i.employeeDepartment) departmentsSet.add(i.employeeDepartment);
+      if (i.employeeRole) rolesSet.add(i.employeeRole);
+      if (i.currentStepKey) stepsMap.set(i.currentStepKey, i.currentStepName);
+      if (i.admissionResponsibleName && i.admissionResponsibleName !== 'Sem responsável') {
+        responsiblesSet.add(i.admissionResponsibleName);
+      }
+      if (i.stepResponsibleName && i.stepResponsibleName !== 'Sem responsável') {
+        responsiblesSet.add(i.stepResponsibleName);
+      }
+    });
+
+    eligibleUsers.forEach(u => {
+      if (u.active !== false) {
+        responsiblesSet.add(u.name);
+      }
+    });
+    responsiblesSet.add('Sem responsável');
+
+    return {
+      cards,
+      distributionByResponsible,
+      items: paginatedItems,
+      unassignedItems,
+      myQueueItems,
+      total,
+      page,
+      limit,
+      totalPages,
+      filters: {
+        users: eligibleUsers.map(u => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          department: u.department,
+          active: u.active !== false
+        })),
+        units: Array.from(unitsSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        roles: Array.from(rolesSet).sort(),
+        steps: Array.from(stepsMap.entries()).map(([stepKey, stepName]) => ({ stepKey, stepName })),
+        situations: [
+          { key: 'TODAS', label: 'Todas as Situações' },
+          { key: 'EM_DIA', label: 'Em Dia' },
+          { key: 'AGUARDANDO_RH', label: 'Aguardando RH' },
+          { key: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário' },
+          { key: 'COM_PENDENCIA', label: 'Com Pendência' },
+          { key: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente' },
+          { key: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo' },
+          { key: 'ATRASADA', label: 'Atrasada' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' }
+        ],
+        priorities: ['CRITICA', 'ALTA', 'NORMAL'],
+        responsibles: Array.from(responsiblesSet).sort()
+      }
+    };
+  }
+
+  // =========================================================================
+  // BLOCO 6.5: TAREFAS OPERACIONAIS DO RH - MÉTODOS DE NEGÓCIO
+  // =========================================================================
+
+  /**
+   * Criação de Tarefa Operacional vinculada obrigatoriamente a uma Admissão
+   */
+  createOperationalTask(
+    input: CreateOperationalTaskInput,
+    creatorUser: { id?: string; name: string; email?: string }
+  ): OperationalTask {
+    const admission = this.data.admissions.find(a => a.id === input.admissionId);
+    if (!admission) {
+      throw new Error(`Admissão com id "${input.admissionId}" não encontrada.`);
+    }
+
+    const title = (input.title || '').trim();
+    if (!title || title.length < 3) {
+      throw new Error('O título da tarefa é obrigatório e deve ter no mínimo 3 caracteres.');
+    }
+    if (title.length > 150) {
+      throw new Error('O título da tarefa não pode exceder 150 caracteres.');
+    }
+
+    const allowedPriorities: OperationalPriority[] = ['NORMAL', 'ALTA', 'CRITICA'];
+    const priority = allowedPriorities.includes(input.priority) ? input.priority : 'NORMAL';
+
+    // Tratar prazo operacional (dueAt)
+    let dueAt: string | null = null;
+    if (input.dueAt) {
+      const parsedDate = new Date(input.dueAt);
+      if (isNaN(parsedDate.getTime())) {
+        throw new Error('O prazo informado não é uma data válida.');
+      }
+      dueAt = parsedDate.toISOString();
+    }
+
+    // Tratar responsável operacional (reutilizando mecanismo 6.4)
+    let responsibleUserId: string | null = null;
+    let responsibleUserName: string | undefined = undefined;
+    let responsibleUserEmail: string | undefined = undefined;
+    let assignedAt: string | undefined = undefined;
+    let assignedBy: string | undefined = undefined;
+
+    if (input.responsibleUserId && input.responsibleUserId.trim() !== '') {
+      const targetUser = this.data.users.find(
+        u => u.id === input.responsibleUserId || u.email.toLowerCase() === input.responsibleUserId?.toLowerCase()
+      );
+      if (!targetUser) {
+        throw new Error(`Usuário responsável "${input.responsibleUserId}" não encontrado.`);
+      }
+      if (targetUser.active === false) {
+        throw new Error(`O usuário "${targetUser.name}" está inativo e não pode receber novas tarefas.`);
+      }
+      const allowedRoles = ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'];
+      if (!allowedRoles.includes(targetUser.role)) {
+        throw new Error(`O perfil "${targetUser.role}" não possui autorização para assumir tarefas operacionais.`);
+      }
+
+      responsibleUserId = targetUser.id;
+      responsibleUserName = targetUser.name;
+      responsibleUserEmail = targetUser.email;
+      assignedAt = new Date().toISOString();
+      assignedBy = creatorUser.name;
+    }
+
+    // Tratar origem operacional
+    const sourceType: OperationalTaskSourceType = input.sourceType || 'ADMISSAO';
+    let documentName: string | undefined = undefined;
+    if (input.documentId) {
+      const doc = admission.documents?.find(d => d.id === input.documentId);
+      if (doc) {
+        documentName = typeof doc.documentType === 'string' ? doc.documentType : doc.document_type_name;
+      }
+    }
+
+    let stepName: string | undefined = undefined;
+    if (input.stepKey) {
+      const step = admission.processSteps?.find(s => s.stepKey === input.stepKey);
+      if (step) {
+        stepName = step.stepName;
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const taskId = 'task-' + crypto.randomUUID().slice(0, 8);
+    const admissionCode = admission.id.replace('adm-', 'ADM-').slice(0, 10).toUpperCase();
+
+    const history: OperationalTaskHistoryItem[] = [
+      {
+        id: 'th-' + crypto.randomUUID().slice(0, 8),
+        taskId,
+        action: 'CREATED',
+        performedBy: creatorUser.name,
+        performedByUserId: creatorUser.id,
+        performedAt: nowIso,
+        newStatus: 'PENDENTE',
+        notes: `Tarefa criada a partir de ${sourceType}${input.sourceDescription ? `: ${input.sourceDescription}` : ''}`
+      }
+    ];
+
+    if (responsibleUserId && responsibleUserName) {
+      history.push({
+        id: 'th-' + crypto.randomUUID().slice(0, 8),
+        taskId,
+        action: 'ASSIGNED',
+        performedBy: creatorUser.name,
+        performedByUserId: creatorUser.id,
+        performedAt: nowIso,
+        newUserId: responsibleUserId,
+        newUserName: responsibleUserName,
+        notes: `Atribuída diretamente na criação`
+      });
+    }
+
+    const task: OperationalTask = {
+      id: taskId,
+      tenantId: 'tenant-default',
+      admissionId: admission.id,
+      admissionCode,
+      employeeId: admission.employeeId,
+      employeeName: admission.employee.name,
+      employeeCpfMasked: maskCPF(admission.employee.cpf),
+      employeeRole: admission.employee.role,
+      employeeDepartment: admission.employee.department,
+      employeeUnit: admission.employee.unit,
+      sourceType,
+      sourceId: input.sourceId,
+      sourceDescription: input.sourceDescription,
+      stepKey: input.stepKey,
+      stepName,
+      documentId: input.documentId,
+      documentName,
+      approvalId: input.approvalId,
+      title,
+      description: input.description?.trim() || undefined,
+      priority,
+      status: 'PENDENTE',
+      responsibleUserId,
+      responsibleUserName,
+      responsibleUserEmail,
+      assignedAt,
+      assignedBy,
+      dueAt,
+      isOverdue: dueAt ? new Date(dueAt).getTime() < Date.now() : false,
+      createdBy: creatorUser.name,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      history
+    };
+
+    if (!this.data.operationalTasks) {
+      this.data.operationalTasks = [];
+    }
+    this.data.operationalTasks.unshift(task);
+
+    // Registro de Auditoria Global (Bloco 5.7)
+    this.addAuditLog({
+      action: 'task_created',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: admission.id,
+      employeeName: admission.employee.name,
+      details: `Tarefa operacional "${task.title}" criada por ${creatorUser.name} [Prioridade: ${task.priority}${responsibleUserName ? `, Responsável: ${responsibleUserName}` : ', Sem responsável'}${dueAt ? `, Prazo: ${new Date(dueAt).toLocaleDateString('pt-BR')}` : ''}].`,
+      userName: creatorUser.name
+    });
+
+    if (responsibleUserId && responsibleUserName) {
+      this.addAuditLog({
+        action: 'task_assigned',
+        entityType: 'operational_task',
+        entityId: task.id,
+        entityName: task.title,
+        admissionId: admission.id,
+        employeeName: admission.employee.name,
+        details: `Tarefa "${task.title}" atribuída para ${responsibleUserName} por ${creatorUser.name}.`,
+        userName: creatorUser.name
+      });
+    }
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Consulta paginada e filtrada de Tarefas Operacionais do RH
+   */
+  getOperationalTasks(
+    filters: OperationalTaskFilters & { currentUserId?: string; currentUserEmail?: string } = {}
+  ): OperationalTasksResponse {
+    if (!this.data.operationalTasks) {
+      this.data.operationalTasks = [];
+    }
+
+    const now = Date.now();
+
+    // 1. Atualizar flag isOverdue dinamicamente para todas as tarefas
+    const allTasks = this.data.operationalTasks.map(t => {
+      const isOverdue = t.dueAt
+        ? new Date(t.dueAt).getTime() < now && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+        : false;
+      return { ...t, isOverdue };
+    });
+
+    // 2. Resumo analítico global
+    let pending = 0;
+    let inProgress = 0;
+    let completed = 0;
+    let blocked = 0;
+    let cancelled = 0;
+    let unassigned = 0;
+    let myTasks = 0;
+    let critical = 0;
+    let overdue = 0;
+
+    const currentUserId = filters.currentUserId || 'user-rh-01';
+
+    allTasks.forEach(t => {
+      if (t.status === 'PENDENTE') pending++;
+      if (t.status === 'EM_ANDAMENTO') inProgress++;
+      if (t.status === 'CONCLUIDA') completed++;
+      if (t.status === 'BLOQUEADA') blocked++;
+      if (t.status === 'CANCELADA') cancelled++;
+
+      const isActive = t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA';
+      if (isActive && !t.responsibleUserId) unassigned++;
+      if (isActive && t.responsibleUserId === currentUserId) myTasks++;
+      if (isActive && t.priority === 'CRITICA') critical++;
+      if (isActive && t.isOverdue) overdue++;
+    });
+
+    const summary: OperationalTaskSummary = {
+      total: allTasks.length,
+      pending,
+      inProgress,
+      completed,
+      blocked,
+      cancelled,
+      unassigned,
+      myTasks,
+      critical,
+      overdue
+    };
+
+    // 3. Aplicação dos filtros
+    let filtered = [...allTasks];
+
+    // Modo de visualização rápido
+    if (filters.viewMode) {
+      switch (filters.viewMode) {
+        case 'minhas':
+          filtered = filtered.filter(
+            t => t.responsibleUserId === currentUserId && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+          );
+          break;
+        case 'sem_responsavel':
+          filtered = filtered.filter(
+            t => !t.responsibleUserId && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+          );
+          break;
+        case 'criticas':
+          filtered = filtered.filter(
+            t => t.priority === 'CRITICA' && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+          );
+          break;
+        case 'vencidas':
+          filtered = filtered.filter(t => t.isOverdue);
+          break;
+        case 'concluidas':
+          filtered = filtered.filter(t => t.status === 'CONCLUIDA');
+          break;
+        case 'todas':
+        default:
+          break;
+      }
+    }
+
+    // Filtro de Status
+    if (filters.status && filters.status !== 'TODOS' && filters.status !== 'all') {
+      filtered = filtered.filter(t => t.status === filters.status);
+    }
+
+    // Filtro de Prioridade
+    if (filters.priority && filters.priority !== 'TODAS' && filters.priority !== 'all') {
+      filtered = filtered.filter(t => t.priority === filters.priority);
+    }
+
+    // Filtro de Responsável
+    if (filters.responsible) {
+      if (filters.responsible === 'sem_responsavel') {
+        filtered = filtered.filter(t => !t.responsibleUserId);
+      } else {
+        filtered = filtered.filter(
+          t => t.responsibleUserId === filters.responsible || t.responsibleUserName === filters.responsible
+        );
+      }
+    }
+
+    // Filtro de Origem
+    if (filters.sourceType && filters.sourceType !== 'TODAS' && filters.sourceType !== 'all') {
+      filtered = filtered.filter(t => t.sourceType === filters.sourceType);
+    }
+
+    // Filtro por Unidade
+    if (filters.unit && filters.unit !== 'TODAS' && filters.unit !== 'all') {
+      filtered = filtered.filter(t => t.employeeUnit === filters.unit);
+    }
+
+    // Filtro por Departamento
+    if (filters.department && filters.department !== 'TODOS' && filters.department !== 'all') {
+      filtered = filtered.filter(t => t.employeeDepartment === filters.department);
+    }
+
+    // Filtro por Admissão
+    if (filters.admissionId) {
+      filtered = filtered.filter(t => t.admissionId === filters.admissionId);
+    }
+
+    // Filtro por Funcionário
+    if (filters.employeeId) {
+      filtered = filtered.filter(t => t.employeeId === filters.employeeId);
+    }
+
+    // Busca Textual (Título, Descrição, Funcionário, CPF mascarado, Código de Admissão)
+    if (filters.search && filters.search.trim() !== '') {
+      const q = filters.search.trim().toLowerCase();
+      filtered = filtered.filter(t => {
+        return (
+          t.title.toLowerCase().includes(q) ||
+          (t.description && t.description.toLowerCase().includes(q)) ||
+          t.employeeName.toLowerCase().includes(q) ||
+          t.admissionCode.toLowerCase().includes(q) ||
+          (t.employeeCpfMasked && t.employeeCpfMasked.includes(q)) ||
+          (t.documentName && t.documentName.toLowerCase().includes(q)) ||
+          (t.stepName && t.stepName.toLowerCase().includes(q))
+        );
+      });
+    }
+
+    // 4. Ordenação
+    const priorityWeight: Record<OperationalPriority, number> = {
+      CRITICA: 3,
+      ALTA: 2,
+      NORMAL: 1
+    };
+
+    const sortBy = filters.sortBy || 'priority';
+    const sortOrder = filters.sortOrder || 'desc';
+
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'priority') {
+        comparison = priorityWeight[a.priority] - priorityWeight[b.priority];
+      } else if (sortBy === 'dueAt') {
+        const timeA = a.dueAt ? new Date(a.dueAt).getTime() : 9999999999999;
+        const timeB = b.dueAt ? new Date(b.dueAt).getTime() : 9999999999999;
+        comparison = timeA - timeB;
+      } else if (sortBy === 'createdAt') {
+        comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sortBy === 'updatedAt') {
+        comparison = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+      } else if (sortBy === 'title') {
+        comparison = a.title.localeCompare(b.title);
+      } else if (sortBy === 'status') {
+        comparison = a.status.localeCompare(b.status);
+      }
+
+      return sortOrder === 'desc' ? -comparison : comparison;
+    });
+
+    // 5. Paginação
+    const page = filters.page && filters.page > 0 ? filters.page : 1;
+    const limit = filters.limit && filters.limit > 0 ? filters.limit : 20;
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const paginatedItems = filtered.slice((page - 1) * limit, page * limit);
+
+    // 6. Opções de Filtros para a UI
+    const unitsSet = new Set<string>();
+    const departmentsSet = new Set<string>();
+    allTasks.forEach(t => {
+      if (t.employeeUnit) unitsSet.add(t.employeeUnit);
+      if (t.employeeDepartment) departmentsSet.add(t.employeeDepartment);
+    });
+
+    const eligibleUsers = this.data.users.filter(u =>
+      ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'].includes(u.role)
+    );
+
+    return {
+      summary,
+      items: paginatedItems,
+      total,
+      page,
+      limit,
+      totalPages,
+      filters: {
+        users: eligibleUsers.map(u => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          department: u.department,
+          active: u.active !== false
+        })),
+        sources: [
+          { key: 'TODAS', label: 'Todas as origens' },
+          { key: 'ADMISSAO', label: 'Admissão Geral' },
+          { key: 'PENDENCIA', label: 'Central de Pendências' },
+          { key: 'DOCUMENTO', label: 'Conferência Documental' },
+          { key: 'ETAPA', label: 'Etapa do Processo' },
+          { key: 'APROVACAO', label: 'Aprovação Interna' },
+          { key: 'CHECKLIST', label: 'Checklist Operacional' },
+          { key: 'COMUNICACAO', label: 'Comunicação' }
+        ],
+        units: Array.from(unitsSet).sort(),
+        departments: Array.from(departmentsSet).sort(),
+        statuses: [
+          { key: 'TODOS', label: 'Todos os status' },
+          { key: 'PENDENTE', label: 'Pendente' },
+          { key: 'EM_ANDAMENTO', label: 'Em Andamento' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'CONCLUIDA', label: 'Concluída' },
+          { key: 'CANCELADA', label: 'Cancelada' }
+        ],
+        priorities: ['CRITICA', 'ALTA', 'NORMAL']
+      }
+    };
+  }
+
+  /**
+   * Busca Tarefa Operacional por ID
+   */
+  getOperationalTaskById(id: string): OperationalTask {
+    if (!this.data.operationalTasks) {
+      this.data.operationalTasks = [];
+    }
+    const task = this.data.operationalTasks.find(t => t.id === id);
+    if (!task) {
+      throw new Error(`Tarefa com identificador "${id}" não encontrada.`);
+    }
+
+    const now = Date.now();
+    const isOverdue = task.dueAt
+      ? new Date(task.dueAt).getTime() < now && task.status !== 'CONCLUIDA' && task.status !== 'CANCELADA'
+      : false;
+
+    return { ...task, isOverdue };
+  }
+
+  /**
+   * Atribui, transfere ou desatribui responsável de uma tarefa operacional
+   */
+  assignOperationalTask(
+    taskId: string,
+    responsibleUserId: string | null,
+    performer: { id?: string; name: string },
+    reason?: string
+  ): OperationalTask {
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
+      throw new Error(`Não é permitido alterar o responsável de uma tarefa ${task.status.toLowerCase()}. Reabra a tarefa primeiro.`);
+    }
+
+    const previousUserId = task.responsibleUserId || undefined;
+    const previousUserName = task.responsibleUserName || undefined;
+    const nowIso = new Date().toISOString();
+
+    let action: OperationalTaskActionType = 'ASSIGNED';
+
+    if (responsibleUserId === null || responsibleUserId.trim() === '') {
+      // Desatribuição
+      task.responsibleUserId = null;
+      task.responsibleUserName = undefined;
+      task.responsibleUserEmail = undefined;
+      task.assignedAt = undefined;
+      task.assignedBy = undefined;
+      action = 'UNASSIGNED';
+
+      task.history.push({
+        id: 'th-' + crypto.randomUUID().slice(0, 8),
+        taskId,
+        action: 'UNASSIGNED',
+        performedBy: performer.name,
+        performedByUserId: performer.id,
+        performedAt: nowIso,
+        previousUserId,
+        previousUserName,
+        reason: reason || 'Responsável removido da tarefa',
+        notes: reason
+      });
+
+      this.addAuditLog({
+        action: 'task_unassigned',
+        entityType: 'operational_task',
+        entityId: task.id,
+        entityName: task.title,
+        admissionId: task.admissionId,
+        employeeName: task.employeeName,
+        details: `Responsável ${previousUserName || 'anterior'} removido da tarefa "${task.title}" por ${performer.name}.${reason ? ` Motivo: "${reason}".` : ''}`,
+        userName: performer.name
+      });
+    } else {
+      const targetUser = this.data.users.find(
+        u => u.id === responsibleUserId || u.email.toLowerCase() === responsibleUserId.toLowerCase()
+      );
+      if (!targetUser) {
+        throw new Error(`Usuário responsável "${responsibleUserId}" não encontrado.`);
+      }
+      if (targetUser.active === false) {
+        throw new Error(`O usuário "${targetUser.name}" está inativo e não pode receber tarefas.`);
+      }
+      const allowedRoles = ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'];
+      if (!allowedRoles.includes(targetUser.role)) {
+        throw new Error(`O perfil "${targetUser.role}" não possui autorização para assumir tarefas operacionais.`);
+      }
+
+      action = previousUserId ? 'REASSIGNED' : 'ASSIGNED';
+
+      task.responsibleUserId = targetUser.id;
+      task.responsibleUserName = targetUser.name;
+      task.responsibleUserEmail = targetUser.email;
+      task.assignedAt = nowIso;
+      task.assignedBy = performer.name;
+
+      task.history.push({
+        id: 'th-' + crypto.randomUUID().slice(0, 8),
+        taskId,
+        action,
+        performedBy: performer.name,
+        performedByUserId: performer.id,
+        performedAt: nowIso,
+        previousUserId,
+        previousUserName,
+        newUserId: targetUser.id,
+        newUserName: targetUser.name,
+        reason,
+        notes: reason
+      });
+
+      this.addAuditLog({
+        action: action === 'REASSIGNED' ? 'task_reassigned' : 'task_assigned',
+        entityType: 'operational_task',
+        entityId: task.id,
+        entityName: task.title,
+        admissionId: task.admissionId,
+        employeeName: task.employeeName,
+        details: action === 'REASSIGNED'
+          ? `Tarefa "${task.title}" transferida de ${previousUserName || 'Sem responsável'} para ${targetUser.name} por ${performer.name}.${reason ? ` Motivo: "${reason}".` : ''}`
+          : `Tarefa "${task.title}" atribuída para ${targetUser.name} por ${performer.name}.${reason ? ` Motivo: "${reason}".` : ''}`,
+        userName: performer.name
+      });
+    }
+
+    task.updatedAt = nowIso;
+    this.save();
+    return task;
+  }
+
+  /**
+   * Inicia o andamento de uma tarefa operacional
+   */
+  startOperationalTask(taskId: string, performer: { id?: string; name: string }): OperationalTask {
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status === 'CONCLUIDA') {
+      throw new Error('A tarefa já está concluída.');
+    }
+    if (task.status === 'CANCELADA') {
+      throw new Error('A tarefa está cancelada.');
+    }
+    if (task.status === 'BLOQUEADA') {
+      throw new Error('A tarefa está bloqueada. Desbloqueie-a antes de iniciar.');
+    }
+    if (task.status === 'EM_ANDAMENTO') {
+      return task; // Idempotente
+    }
+
+    const previousStatus = task.status;
+    const nowIso = new Date().toISOString();
+    task.status = 'EM_ANDAMENTO';
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'STARTED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      previousStatus,
+      newStatus: 'EM_ANDAMENTO',
+      notes: 'Tarefa colocada em andamento'
+    });
+
+    this.addAuditLog({
+      action: 'task_started',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" iniciada por ${performer.name}.`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Conclui uma tarefa operacional com observação opcional
+   */
+  completeOperationalTask(
+    taskId: string,
+    completionNotes: string | undefined,
+    performer: { id?: string; name: string }
+  ): OperationalTask {
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status === 'CONCLUIDA') {
+      return task; // Idempotência contra duplo clique
+    }
+    if (task.status === 'CANCELADA') {
+      throw new Error('Não é possível concluir uma tarefa cancelada. Reabra-a antes.');
+    }
+
+    const previousStatus = task.status;
+    const nowIso = new Date().toISOString();
+
+    task.status = 'CONCLUIDA';
+    task.completedAt = nowIso;
+    task.completedBy = performer.name;
+    task.completionNotes = completionNotes?.trim() || undefined;
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'COMPLETED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      previousStatus,
+      newStatus: 'CONCLUIDA',
+      notes: task.completionNotes || 'Tarefa concluída com sucesso'
+    });
+
+    this.addAuditLog({
+      action: 'task_completed',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" concluída por ${performer.name}.${task.completionNotes ? ` Observações: "${task.completionNotes}".` : ''}`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Bloqueia uma tarefa operacional por impedimento real (motivo obrigatório)
+   */
+  blockOperationalTask(
+    taskId: string,
+    blockReason: string,
+    performer: { id?: string; name: string }
+  ): OperationalTask {
+    const reason = (blockReason || '').trim();
+    if (!reason || reason.length < 3) {
+      throw new Error('O motivo do bloqueio é obrigatório e deve ter no mínimo 3 caracteres.');
+    }
+
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
+      throw new Error(`Não é possível bloquear uma tarefa ${task.status.toLowerCase()}.`);
+    }
+
+    const previousStatus = task.status;
+    const nowIso = new Date().toISOString();
+
+    task.status = 'BLOQUEADA';
+    task.blockedAt = nowIso;
+    task.blockedBy = performer.name;
+    task.blockReason = reason;
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'BLOCKED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      previousStatus,
+      newStatus: 'BLOQUEADA',
+      reason,
+      notes: reason
+    });
+
+    this.addAuditLog({
+      action: 'task_blocked',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" bloqueada por ${performer.name}. Motivo: "${reason}".`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Desbloqueia uma tarefa operacional
+   */
+  unblockOperationalTask(
+    taskId: string,
+    reason: string | undefined,
+    performer: { id?: string; name: string }
+  ): OperationalTask {
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status !== 'BLOQUEADA') {
+      throw new Error('Apenas tarefas com status BLOQUEADA podem ser desbloqueadas.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const newStatus: OperationalTaskStatus = 'EM_ANDAMENTO';
+
+    task.status = newStatus;
+    task.blockedAt = undefined;
+    task.blockedBy = undefined;
+    task.blockReason = undefined;
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'UNBLOCKED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      previousStatus: 'BLOQUEADA',
+      newStatus,
+      reason: reason || 'Desbloqueio operacional realizado',
+      notes: reason
+    });
+
+    this.addAuditLog({
+      action: 'task_unblocked',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" desbloqueada por ${performer.name}.${reason ? ` Observações: "${reason}".` : ''}`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Reabre uma tarefa operacional concluída ou cancelada (motivo obrigatório)
+   */
+  reopenOperationalTask(
+    taskId: string,
+    reopenReason: string,
+    performer: { id?: string; name: string }
+  ): OperationalTask {
+    const reason = (reopenReason || '').trim();
+    if (!reason || reason.length < 3) {
+      throw new Error('O motivo da reabertura é obrigatório e deve ter no mínimo 3 caracteres.');
+    }
+
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status !== 'CONCLUIDA' && task.status !== 'CANCELADA') {
+      throw new Error(`Apenas tarefas concluídas ou canceladas podem ser reabertas. Status atual: ${task.status}.`);
+    }
+
+    const previousStatus = task.status;
+    const nowIso = new Date().toISOString();
+
+    task.status = 'PENDENTE';
+    task.completedAt = undefined;
+    task.completedBy = undefined;
+    task.completionNotes = undefined;
+    task.cancelledAt = undefined;
+    task.cancelledBy = undefined;
+    task.cancelReason = undefined;
+    task.reopenedAt = nowIso;
+    task.reopenedBy = performer.name;
+    task.reopenReason = reason;
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'REOPENED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      previousStatus,
+      newStatus: 'PENDENTE',
+      reason,
+      notes: reason
+    });
+
+    this.addAuditLog({
+      action: 'task_reopened',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" reaberta por ${performer.name}. Motivo: "${reason}".`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Cancela uma tarefa operacional (motivo obrigatório, preserva histórico)
+   */
+  cancelOperationalTask(
+    taskId: string,
+    cancelReason: string,
+    performer: { id?: string; name: string }
+  ): OperationalTask {
+    const reason = (cancelReason || '').trim();
+    if (!reason || reason.length < 3) {
+      throw new Error('O motivo do cancelamento é obrigatório e deve ter no mínimo 3 caracteres.');
+    }
+
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status === 'CANCELADA') {
+      return task; // Idempotente
+    }
+
+    const previousStatus = task.status;
+    const nowIso = new Date().toISOString();
+
+    task.status = 'CANCELADA';
+    task.cancelledAt = nowIso;
+    task.cancelledBy = performer.name;
+    task.cancelReason = reason;
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'CANCELLED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      previousStatus,
+      newStatus: 'CANCELADA',
+      reason,
+      notes: reason
+    });
+
+    this.addAuditLog({
+      action: 'task_cancelled',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" cancelada por ${performer.name}. Motivo: "${reason}".`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Atualiza dados de uma tarefa operacional (título, descrição, prioridade, prazo)
+   */
+  updateOperationalTask(
+    taskId: string,
+    input: UpdateOperationalTaskInput,
+    performer: { id?: string; name: string }
+  ): OperationalTask {
+    const task = this.getOperationalTaskById(taskId);
+    if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
+      throw new Error(`Não é possível editar uma tarefa ${task.status.toLowerCase()}.`);
+    }
+
+    const nowIso = new Date().toISOString();
+
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (!title || title.length < 3) {
+        throw new Error('O título deve ter no mínimo 3 caracteres.');
+      }
+      task.title = title;
+    }
+
+    if (input.description !== undefined) {
+      task.description = input.description.trim() || undefined;
+    }
+
+    if (input.priority !== undefined) {
+      const allowedPriorities: OperationalPriority[] = ['NORMAL', 'ALTA', 'CRITICA'];
+      if (!allowedPriorities.includes(input.priority)) {
+        throw new Error('Prioridade inválida.');
+      }
+      task.priority = input.priority;
+    }
+
+    if (input.dueAt !== undefined) {
+      if (input.dueAt === null || input.dueAt === '') {
+        task.dueAt = null;
+      } else {
+        const parsedDate = new Date(input.dueAt);
+        if (isNaN(parsedDate.getTime())) {
+          throw new Error('Prazo inválido.');
+        }
+        task.dueAt = parsedDate.toISOString();
+      }
+    }
+
+    task.updatedAt = nowIso;
+
+    task.history.push({
+      id: 'th-' + crypto.randomUUID().slice(0, 8),
+      taskId,
+      action: 'UPDATED',
+      performedBy: performer.name,
+      performedByUserId: performer.id,
+      performedAt: nowIso,
+      notes: input.reason || 'Dados da tarefa atualizados'
+    });
+
+    this.addAuditLog({
+      action: 'task_updated',
+      entityType: 'operational_task',
+      entityId: task.id,
+      entityName: task.title,
+      admissionId: task.admissionId,
+      employeeName: task.employeeName,
+      details: `Tarefa operacional "${task.title}" atualizada por ${performer.name}.${input.reason ? ` Motivo: "${input.reason}".` : ''}`,
+      userName: performer.name
+    });
+
+    this.save();
+    return task;
+  }
+
+  /**
+   * Retorna todas as tarefas operacionais de uma admissão específica
+   */
+  getAdmissionOperationalTasks(admissionId: string): OperationalTask[] {
+    if (!this.data.operationalTasks) {
+      this.data.operationalTasks = [];
+    }
+    const now = Date.now();
+    return this.data.operationalTasks
+      .filter(t => t.admissionId === admissionId)
+      .map(t => ({
+        ...t,
+        isOverdue: t.dueAt
+          ? new Date(t.dueAt).getTime() < now && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+          : false
+      }));
   }
 }
 

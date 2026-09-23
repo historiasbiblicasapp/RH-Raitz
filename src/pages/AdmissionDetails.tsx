@@ -57,6 +57,7 @@ import { AdmissionProcessStepper } from '../components/AdmissionProcessStepper.t
 import { AdmissionOperationalChecklistTab } from '../components/AdmissionOperationalChecklistTab.tsx';
 import { ApprovalDecisionModal } from '../components/ApprovalDecisionModal.tsx';
 import { UnifiedHistoryTimeline } from '../components/history/UnifiedHistoryTimeline.tsx';
+import { AssignResponsibleModal } from '../components/AssignResponsibleModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
 type ActiveTab = 'resumo' | 'etapas' | 'aprovacao' | 'checklist' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
@@ -127,6 +128,9 @@ export const AdmissionDetails: React.FC = () => {
 
   // Bloco 5.6: Modal de Decisão da Aprovação Interna
   const [isApprovalModalOpen, setIsApprovalModalOpen] = useState(false);
+
+  // Bloco 6.4: Modal de Atribuição de Responsável
+  const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
 
   // Feedback de link copiado
   const [copiedLink, setCopiedLink] = useState(false);
@@ -666,6 +670,23 @@ export const AdmissionDetails: React.FC = () => {
                   <UserCheck className="w-3.5 h-3.5 text-blue-600" />
                   Ficha do Funcionário
                 </Link>
+
+                {/* Bloco 6.4: Responsável Operacional */}
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100/90 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200">
+                  <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="text-slate-500 font-normal">Responsável:</span>
+                  <span className={admission.responsibleUserName ? 'text-slate-900 font-bold' : 'text-amber-700 font-bold'}>
+                    {admission.responsibleUserName || 'Sem responsável'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsAssignModalOpen(true)}
+                    className="ml-1 text-[11px] text-blue-600 hover:text-blue-800 font-bold hover:underline cursor-pointer"
+                    title="Atribuir ou transferir responsável"
+                  >
+                    Alterar
+                  </button>
+                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1 font-medium">
                 <span className="text-slate-800 font-semibold">{admission.employee.role}</span>
@@ -2342,6 +2363,23 @@ export const AdmissionDetails: React.FC = () => {
             setIsApprovalModalOpen(false);
             fetchAdmission();
           }}
+        />
+      )}
+
+      {/* Modal de Atribuição de Responsável (Bloco 6.4) */}
+      {isAssignModalOpen && admission && (
+        <AssignResponsibleModal
+          isOpen={isAssignModalOpen}
+          onClose={() => setIsAssignModalOpen(false)}
+          onSuccess={() => {
+            fetchAdmission();
+          }}
+          admissionId={admission.id}
+          admissionCode={admission.id.replace('adm-', 'ADM-').slice(0, 10).toUpperCase()}
+          employeeName={admission.employee.name}
+          currentResponsibleId={admission.responsibleUserId}
+          currentResponsibleName={admission.responsibleUserName}
+          updatedAt={admission.updatedAt}
         />
       )}
     </div>

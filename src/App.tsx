@@ -43,6 +43,10 @@ import { EmployeesPage } from './pages/EmployeesPage.tsx';
 import { EmployeeDetailsPage } from './pages/EmployeeDetailsPage.tsx';
 import { OperationalChecklistPage } from './pages/OperationalChecklistPage.tsx';
 import { ApprovalQueue } from './pages/ApprovalQueue.tsx';
+import { OperationsHubPage } from './pages/OperationsHubPage.tsx';
+import { AdmissionKpiPage } from './pages/AdmissionKpiPage.tsx';
+import { AdmissionBottleneckPage } from './pages/AdmissionBottleneckPage.tsx';
+import { WorkDistributionPage } from './pages/WorkDistributionPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -63,6 +67,20 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/indicadores" element={<AdmissionKpiPage />} />
+            <Route path="/kpis" element={<AdmissionKpiPage />} />
+            <Route path="/admissoes/indicadores" element={<AdmissionKpiPage />} />
+            <Route path="/gargalos" element={<AdmissionBottleneckPage />} />
+            <Route path="/bottlenecks" element={<AdmissionBottleneckPage />} />
+            <Route path="/analise-gargalos" element={<AdmissionBottleneckPage />} />
+            <Route path="/admissoes/gargalos" element={<AdmissionBottleneckPage />} />
+            <Route path="/operacao" element={<OperationsHubPage />} />
+            <Route path="/operacoes" element={<OperationsHubPage />} />
+            <Route path="/central-de-operacoes" element={<OperationsHubPage />} />
+            <Route path="/distribuicao" element={<WorkDistributionPage />} />
+            <Route path="/distribuicao-trabalho" element={<WorkDistributionPage />} />
+            <Route path="/responsaveis" element={<WorkDistributionPage />} />
+            <Route path="/gestao-responsaveis" element={<WorkDistributionPage />} />
             <Route path="/admissoes" element={<AdmissionsList />} />
             <Route path="/aprovacoes" element={<ApprovalQueue />} />
             <Route path="/admissoes/aprovacoes" element={<ApprovalQueue />} />

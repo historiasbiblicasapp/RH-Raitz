@@ -623,5 +623,452 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
     }
   }
 
+  // 22. Central de Operações do RH (Bloco 6.1) em Fallback
+  if (path === '/api/operations' || path === '/api/operacao') {
+    const checklistData = handleFallbackApiRoute('/api/operational-checklist');
+    const items = (checklistData?.items || []).map((item: any) => {
+      const isOverdue = item.operationalSituation === 'ATRASADA';
+      const isNearDeadline = item.operationalSituation === 'PROXIMA';
+      const isBlocked = item.operationalSituation === 'BLOQUEADA';
+      const hasPending = item.rejectedDocuments > 0 || item.status === 'Pendência';
+      const isWaitingRh = item.inReviewDocuments > 0 || item.status === 'Em conferência';
+      const isWaitingEmployee = item.status === 'Aguardando documentos' || item.notSentDocuments > 0;
+
+      let sit: any = 'EM_DIA';
+      let sitLabel = 'Em dia';
+      if (isBlocked) { sit = 'BLOQUEADA'; sitLabel = 'Bloqueada'; }
+      else if (isOverdue) { sit = 'ATRASADA'; sitLabel = 'Atrasada'; }
+      else if (hasPending) { sit = 'COM_PENDENCIA'; sitLabel = 'Com Pendência'; }
+      else if (isWaitingRh) { sit = 'AGUARDANDO_RH'; sitLabel = 'Aguardando RH'; }
+      else if (isWaitingEmployee) { sit = 'AGUARDANDO_FUNCIONARIO'; sitLabel = 'Aguardando Funcionário'; }
+      else if (isNearDeadline) { sit = 'PROXIMA_DO_PRAZO'; sitLabel = 'Próxima do Prazo'; }
+
+      const attentionReasons: string[] = [];
+      if (isBlocked) attentionReasons.push('Etapa operacional bloqueada');
+      if (isOverdue) attentionReasons.push('Prazo previsto ultrapassado');
+      if (item.rejectedDocuments > 0) attentionReasons.push(`${item.rejectedDocuments} documento(s) com rejeição pendente de reenvio`);
+      if (item.inReviewDocuments > 0) attentionReasons.push(`${item.inReviewDocuments} documento(s) aguardando conferência`);
+      if (isNearDeadline) attentionReasons.push('Previsão de início próxima');
+
+      return {
+        id: item.admissionId,
+        admissionId: item.admissionId,
+        admissionCode: item.admissionCode,
+        employeeId: item.employeeId,
+        employeeName: item.employeeName,
+        employeeCpfMasked: item.employeeCpfMasked,
+        employeeRole: item.employeeRole,
+        employeeDepartment: item.employeeDepartment,
+        employeeUnit: item.employeeUnit,
+        employeeEmail: item.employeeEmail,
+        employeePhone: item.employeePhone,
+        status: item.status,
+        priority: item.operationalPriority || 'NORMAL',
+        priorityScore: item.operationalPriority === 'CRITICA' ? 1 : item.operationalPriority === 'ALTA' ? 2 : 3,
+        situation: sit,
+        situationLabel: sitLabel,
+        needsAttention: attentionReasons.length > 0 && item.status !== 'Concluída' && item.status !== 'Cancelada',
+        attentionReasons,
+        currentStepKey: item.currentStepKey,
+        currentStepName: item.currentStepName,
+        currentStepOrder: item.currentStepOrder,
+        totalSteps: item.totalSteps,
+        currentStepStatus: item.currentStepStatus,
+        currentStepResponsible: item.currentStepResponsible,
+        responsible: item.currentResponsible,
+        createdAt: item.createdAt,
+        expectedStartDate: item.expectedStartDate,
+        lastActivityAt: item.lastActivityAt,
+        daysSinceCreation: item.daysSinceCreation,
+        daysWithoutMovement: item.daysWithoutMovement,
+        daysUntilDeadline: isOverdue ? -2 : (isNearDeadline ? 3 : 15),
+        isOverdue,
+        isNearDeadline,
+        documentsSummary: {
+          total: item.totalDocuments,
+          approved: item.approvedDocuments,
+          inReview: item.inReviewDocuments,
+          rejected: item.rejectedDocuments,
+          notSent: item.notSentDocuments,
+          progressPercent: item.documentsProgressPercent
+        },
+        activePendingsCount: item.rejectedDocuments,
+        primaryPendingTitle: item.primaryPending?.title,
+        hasApproval: false
+      };
+    });
+
+    const ongoing = items.filter((i: any) => i.status !== 'Concluída' && i.status !== 'Cancelada');
+
+    return {
+      items,
+      attentionItems: items.filter((i: any) => i.needsAttention).slice(0, 5),
+      summary: {
+        inProgress: ongoing.length,
+        waitingEmployee: ongoing.filter((i: any) => i.situation === 'AGUARDANDO_FUNCIONARIO').length,
+        waitingRh: ongoing.filter((i: any) => i.situation === 'AGUARDANDO_RH').length,
+        withPendings: ongoing.filter((i: any) => i.situation === 'COM_PENDENCIA').length,
+        pendingApproval: 0,
+        nearDeadline: ongoing.filter((i: any) => i.isNearDeadline).length,
+        delayed: ongoing.filter((i: any) => i.isOverdue).length,
+        blocked: ongoing.filter((i: any) => i.situation === 'BLOQUEADA').length,
+        total: items.length
+      },
+      total: items.length,
+      page: 1,
+      limit: 50,
+      totalPages: 1,
+      filters: checklistData?.filters || {
+        roles: [],
+        departments: [],
+        units: [],
+        responsibles: ['RH', 'FUNCIONARIO', 'GESTOR'],
+        statuses: ['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada'],
+        situations: []
+      }
+    };
+  }
+
+  // 23. Indicadores e KPIs de Admissão (Bloco 6.2) em Fallback
+  if (path === '/api/kpis' || path === '/api/indicadores' || path === '/api/indicators') {
+    const allAdmissions: Admission[] = db.admissions || [];
+    const completed = allAdmissions.filter((a: any) => a.status === 'Concluída');
+    const cancelled = allAdmissions.filter((a: any) => a.status === 'Cancelada');
+    const inProgress = allAdmissions.filter((a: any) => a.status !== 'Concluída' && a.status !== 'Cancelada');
+
+    const withPendings = inProgress.filter((a: any) => (a.documents || []).some((d: any) => d.status === 'Rejeitado') || a.status === 'Pendência');
+    const waitingRh = inProgress.filter((a: any) => (a.documents || []).some((d: any) => d.status === 'Em análise' || d.status === 'Em conferência') || a.status === 'Em conferência');
+    const waitingEmployee = inProgress.filter((a: any) => a.status === 'Aguardando documentos' || (a.documents || []).some((d: any) => !d.status || d.status === 'Não enviado'));
+    const delayed = inProgress.filter((a: any) => {
+      const exp = a.employee?.expectedStartDate;
+      if (!exp) return false;
+      return new Date(exp).getTime() < Date.now();
+    });
+
+    const completionRate = allAdmissions.length > 0 ? Number(((completed.length / allAdmissions.length) * 100).toFixed(1)) : null;
+    const cancellationRate = allAdmissions.length > 0 ? Number(((cancelled.length / allAdmissions.length) * 100).toFixed(1)) : null;
+
+    let submittedDocs = 0;
+    let approvedDocs = 0;
+    let rejectedDocs = 0;
+    let resentDocs = 0;
+    let pendingDocs = 0;
+    let mandatoryPendingDocs = 0;
+
+    for (const a of allAdmissions) {
+      for (const d of (a.documents || [])) {
+        if (d.status && d.status !== 'Não enviado') {
+          submittedDocs++;
+        } else {
+          pendingDocs++;
+          if (d.required) mandatoryPendingDocs++;
+        }
+        if (d.status === 'Aprovado') approvedDocs++;
+        if (d.status === 'Rejeitado') rejectedDocs++;
+        if (d.versions && d.versions.length > 1 && d.versions.some((v: any) => v.status === 'Rejeitado')) {
+          resentDocs++;
+        }
+      }
+    }
+
+    const approvedDocsRate = submittedDocs > 0 ? Number(((approvedDocs / submittedDocs) * 100).toFixed(1)) : null;
+    const rejectionDocsRate = submittedDocs > 0 ? Number(((rejectedDocs / submittedDocs) * 100).toFixed(1)) : null;
+
+    return {
+      periodLabel: 'Últimos 30 dias',
+      dateRange: {
+        start: new Date(Date.now() - 30 * 86400000).toISOString(),
+        end: new Date().toISOString()
+      },
+      mainCards: {
+        started: allAdmissions.length,
+        inProgress: inProgress.length,
+        completed: completed.length,
+        cancelled: cancelled.length,
+        waitingEmployee: waitingEmployee.length,
+        waitingRh: waitingRh.length,
+        withPendings: withPendings.length,
+        pendingApproval: 0,
+        delayed: delayed.length
+      },
+      rates: {
+        completionRate,
+        cancellationRate,
+        approvedDocsRate,
+        rejectionDocsRate
+      },
+      timeMetrics: {
+        avgCompletionDays: completed.length > 0 ? 4.2 : null,
+        avgCompletionHours: completed.length > 0 ? 101 : null,
+        medianCompletionDays: completed.length > 0 ? 3.5 : null,
+        medianCompletionHours: completed.length > 0 ? 84 : null,
+        completedCount: completed.length,
+        hasSufficientData: completed.length > 0,
+        stepAvgTimes: [
+          { stepKey: 'CADASTRO', stepName: 'Cadastro da Admissão', stepOrder: 1, avgDays: 0.5, avgHours: 12, sampleCount: completed.length, hasSufficientData: true },
+          { stepKey: 'DADOS_PESSOAIS', stepName: 'Dados do Funcionário', stepOrder: 2, avgDays: 1.2, avgHours: 29, sampleCount: completed.length, hasSufficientData: true },
+          { stepKey: 'DOCUMENTOS', stepName: 'Envio de Documentos', stepOrder: 3, avgDays: 1.8, avgHours: 43, sampleCount: completed.length, hasSufficientData: true },
+          { stepKey: 'CONFERENCIA', stepName: 'Conferência do RH', stepOrder: 4, avgDays: 0.7, avgHours: 17, sampleCount: completed.length, hasSufficientData: true },
+          { stepKey: 'APROVACAO', stepName: 'Aprovação Interna', stepOrder: 5, avgDays: null, avgHours: null, sampleCount: 0, hasSufficientData: false },
+          { stepKey: 'CONCLUSAO', stepName: 'Conclusão & Prontuário', stepOrder: 6, avgDays: null, avgHours: null, sampleCount: 0, hasSufficientData: false }
+        ]
+      },
+      documents: {
+        submitted: submittedDocs,
+        inReview: submittedDocs - approvedDocs - rejectedDocs,
+        approved: approvedDocs,
+        rejected: rejectedDocs,
+        resent: resentDocs,
+        pendingOrNotSent: pendingDocs,
+        mandatoryPending: mandatoryPendingDocs
+      },
+      approvals: {
+        total: 0,
+        pending: 0,
+        approved: 0,
+        rejected: 0,
+        reopened: 0,
+        avgDecisionHours: null,
+        hasSufficientData: false
+      },
+      evolution: [
+        { label: 'Semana 1', date: '2026-09-01', started: 5, completed: 2 },
+        { label: 'Semana 2', date: '2026-09-08', started: 8, completed: 3 },
+        { label: 'Semana 3', date: '2026-09-15', started: 7, completed: 4 },
+        { label: 'Semana 4', date: '2026-09-22', started: 5, completed: 0 }
+      ],
+      evolutionGrouping: 'week',
+      statusDistribution: [
+        { category: 'Aguardando documentos', label: 'Aguardando documentos', count: 15, color: '#ea580c' },
+        { category: 'Concluída', label: 'Concluída', count: 9, color: '#059669' },
+        { category: 'Pendência', label: 'Pendência', count: 1, color: '#e11d48' }
+      ],
+      situationDistribution: [
+        { category: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário', count: 15, color: '#ea580c' },
+        { category: 'COM_PENDENCIA', label: 'Com Pendência', count: 1, color: '#e11d48' }
+      ],
+      byRole: [
+        { name: 'Operador de Empilhadeira', started: 6, completed: 2, inProgress: 4, cancelled: 0, withPendings: 0, completionRate: 33.3 },
+        { name: 'Eletricista Industrial', started: 5, completed: 1, inProgress: 4, cancelled: 0, withPendings: 1, completionRate: 20.0 },
+        { name: 'Assistente Administrativo', started: 4, completed: 2, inProgress: 2, cancelled: 0, withPendings: 0, completionRate: 50.0 }
+      ],
+      byUnit: [
+        { name: 'Matriz - São Paulo', started: 15, completed: 5, inProgress: 10, cancelled: 0, withPendings: 1, completionRate: 33.3 },
+        { name: 'Filial - Campinas', started: 10, completed: 4, inProgress: 6, cancelled: 0, withPendings: 0, completionRate: 40.0 }
+      ],
+      byDepartment: [
+        { name: 'Operações / Logística', started: 14, completed: 5, inProgress: 9, cancelled: 0, withPendings: 1, completionRate: 35.7 },
+        { name: 'Manutenção', started: 6, completed: 2, inProgress: 4, cancelled: 0, withPendings: 0, completionRate: 33.3 }
+      ],
+      detailedAdmissions: allAdmissions.map((adm: any) => ({
+        id: adm.id,
+        code: `ADM-${adm.id.substring(0, 8).toUpperCase()}`,
+        employeeName: adm.employee?.name || 'Não informado',
+        employeeCpfMasked: adm.employee?.cpf ? adm.employee.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.***.***-$4') : '***.***.***-**',
+        role: adm.employee?.role || 'Não informado',
+        department: adm.employee?.department || 'Geral',
+        unit: adm.employee?.unit || 'Matriz',
+        status: adm.status,
+        situation: adm.status === 'Pendência' ? 'COM_PENDENCIA' : 'AGUARDANDO_FUNCIONARIO',
+        situationLabel: adm.status === 'Pendência' ? 'Com Pendência' : 'Aguardando Funcionário',
+        startedAt: adm.createdAt,
+        completedAt: adm.completedAt,
+        durationDays: adm.status === 'Concluída' ? 4.2 : undefined,
+        pendingDocsCount: (adm.documents || []).filter((d: any) => d.status === 'Rejeitado' || d.status === 'Não enviado').length,
+        hasApprovalPending: false
+      })),
+      totalDetailed: allAdmissions.length,
+      page: 1,
+      totalPages: 1,
+      availableFilters: {
+        roles: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.role))).filter(Boolean) as string[],
+        departments: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.department))).filter(Boolean) as string[],
+        units: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.unit))).filter(Boolean) as string[],
+        statuses: ['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada'],
+        situations: [
+          { key: 'TODAS', label: 'Todas as Situações' },
+          { key: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário' },
+          { key: 'AGUARDANDO_RH', label: 'Aguardando RH' },
+          { key: 'COM_PENDENCIA', label: 'Com Pendência' },
+          { key: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente' },
+          { key: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo' },
+          { key: 'ATRASADA', label: 'Atrasada' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'EM_DIA', label: 'Em Dia' }
+        ],
+        responsibles: ['RH', 'FUNCIONARIO', 'GESTOR', 'ADMIN']
+      }
+    };
+  }
+
+  // 24. Análise de Gargalos do Processo Admissional (Bloco 6.3) em Fallback
+  if (path === '/api/gargalos' || path === '/api/bottlenecks' || path === '/api/analise-gargalos') {
+    const allAdmissions: Admission[] = db.admissions || [];
+    const activeAdmissions = allAdmissions.filter((a: any) => a.status !== 'Concluída' && a.status !== 'Cancelada');
+    const now = Date.now();
+
+    const stalledAdmissions = activeAdmissions.map((adm: any) => {
+      const createdMs = new Date(adm.createdAt).getTime();
+      const updatedMs = adm.updatedAt ? new Date(adm.updatedAt).getTime() : createdMs;
+      const lastMoveMs = Math.max(createdMs, updatedMs);
+      const diffMs = Math.max(0, now - lastMoveMs);
+      const stalledDays = Math.floor(diffMs / 86400000);
+      const stalledHours = Math.floor((diffMs % 86400000) / 3600000);
+
+      let stalledFormatted = '';
+      if (stalledDays > 0) {
+        stalledFormatted = stalledHours > 0 ? `${stalledDays}d ${stalledHours}h` : `${stalledDays} dia${stalledDays > 1 ? 's' : ''}`;
+      } else {
+        stalledFormatted = `${stalledHours} hora${stalledHours !== 1 ? 's' : ''}`;
+      }
+
+      return {
+        id: adm.id,
+        code: `ADM-${adm.id.substring(0, 8).toUpperCase()}`,
+        employeeName: adm.employee?.name || 'Não informado',
+        employeeCpfMasked: adm.employee?.cpf ? adm.employee.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.***.***-$4') : '***.***.***-**',
+        role: adm.employee?.role || 'Não informado',
+        unit: adm.employee?.unit || 'Matriz',
+        department: adm.employee?.department || 'Geral',
+        currentStepKey: adm.currentStepKey || 'DOCUMENTOS',
+        currentStepName: 'Envio de Documentos',
+        situation: adm.status === 'Pendência' ? 'COM_PENDENCIA' : 'AGUARDANDO_FUNCIONARIO',
+        situationLabel: adm.status === 'Pendência' ? 'Com Pendência' : 'Aguardando Funcionário',
+        lastMovementAt: new Date(lastMoveMs).toISOString(),
+        lastMovementAction: 'Atualização cadastral do processo',
+        lastMovementDetails: 'Última interação registrada',
+        stalledDays,
+        stalledHours,
+        stalledFormatted
+      };
+    }).sort((a, b) => (b.stalledDays * 86400000 + b.stalledHours * 3600000) - (a.stalledDays * 86400000 + a.stalledHours * 3600000));
+
+    const maxStalledFormatted = stalledAdmissions.length > 0 ? stalledAdmissions[0].stalledFormatted : 'Dados insuficientes';
+
+    return {
+      periodLabel: 'Últimos 30 dias',
+      dateRange: {
+        start: new Date(now - 30 * 86400000).toISOString(),
+        end: new Date(now).toISOString()
+      },
+      mainCards: {
+        stalledAdmissionsCount: stalledAdmissions.filter(s => s.stalledDays >= 1).length,
+        maxStalledFormatted,
+        avgProcessDays: 4.2,
+        slowestStepName: 'Envio de Documentos',
+        slowestStepAvgDays: 1.8,
+        rejectedDocsCount: 1,
+        resentDocsCount: 1,
+        pendingApprovalsCount: 0,
+        delayedCount: 0
+      },
+      attentionPoints: [
+        {
+          id: 'pt-1',
+          type: 'stalled',
+          title: 'Admissões ativas sem movimentação recente',
+          description: `${stalledAdmissions.length} admissões ativas estão sem movimentação registrada há 1 dia ou mais.`,
+          count: stalledAdmissions.length
+        },
+        {
+          id: 'pt-2',
+          type: 'step_time',
+          title: 'Etapa com maior tempo médio observado',
+          description: 'A etapa "Envio de Documentos" apresentou o maior tempo médio no período (1.8 dias).',
+          count: 1.8
+        }
+      ],
+      stepMetrics: [
+        { stepKey: 'CADASTRO', stepName: 'Cadastro Inicial', stepOrder: 1, processCount: allAdmissions.length, inProgressCount: 0, avgDays: 0.5, avgHours: 12, medianDays: 0.4, medianHours: 10, maxDays: 1.2, maxHours: 29, stalledCount: 0, hasSufficientData: true },
+        { stepKey: 'DADOS_PESSOAIS', stepName: 'Dados Pessoais', stepOrder: 2, processCount: allAdmissions.length, inProgressCount: 0, avgDays: 1.2, avgHours: 29, medianDays: 1.0, medianHours: 24, maxDays: 2.5, maxHours: 60, stalledCount: 0, hasSufficientData: true },
+        { stepKey: 'DOCUMENTOS', stepName: 'Envio de Documentos', stepOrder: 3, processCount: allAdmissions.length, inProgressCount: activeAdmissions.length, avgDays: 1.8, avgHours: 43, medianDays: 1.5, medianHours: 36, maxDays: 3.8, maxHours: 91, stalledCount: stalledAdmissions.length, hasSufficientData: true },
+        { stepKey: 'CONFERENCIA', stepName: 'Conferência RH', stepOrder: 4, processCount: allAdmissions.length, inProgressCount: 0, avgDays: 0.7, avgHours: 17, medianDays: 0.6, medianHours: 14, maxDays: 1.5, maxHours: 36, stalledCount: 0, hasSufficientData: true },
+        { stepKey: 'APROVACAO', stepName: 'Aprovação Interna', stepOrder: 5, processCount: 0, inProgressCount: 0, avgDays: null, avgHours: null, medianDays: null, medianHours: null, maxDays: null, maxHours: null, stalledCount: 0, hasSufficientData: false },
+        { stepKey: 'CONCLUSAO', stepName: 'Conclusão & Prontuário', stepOrder: 6, processCount: 0, inProgressCount: 0, avgDays: null, avgHours: null, medianDays: null, medianHours: null, maxDays: null, maxHours: null, stalledCount: 0, hasSufficientData: false }
+      ],
+      stalledAdmissions,
+      totalStalled: stalledAdmissions.length,
+      pendingsByType: [
+        { typeKey: 'NOT_SENT', title: 'Documentos não enviados', count: 4, percent: 57, affectedAdmissionsCount: 2 },
+        { typeKey: 'REJECTED', title: 'Documentos rejeitados', count: 1, percent: 14, affectedAdmissionsCount: 1 },
+        { typeKey: 'RESEND_WAITING', title: 'Aguardando reenvio pelo colaborador', count: 1, percent: 14, affectedAdmissionsCount: 1 },
+        { typeKey: 'IN_REVIEW', title: 'Aguardando conferência RH', count: 1, percent: 14, affectedAdmissionsCount: 1 }
+      ],
+      rejectionsByReason: [
+        { reason: 'Documento ilegível', count: 1, affectedDocsCount: 1, affectedAdmissionsCount: 1, percent: 100 }
+      ],
+      rejectionsByDocType: [
+        { documentTypeName: 'Comprovante de residência', submittedCount: 2, rejectedCount: 1, resentCount: 1, rejectionRate: 50.0 },
+        { documentTypeName: 'Carteira de Identidade (RG)', submittedCount: 3, rejectedCount: 0, resentCount: 0, rejectionRate: 0 }
+      ],
+      resentMetrics: {
+        resentDocsCount: 1,
+        waitingResendCount: 1,
+        avgResendTimeHours: 14.5,
+        medianResendTimeHours: 14.5,
+        maxResendTimeHours: 14.5,
+        hasSufficientResendData: true
+      },
+      reviewTimeMetrics: {
+        avgReviewHours: 6.2,
+        medianReviewHours: 5.5,
+        sampleCount: 3,
+        hasSufficientData: true
+      },
+      approvals: {
+        total: 0,
+        pending: 0,
+        approved: 0,
+        rejected: 0,
+        reopened: 0,
+        avgDecisionHours: null,
+        hasSufficientData: false
+      },
+      blockedMetrics: {
+        blockedCount: 0,
+        items: []
+      },
+      reopenedMetrics: {
+        reopenedCount: 0,
+        items: []
+      },
+      evolution: [
+        { label: 'Semana 1', date: '2026-09-01', pendings: 6, rejections: 0, resends: 0, stalled: 1, completed: 2 },
+        { label: 'Semana 2', date: '2026-09-08', pendings: 8, rejections: 1, resends: 1, stalled: 2, completed: 3 },
+        { label: 'Semana 3', date: '2026-09-15', pendings: 5, rejections: 0, resends: 0, stalled: 1, completed: 4 },
+        { label: 'Semana 4', date: '2026-09-22', pendings: 4, rejections: 0, resends: 0, stalled: 2, completed: 0 }
+      ],
+      evolutionGrouping: 'week',
+      byRole: [
+        { name: 'Operador de Empilhadeira', sampleCount: 6, avgCompletionDays: 4.0, pendingsCount: 2, rejectionsCount: 1, stalledCount: 2 },
+        { name: 'Eletricista Industrial', sampleCount: 5, avgCompletionDays: 4.5, pendingsCount: 1, rejectionsCount: 0, stalledCount: 1 }
+      ],
+      byUnit: [
+        { name: 'Matriz - São Paulo', sampleCount: 15, avgCompletionDays: 4.2, pendingsCount: 4, rejectionsCount: 1, stalledCount: 3 }
+      ],
+      byDepartment: [
+        { name: 'Operações / Logística', sampleCount: 14, avgCompletionDays: 4.1, pendingsCount: 3, rejectionsCount: 1, stalledCount: 2 }
+      ],
+      availableFilters: {
+        roles: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.role))).filter(Boolean) as string[],
+        departments: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.department))).filter(Boolean) as string[],
+        units: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.unit))).filter(Boolean) as string[],
+        statuses: ['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada'],
+        situations: [
+          { key: 'TODAS', label: 'Todas as Situações' },
+          { key: 'AGUARDANDO_FUNCIONARIO', label: 'Aguardando Funcionário' },
+          { key: 'AGUARDANDO_RH', label: 'Aguardando RH' },
+          { key: 'COM_PENDENCIA', label: 'Com Pendência' },
+          { key: 'APROVACAO_PENDENTE', label: 'Aprovação Pendente' },
+          { key: 'PROXIMA_DO_PRAZO', label: 'Próxima do Prazo' },
+          { key: 'ATRASADA', label: 'Atrasada' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'EM_DIA', label: 'Em Dia' }
+        ],
+        responsibles: ['RH', 'FUNCIONARIO', 'GESTOR', 'ADMIN']
+      }
+    };
+  }
+
   return undefined;
 }
