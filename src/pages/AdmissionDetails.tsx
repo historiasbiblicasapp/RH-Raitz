@@ -41,7 +41,8 @@ import {
   MessageSquare,
   CalendarClock,
   ShieldCheck,
-  RotateCcw
+  RotateCcw,
+  CheckSquare
 } from 'lucide-react';
 import { Admission, AdmissionDocument, AuditLog, CommunicationLog } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
@@ -55,12 +56,13 @@ import { CommunicationModal } from '../components/CommunicationModal.tsx';
 import { AdmissionTimeline } from '../components/AdmissionTimeline.tsx';
 import { AdmissionProcessStepper } from '../components/AdmissionProcessStepper.tsx';
 import { AdmissionOperationalChecklistTab } from '../components/AdmissionOperationalChecklistTab.tsx';
+import { AdmissionOperationalTasksTab } from '../components/AdmissionOperationalTasksTab.tsx';
 import { ApprovalDecisionModal } from '../components/ApprovalDecisionModal.tsx';
 import { UnifiedHistoryTimeline } from '../components/history/UnifiedHistoryTimeline.tsx';
 import { AssignResponsibleModal } from '../components/AssignResponsibleModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 
-type ActiveTab = 'resumo' | 'etapas' | 'aprovacao' | 'checklist' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
+type ActiveTab = 'resumo' | 'etapas' | 'aprovacao' | 'checklist' | 'tarefas' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
 
 export const AdmissionDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -78,8 +80,14 @@ export const AdmissionDetails: React.FC = () => {
     const tabParam = searchParams.get('tab');
     const docIdParam = searchParams.get('docId');
 
-    if (tabParam && ['resumo', 'etapas', 'checklist', 'dados', 'documentos', 'pendencias', 'prazos', 'acompanhamento', 'historico', 'convite'].includes(tabParam)) {
-      setActiveTab(tabParam === 'acompanhamento' ? 'prazos' : (tabParam as ActiveTab));
+    if (tabParam && ['resumo', 'etapas', 'aprovacao', 'checklist', 'tarefas', 'tasks', 'dados', 'documentos', 'pendencias', 'prazos', 'acompanhamento', 'historico', 'convite'].includes(tabParam)) {
+      if (tabParam === 'acompanhamento') {
+        setActiveTab('prazos');
+      } else if (tabParam === 'tasks') {
+        setActiveTab('tarefas');
+      } else {
+        setActiveTab(tabParam as ActiveTab);
+      }
     }
     if (docIdParam) {
       setHighlightedDocId(docIdParam);
@@ -797,6 +805,18 @@ export const AdmissionDetails: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setActiveTab('tarefas')}
+            className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'tarefas'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            <span>Tarefas</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('dados')}
             className={`px-3.5 py-2 rounded-xl transition-colors whitespace-nowrap cursor-pointer ${
               activeTab === 'dados'
@@ -990,11 +1010,19 @@ export const AdmissionDetails: React.FC = () => {
           admission={admission}
           onUpdateAdmission={setAdmission}
           onNavigateTab={(tab, docId) => {
-            if (['resumo', 'etapas', 'checklist', 'dados', 'documentos', 'pendencias', 'prazos', 'historico', 'convite'].includes(tab)) {
+            if (['resumo', 'etapas', 'aprovacao', 'checklist', 'tarefas', 'dados', 'documentos', 'pendencias', 'prazos', 'historico', 'convite'].includes(tab)) {
               setActiveTab(tab as ActiveTab);
               if (docId) setHighlightedDocId(docId);
             }
           }}
+        />
+      )}
+
+      {/* ABA: TAREFAS OPERACIONAIS */}
+      {activeTab === 'tarefas' && (
+        <AdmissionOperationalTasksTab
+          admission={admission}
+          onRefreshAdmission={fetchAdmission}
         />
       )}
 

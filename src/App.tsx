@@ -47,6 +47,7 @@ import { OperationsHubPage } from './pages/OperationsHubPage.tsx';
 import { AdmissionKpiPage } from './pages/AdmissionKpiPage.tsx';
 import { AdmissionBottleneckPage } from './pages/AdmissionBottleneckPage.tsx';
 import { WorkDistributionPage } from './pages/WorkDistributionPage.tsx';
+import { OperationalTasksPage } from './pages/OperationalTasksPage.tsx';
 
 // Página do Funcionário (Mobile-first)
 import { EmployeePortal } from './pages/EmployeePortal.tsx';
@@ -87,6 +88,9 @@ export function App() {
             <Route path="/checklist" element={<OperationalChecklistPage />} />
             <Route path="/checklist-operacional" element={<OperationalChecklistPage />} />
             <Route path="/admissoes/checklist" element={<OperationalChecklistPage />} />
+            <Route path="/tarefas" element={<OperationalTasksPage />} />
+            <Route path="/tarefas-operacionais" element={<OperationalTasksPage />} />
+            <Route path="/tasks" element={<OperationalTasksPage />} />
             <Route path="/funcionarios" element={<EmployeesPage />} />
             <Route path="/funcionarios/:id" element={<EmployeeDetailsPage />} />
             <Route path="/colaboradores" element={<EmployeesPage />} />

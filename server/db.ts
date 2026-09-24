@@ -150,7 +150,11 @@ import {
   OperationalTaskFilters,
   OperationalTasksResponse,
   CreateOperationalTaskInput,
-  UpdateOperationalTaskInput
+  UpdateOperationalTaskInput,
+  AutomationRoutineKey,
+  AutomationRoutineRule,
+  AutomationExecutionRecord,
+  AutomationsHubResponse
 } from '../src/types/index.ts';
 import { maskCPF, validateCPF, validateEmail } from '../src/lib/cpf.ts';
 import { initialDbData } from '../src/data/initialDb.ts';
@@ -179,6 +183,7 @@ export interface DatabaseSchema {
   admissionProcess?: AdmissionProcessConfig;
   admissionProcessVersions?: AdmissionProcessVersion[];
   operationalTasks?: OperationalTask[];
+  automationExecutions?: AutomationExecutionRecord[];
 }
 
 export const DEFAULT_ADMISSION_PROCESS_STEPS: ConfigurableProcessStep[] = [
@@ -358,6 +363,13 @@ export function generateDefaultSettings(): SystemSettings {
       sessionTimeoutMinutes: 480,
       restrictAccessToRhAndAdmin: true,
       enforceAuditLogging: true
+    },
+    automations: {
+      DOCUMENT_REJECTED: true,
+      DOCUMENT_RESUBMITTED: true,
+      ALL_REQUIRED_DOCUMENTS_APPROVED: true,
+      APPROVAL_COMPLETED: true,
+      TASK_COMPLETED: true
     },
     updatedAt: now,
     updatedBy: 'Sistema'
@@ -1049,6 +1061,17 @@ export class Database {
         if (!this.data.users) this.data.users = [];
         if (!this.data.communicationLogs) this.data.communicationLogs = [];
         if (!this.data.operationalTasks) this.data.operationalTasks = [];
+        if (!this.data.automationExecutions) this.data.automationExecutions = [];
+
+        if (this.data.settings && !this.data.settings.automations) {
+          this.data.settings.automations = {
+            DOCUMENT_REJECTED: true,
+            DOCUMENT_RESUBMITTED: true,
+            ALL_REQUIRED_DOCUMENTS_APPROVED: true,
+            APPROVAL_COMPLETED: true,
+            TASK_COMPLETED: true
+          };
+        }
 
         // Garante a existência e integridade dos cargos (Job Positions)
         if (!this.data.jobPositions || this.data.jobPositions.length === 0) {
@@ -4934,6 +4957,11 @@ export class Database {
       link: `/admissoes/${admissionId}`
     });
 
+    // Bloco 6.6: Automação determinística para documento reenviado
+    if (isReupload) {
+      this.executeAutomationOnDocumentResubmitted(admission, doc);
+    }
+
     this.save();
     return doc;
   }
@@ -5058,6 +5086,19 @@ export class Database {
       });
     }
 
+    // Bloco 6.6: Disparo de rotinas determinísticas de automação
+    if (decision === 'Aprovado') {
+      this.executeAutomationOnAllRequiredApproved(targetAdmission, reviewerName);
+    } else {
+      this.executeAutomationOnDocumentRejected(
+        targetAdmission,
+        targetDocument,
+        reviewerName,
+        rejectionReason!.trim(),
+        rejectionNotes ? rejectionNotes.trim() : undefined
+      );
+    }
+
     this.save();
     return { admission: targetAdmission, document: targetDocument };
   }
@@ -5081,25 +5122,43 @@ export class Database {
       ? Math.round((approvedDocs.length / requiredDocs.length) * 100)
       : 100;
 
-    // REGRA: Uma admissão só pode ser "CONCLUÍDA" se todos os obrigatórios estiverem aprovados
+    // REGRA 6.6.C: Uma admissão só pode ser "CONCLUÍDA" se todos os obrigatórios estiverem aprovados,
+    // E NÃO houver aprovação interna obrigatória pendente, E não houver outras etapas obrigatórias pendentes!
+    // "Nunca concluir automaticamente uma admissão se ainda existir aprovação obrigatória."
+    const hasPendingMandatoryApproval = Boolean(
+      admission.approval &&
+      admission.approval.required &&
+      admission.approval.status !== 'APROVADA'
+    );
+
+    const otherRequiredStepsPending = (admission.processSteps || []).some(
+      s => s.required && s.stepKey !== 'DOCUMENTOS' && s.stepKey !== 'CADASTRO' && s.stepKey !== 'DADOS_PESSOAIS' && s.status !== 'CONCLUIDA' && s.status !== 'IGNORADA'
+    );
+
     if (approvedDocs.length === requiredDocs.length && requiredDocs.length > 0) {
-      admission.status = 'Concluída';
-      if (!admission.completedAt) {
-        admission.completedAt = new Date().toISOString();
-        this.addAuditLog({
-          userName: 'Sistema',
-          action: 'Admissão concluída',
-          admissionId: admission.id,
-          employeeName: admission.employee.name,
-          details: 'Todos os documentos obrigatórios foram aprovados pela equipe de RH.'
-        });
-        this.addNotification({
-          title: 'Admissão concluída!',
-          message: `O processo admissional de ${admission.employee.name} foi concluído com 100% dos documentos aprovados.`,
-          type: 'completed',
-          admissionId: admission.id,
-          link: `/admissoes/${admission.id}`
-        });
+      if (hasPendingMandatoryApproval || otherRequiredStepsPending) {
+        admission.status = 'Em conferência';
+      } else {
+        admission.status = 'Concluída';
+        if (!admission.completedAt) {
+          admission.completedAt = new Date().toISOString();
+          this.addAuditLog({
+            userName: 'Sistema (Automação)',
+            action: 'Admissão concluída',
+            entityType: 'admission',
+            admissionId: admission.id,
+            employeeName: admission.employee.name,
+            details: 'Todos os documentos obrigatórios e requisitos foram aprovados e atendidos.',
+            isAutomatic: true
+          });
+          this.addNotification({
+            title: 'Admissão concluída!',
+            message: `O processo admissional de ${admission.employee.name} foi concluído com 100% dos documentos aprovados.`,
+            type: 'completed',
+            admissionId: admission.id,
+            link: `/admissoes/${admission.id}`
+          });
+        }
       }
     } else if (rejectedDocs.length > 0 || (admission.correctionRequest && !admission.correctionRequest.resolved)) {
       // Se possui qualquer documento rejeitado ou correção pendente -> Pendência
@@ -8848,6 +8907,9 @@ export class Database {
     // Avalia o avanço da admissão para a próxima etapa (ex: CONCLUSAO)
     this.evaluateAdmissionProcessSteps(admission, userName);
 
+    // Bloco 6.6: Automação determinística para aprovação concluída
+    this.executeAutomationOnApprovalCompleted(admission, app, userName);
+
     admission.updatedAt = now;
     this.save();
 
@@ -12309,11 +12371,11 @@ export class Database {
     }
 
     const now = Date.now();
-    const isOverdue = task.dueAt
+    task.isOverdue = task.dueAt
       ? new Date(task.dueAt).getTime() < now && task.status !== 'CONCLUIDA' && task.status !== 'CANCELADA'
       : false;
 
-    return { ...task, isOverdue };
+    return task;
   }
 
   /**
@@ -12522,6 +12584,9 @@ export class Database {
       details: `Tarefa operacional "${task.title}" concluída por ${performer.name}.${task.completionNotes ? ` Observações: "${task.completionNotes}".` : ''}`,
       userName: performer.name
     });
+
+    // Bloco 6.6: Automação determinística para tarefa concluída
+    this.executeAutomationOnTaskCompleted(task, performer.name);
 
     this.save();
     return task;
@@ -12838,6 +12903,710 @@ export class Database {
           ? new Date(t.dueAt).getTime() < now && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
           : false
       }));
+  }
+
+  // =========================================================================
+  // BLOCO 6.6: AUTOMAÇÃO DE ROTINAS INTERNAS DO RH
+  // =========================================================================
+
+  ensureAutomationsInitialized(): void {
+    if (!this.data.automationExecutions) {
+      this.data.automationExecutions = [];
+    }
+    const settings = this.getSettings();
+    if (!settings.automations) {
+      settings.automations = {
+        DOCUMENT_REJECTED: true,
+        DOCUMENT_RESUBMITTED: true,
+        ALL_REQUIRED_DOCUMENTS_APPROVED: true,
+        APPROVAL_COMPLETED: true,
+        TASK_COMPLETED: true
+      };
+      this.save();
+    }
+  }
+
+  isAutomationEnabled(routineKey: AutomationRoutineKey): boolean {
+    this.ensureAutomationsInitialized();
+    const settings = this.getSettings();
+    if (settings.automations && typeof settings.automations[routineKey] === 'boolean') {
+      return settings.automations[routineKey];
+    }
+    return true; // Padrão ativo
+  }
+
+  toggleAutomationRoutine(routineKey: AutomationRoutineKey, enabled: boolean, userName: string): boolean {
+    this.ensureAutomationsInitialized();
+    const settings = this.getSettings();
+    if (!settings.automations) {
+      settings.automations = {};
+    }
+    const previous = settings.automations[routineKey] ?? true;
+    settings.automations[routineKey] = enabled;
+    settings.updatedAt = new Date().toISOString();
+    settings.updatedBy = userName;
+
+    this.addAuditLog({
+      userName,
+      action: 'automation_toggled',
+      entityType: 'automation',
+      entityId: routineKey,
+      entityName: routineKey,
+      fieldChanged: `automação_${routineKey}`,
+      previousValue: previous ? 'Ativa' : 'Inativa',
+      newValue: enabled ? 'Ativa' : 'Inativa',
+      details: `Rotina de automação interna "${routineKey}" foi ${enabled ? 'ativada' : 'desativada'} por ${userName}.`
+    });
+
+    this.save();
+    return enabled;
+  }
+
+  getAutomationsHubData(): AutomationsHubResponse {
+    this.ensureAutomationsInitialized();
+    const settings = this.getSettings();
+    const automations = settings.automations || {};
+    const executions = this.data.automationExecutions || [];
+
+    const routineDefinitions: Array<{
+      key: AutomationRoutineKey;
+      name: string;
+      triggerEvent: string;
+      description: string;
+      deterministicActions: string[];
+    }> = [
+      {
+        key: 'DOCUMENT_REJECTED',
+        name: 'Documento Rejeitado pelo RH',
+        triggerEvent: 'Documento recusado com motivo na conferência',
+        description: 'Quando um documento é reprovado pelo RH, atualiza a situação de pendência, orienta o reenvio e cria automaticamente tarefa operacional de cobrança sem duplicidade.',
+        deterministicActions: [
+          'Atualiza pendência no checklist da admissão',
+          'Disponibiliza status "Rejeitado" e notas para o colaborador reenviar',
+          'Sinaliza impedimento na etapa de Documentos do processo admissional',
+          'Cria tarefa operacional de cobrança vinculada ao analista responsável (se não houver equivalente ativa)',
+          'Registra log rastreável de auditoria automática'
+        ]
+      },
+      {
+        key: 'DOCUMENT_RESUBMITTED',
+        name: 'Documento Reenviado pelo Colaborador',
+        triggerEvent: 'Nova versão de documento carregada',
+        description: 'Quando uma nova versão de documento rejeitado é enviada, atualiza a versão sem sobrescrever o histórico, retorna o documento para conferência e conclui a tarefa operacional pendente.',
+        deterministicActions: [
+          'Registra nova versão mantendo histórico de versões anteriores intacto',
+          'Retorna documento para a fila de conferência do RH',
+          'Remove situação de pendência e bloqueio quando não restarem outros documentos rejeitados',
+          'Conclui automaticamente tarefas operacionais ativas de cobrança deste documento',
+          'Registra log de auditoria automática'
+        ]
+      },
+      {
+        key: 'ALL_REQUIRED_DOCUMENTS_APPROVED',
+        name: 'Todos os Documentos Obrigatórios Aprovados',
+        triggerEvent: '100% dos documentos obrigatórios validados pelo RH',
+        description: 'Avança a etapa de Documentos do processo admissional. Se houver aprovação interna obrigatória pendente, JAMAIS conclui a admissão indevidamente, direcionando para a aprovação formal.',
+        deterministicActions: [
+          'Conclui a etapa "Documentos" no processo admissional configurável',
+          'Verifica requisitos de aprovação interna (Bloco 5.6): NUNCA conclui se houver aprovação obrigatória pendente',
+          'Gera tarefa operacional para o aprovador/gestor quando a aprovação for necessária',
+          'Avança admissão para "Concluída" somente se todas as etapas e aprovações estiverem concluídas',
+          'Registra log de auditoria automática'
+        ]
+      },
+      {
+        key: 'APPROVAL_COMPLETED',
+        name: 'Aprovação Interna Concluída',
+        triggerEvent: 'Aprovação formal deferida pelo gestor ou diretoria',
+        description: 'Quando a aprovação interna obrigatória é concedida, verifica documentos, etapas e pendências, concluindo tarefas vinculadas e avançando o processo admissional.',
+        deterministicActions: [
+          'Conclui a etapa de "Aprovação" no processo admissional',
+          'Conclui automaticamente tarefas operacionais ativas de aprovação interna',
+          'Verifica se todos os documentos e etapas obrigatórias estão atendidos',
+          'Avança a admissão para "Concluída" quando todos os requisitos forem satisfeitos',
+          'Registra log de auditoria formal'
+        ]
+      },
+      {
+        key: 'TASK_COMPLETED',
+        name: 'Tarefa Operacional Concluída',
+        triggerEvent: 'Resolução de tarefa operacional pelo analista do RH',
+        description: 'Quando uma tarefa operacional é finalizada, sincroniza a situação correspondente e desbloqueia etapas sem alterar documentos ou aprovações indevidamente.',
+        deterministicActions: [
+          'Verifica se a tarefa concluída possuía vínculo com bloqueio de etapa',
+          'Desbloqueia etapa do processo quando não restarem outros impedimentos',
+          'Sincroniza situação na Central de Operações',
+          'Não altera aprovações ou documentos indevidamente (preserva decisões humanas)',
+          'Registra evento rastreável'
+        ]
+      }
+    ];
+
+    const routines: AutomationRoutineRule[] = routineDefinitions.map(def => {
+      const routineExecs = executions.filter(e => e.routineKey === def.key);
+      const lastExec = routineExecs[routineExecs.length - 1];
+      return {
+        key: def.key,
+        name: def.name,
+        triggerEvent: def.triggerEvent,
+        description: def.description,
+        deterministicActions: def.deterministicActions,
+        enabled: automations[def.key] !== false,
+        totalExecutions: routineExecs.length,
+        lastExecutedAt: lastExec?.executedAt,
+        lastExecutionStatus: lastExec?.status,
+        lastExecutionSummary: lastExec?.details
+      };
+    });
+
+    const activeRoutines = routines.filter(r => r.enabled).length;
+
+    return {
+      routines,
+      summary: {
+        totalRoutines: routines.length,
+        activeRoutines,
+        inactiveRoutines: routines.length - activeRoutines,
+        totalExecutions: executions.length
+      },
+      recentExecutions: [...executions].reverse().slice(0, 50)
+    };
+  }
+
+  executeAutomationOnDocumentRejected(
+    admission: Admission, 
+    doc: AdmissionDocument, 
+    reviewerName: string, 
+    reason: string, 
+    notes?: string
+  ): void {
+    if (!this.isAutomationEnabled('DOCUMENT_REJECTED')) return;
+
+    try {
+      const now = new Date().toISOString();
+      const actionsTaken: string[] = [];
+
+      // 1. Atualizar o fluxo existente de pendência e processo 5.4
+      const docsStep = (admission.processSteps || []).find(s => s.stepKey === 'DOCUMENTOS');
+      if (docsStep) {
+        docsStep.blockReason = `Documento ${doc.documentType} rejeitado: ${reason}. Aguardando reenvio pelo colaborador.`;
+        actionsTaken.push(`Sinalizado bloqueio na etapa "${docsStep.stepName}" do processo admissional`);
+      }
+
+      // Situação operacional da admissão -> Pendência
+      admission.status = 'Pendência';
+      admission.updatedAt = now;
+      actionsTaken.push('Situação da admissão atualizada para "Pendência"');
+
+      // 2. Criar tarefa operacional (6.5) somente se não existir equivalente ativa (Idempotência Regra 10)
+      const existingTask = (this.data.operationalTasks || []).find(
+        t => t.admissionId === admission.id &&
+             t.documentId === doc.id &&
+             t.sourceType === 'DOCUMENTO' &&
+             (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
+      );
+
+      if (!existingTask) {
+        // Reutilizar responsável já definido na admissão (Regra 9 / Bloco 6.4)
+        const responsibleUserId = admission.responsibleUserId || null;
+
+        const task = this.createOperationalTask({
+          admissionId: admission.id,
+          title: `Cobrar reenvio: ${doc.documentType}`,
+          description: `Documento rejeitado pelo RH. Motivo: ${reason}.${notes ? ` Orientação: "${notes}".` : ''} Cobrar reenvio de nova versão do colaborador.`,
+          priority: doc.required ? 'ALTA' : 'NORMAL',
+          sourceType: 'DOCUMENTO',
+          documentId: doc.id,
+          responsibleUserId: responsibleUserId || undefined
+        }, {
+          name: 'Sistema (Automação)',
+          id: 'system-automation'
+        });
+
+        actionsTaken.push(`Tarefa operacional "${task.title}" criada automaticamente e atribuída a ${task.responsibleUserName || 'Sem responsável'}`);
+      } else {
+        actionsTaken.push(`Tarefa operacional ativa já existente (#${existingTask.id}); criação duplicada evitada por idempotência`);
+      }
+
+      // 3. Auditoria unificada (Bloco 5.7)
+      this.addAuditLog({
+        userName: 'Sistema (Automação)',
+        action: 'automation_document_rejected',
+        entityType: 'automation',
+        entityId: doc.id,
+        entityName: doc.documentType,
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        details: `[Automação] Rotina disparada por rejeição de ${doc.documentType} por ${reviewerName}. Ações: ${actionsTaken.join('; ')}.`,
+        isAutomatic: true
+      });
+
+      // 4. Registro de execução
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'DOCUMENT_REJECTED',
+        routineName: 'Documento Rejeitado',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Documento ${doc.documentType} rejeitado por ${reviewerName}`,
+        actionsTaken,
+        executedAt: now,
+        status: 'SUCCESS',
+        details: actionsTaken.join(' | '),
+        originatingUser: reviewerName
+      });
+
+      this.save();
+    } catch (err: any) {
+      console.error('[Automação] Falha segura na rotina DOCUMENT_REJECTED:', err.message);
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'DOCUMENT_REJECTED',
+        routineName: 'Documento Rejeitado',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Documento ${doc.documentType} rejeitado`,
+        actionsTaken: [],
+        executedAt: new Date().toISOString(),
+        status: 'ERROR',
+        details: 'Erro seguro sem quebra de processo: ' + (err.message || 'Erro inesperado'),
+        originatingUser: reviewerName
+      });
+      this.save();
+    }
+  }
+
+  executeAutomationOnDocumentResubmitted(
+    admission: Admission, 
+    doc: AdmissionDocument
+  ): void {
+    if (!this.isAutomationEnabled('DOCUMENT_RESUBMITTED')) return;
+
+    try {
+      const now = new Date().toISOString();
+      const actionsTaken: string[] = [];
+
+      // 1. Atualizar status e retirar situação de "aguardando reenvio"
+      const remainingRejected = (admission.documents || []).filter(d => d.id !== doc.id && d.status === 'Rejeitado');
+
+      const docsStep = (admission.processSteps || []).find(s => s.stepKey === 'DOCUMENTOS');
+      if (docsStep) {
+        if (remainingRejected.length === 0) {
+          docsStep.blockReason = undefined;
+          actionsTaken.push('Impedimento na etapa "Documentos" removido');
+        } else {
+          docsStep.blockReason = `Ainda existem ${remainingRejected.length} documento(s) com rejeição aguardando reenvio.`;
+        }
+      }
+
+      if (remainingRejected.length === 0 && admission.status === 'Pendência') {
+        admission.status = 'Em conferência';
+        admission.updatedAt = now;
+        actionsTaken.push('Situação da admissão retornada para "Em conferência"');
+      }
+
+      // 2. Concluir tarefas operacionais ativas de cobrança deste documento (6.5)
+      const tasksToComplete = (this.data.operationalTasks || []).filter(
+        t => t.admissionId === admission.id &&
+             t.documentId === doc.id &&
+             (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
+      );
+
+      for (const t of tasksToComplete) {
+        this.completeOperationalTask(
+          t.id,
+          `Concluída automaticamente: nova versão (V${doc.currentVersion}) enviada pelo colaborador.`,
+          { name: 'Sistema (Automação)', id: 'system-automation' }
+        );
+        actionsTaken.push(`Tarefa operacional #${t.id} ("${t.title}") concluída automaticamente`);
+      }
+
+      // 3. Auditoria unificada
+      this.addAuditLog({
+        userName: 'Sistema (Automação)',
+        action: 'automation_document_resubmitted',
+        entityType: 'automation',
+        entityId: doc.id,
+        entityName: doc.documentType,
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        details: `[Automação] Documento ${doc.documentType} reenviado na versão V${doc.currentVersion}. ${actionsTaken.join('; ')}.`,
+        isAutomatic: true
+      });
+
+      // 4. Registro de execução
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'DOCUMENT_RESUBMITTED',
+        routineName: 'Documento Reenviado',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Nova versão V${doc.currentVersion} do documento ${doc.documentType}`,
+        actionsTaken,
+        executedAt: now,
+        status: 'SUCCESS',
+        details: actionsTaken.join(' | '),
+        originatingUser: admission.employee?.name || 'Colaborador'
+      });
+
+      this.save();
+    } catch (err: any) {
+      console.error('[Automação] Falha segura na rotina DOCUMENT_RESUBMITTED:', err.message);
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'DOCUMENT_RESUBMITTED',
+        routineName: 'Documento Reenviado',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Reenvio de documento`,
+        actionsTaken: [],
+        executedAt: new Date().toISOString(),
+        status: 'ERROR',
+        details: 'Erro seguro: ' + (err.message || 'Erro inesperado')
+      });
+      this.save();
+    }
+  }
+
+  executeAutomationOnAllRequiredApproved(
+    admission: Admission, 
+    reviewerName: string
+  ): void {
+    if (!this.isAutomationEnabled('ALL_REQUIRED_DOCUMENTS_APPROVED')) return;
+
+    try {
+      const requiredDocs = (admission.documents || []).filter(d => d.required);
+      const allRequiredApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
+      if (!allRequiredApproved) return;
+
+      const now = new Date().toISOString();
+      const actionsTaken: string[] = [];
+
+      // 1. Processo 5.4: Concluir etapa DOCUMENTOS se ativa
+      const docsStep = (admission.processSteps || []).find(s => s.stepKey === 'DOCUMENTOS');
+      if (docsStep && docsStep.status !== 'CONCLUIDA') {
+        docsStep.status = 'CONCLUIDA';
+        docsStep.completedAt = now;
+        docsStep.completedBy = 'Sistema (Automação)';
+        docsStep.blockReason = undefined;
+        actionsTaken.push(`Etapa "${docsStep.stepName}" concluída com 100% dos documentos obrigatórios aprovados`);
+      }
+
+      // 2. Verificar aprovação interna 5.6:
+      // "NUNCA CONCLUIR AUTOMATICAMENTE UMA ADMISSÃO SE AINDA EXISTIR APROVAÇÃO OBRIGATÓRIA."
+      const hasPendingMandatoryApproval = Boolean(
+        admission.approval &&
+        admission.approval.required &&
+        admission.approval.status !== 'APROVADA'
+      );
+
+      if (hasPendingMandatoryApproval) {
+        // NÃO PODE CONCLUIR A ADMISSÃO!
+        // Avança etapa APROVACAO para EM_ANDAMENTO se existir
+        const apprStep = (admission.processSteps || []).find(s => s.stepKey === 'APROVACAO');
+        if (apprStep && apprStep.status !== 'CONCLUIDA') {
+          apprStep.status = 'EM_ANDAMENTO';
+          apprStep.startedAt = apprStep.startedAt || now;
+          apprStep.blockReason = undefined;
+          actionsTaken.push(`Etapa de "${apprStep.stepName}" liberada e colocada em andamento`);
+        }
+
+        admission.status = 'Em conferência';
+        admission.updatedAt = now;
+        actionsTaken.push('Admissão mantida em andamento aguardando aprovação interna obrigatória (conclusão automática bloqueada)');
+
+        // Criar tarefa operacional de aprovação se não existir
+        const existingApprovalTask = (this.data.operationalTasks || []).find(
+          t => t.admissionId === admission.id &&
+               t.sourceType === 'APROVACAO' &&
+               (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO')
+        );
+
+        if (!existingApprovalTask) {
+          const apprTask = this.createOperationalTask({
+            admissionId: admission.id,
+            title: `Aprovação interna necessária: ${admission.employee.name}`,
+            description: `Todos os documentos obrigatórios foram aprovados. A admissão aguarda aprovação formal da alçada competente (${admission.approval?.approvalType || 'Gestão'}).`,
+            priority: 'ALTA',
+            sourceType: 'APROVACAO',
+            approvalId: admission.approval?.id,
+            responsibleUserId: admission.approval?.assignedUserId || admission.responsibleUserId || undefined
+          }, {
+            name: 'Sistema (Automação)',
+            id: 'system-automation'
+          });
+          actionsTaken.push(`Tarefa de aprovação operacional #${apprTask.id} gerada`);
+        }
+      } else {
+        // Sem aprovação pendente. Verificar se todas as etapas do processo 5.4 estão concluídas
+        this.evaluateAdmissionProcessSteps(admission, 'Sistema (Automação)');
+
+        const allMandatoryStepsCompleted = (admission.processSteps || [])
+          .filter(s => s.required)
+          .every(s => s.status === 'CONCLUIDA' || s.status === 'IGNORADA');
+
+        const hasPendingCorrection = admission.correctionRequest && !admission.correctionRequest.resolved;
+
+        if (allMandatoryStepsCompleted && !hasPendingCorrection && admission.status !== 'Concluída') {
+          admission.status = 'Concluída';
+          admission.completedAt = now;
+          admission.completedBy = 'Sistema (Automação)';
+          admission.updatedAt = now;
+          actionsTaken.push('Admissão concluída com 100% dos documentos e etapas obrigatórias atendidas');
+
+          this.addNotification({
+            title: 'Admissão concluída com sucesso',
+            message: `A admissão de ${admission.employee.name} foi finalizada após aprovação de todos os requisitos.`,
+            type: 'completed',
+            admissionId: admission.id,
+            link: `/admissoes/${admission.id}`
+          });
+        }
+      }
+
+      // 3. Auditoria unificada
+      this.addAuditLog({
+        userName: 'Sistema (Automação)',
+        action: 'automation_all_required_docs_approved',
+        entityType: 'automation',
+        entityId: admission.id,
+        entityName: admission.employee.name,
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        details: `[Automação] 100% dos documentos obrigatórios aprovados por ${reviewerName}. Ações: ${actionsTaken.join('; ')}.`,
+        isAutomatic: true
+      });
+
+      // 4. Registro de execução
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'ALL_REQUIRED_DOCUMENTS_APPROVED',
+        routineName: 'Documentos Obrigatórios Aprovados',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Aprovação do último documento obrigatório por ${reviewerName}`,
+        actionsTaken,
+        executedAt: now,
+        status: 'SUCCESS',
+        details: actionsTaken.join(' | '),
+        originatingUser: reviewerName
+      });
+
+      this.save();
+    } catch (err: any) {
+      console.error('[Automação] Falha segura na rotina ALL_REQUIRED_DOCUMENTS_APPROVED:', err.message);
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'ALL_REQUIRED_DOCUMENTS_APPROVED',
+        routineName: 'Documentos Obrigatórios Aprovados',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Documentos aprovados`,
+        actionsTaken: [],
+        executedAt: new Date().toISOString(),
+        status: 'ERROR',
+        details: 'Erro seguro: ' + (err.message || 'Erro inesperado')
+      });
+      this.save();
+    }
+  }
+
+  executeAutomationOnApprovalCompleted(
+    admission: Admission, 
+    approval: AdmissionApproval, 
+    userName: string
+  ): void {
+    if (!this.isAutomationEnabled('APPROVAL_COMPLETED')) return;
+
+    try {
+      const now = new Date().toISOString();
+      const actionsTaken: string[] = [];
+
+      // 1. Concluir tarefas operacionais ativas de aprovação desta admissão (Idempotência)
+      const approvalTasks = (this.data.operationalTasks || []).filter(
+        t => t.admissionId === admission.id &&
+             t.sourceType === 'APROVACAO' &&
+             (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
+      );
+
+      for (const t of approvalTasks) {
+        this.completeOperationalTask(
+          t.id,
+          `Concluída automaticamente: aprovação interna deferida por ${userName}.`,
+          { name: 'Sistema (Automação)', id: 'system-automation' }
+        );
+        actionsTaken.push(`Tarefa de aprovação #${t.id} concluída`);
+      }
+
+      // 2. Concluir etapa APROVACAO no snapshot do processo 5.4
+      const apprStep = (admission.processSteps || []).find(s => s.stepKey === 'APROVACAO');
+      if (apprStep && apprStep.status !== 'CONCLUIDA') {
+        apprStep.status = 'CONCLUIDA';
+        apprStep.completedAt = now;
+        apprStep.completedBy = userName;
+        apprStep.blockReason = undefined;
+        actionsTaken.push(`Etapa "${apprStep.stepName}" concluída com deferimento formal`);
+      }
+
+      // 3. Verificar documentos, etapas e pendências para avançar o processo
+      const requiredDocs = (admission.documents || []).filter(d => d.required);
+      const allDocsApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
+      const hasPendingIssues = (admission.documents || []).some(d => d.status === 'Rejeitado') ||
+                               (admission.correctionRequest && !admission.correctionRequest.resolved);
+
+      this.evaluateAdmissionProcessSteps(admission, userName);
+
+      const allStepsDone = (admission.processSteps || [])
+        .filter(s => s.required)
+        .every(s => s.status === 'CONCLUIDA' || s.status === 'IGNORADA');
+
+      if (allDocsApproved && allStepsDone && !hasPendingIssues && admission.status !== 'Concluída') {
+        admission.status = 'Concluída';
+        admission.completedAt = admission.completedAt || now;
+        admission.completedBy = admission.completedBy || userName;
+        admission.updatedAt = now;
+        actionsTaken.push('Admissão concluída com sucesso após deferimento da aprovação e conclusão das etapas');
+
+        this.addNotification({
+          title: 'Admissão concluída!',
+          message: `O processo de ${admission.employee.name} foi 100% concluído após aprovação interna formal.`,
+          type: 'completed',
+          admissionId: admission.id,
+          link: `/admissoes/${admission.id}`
+        });
+      } else {
+        actionsTaken.push('Etapa de aprovação registrada; processo avançou para a próxima etapa configurada');
+      }
+
+      // 4. Auditoria unificada
+      this.addAuditLog({
+        userName: 'Sistema (Automação)',
+        action: 'automation_approval_completed',
+        entityType: 'automation',
+        entityId: approval.id,
+        entityName: approval.approvalType,
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        details: `[Automação] Aprovação interna formalizada por ${userName}. Ações: ${actionsTaken.join('; ')}.`,
+        isAutomatic: true
+      });
+
+      // 5. Registro de execução
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'APPROVAL_COMPLETED',
+        routineName: 'Aprovação Concluída',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Aprovação deferida por ${userName}`,
+        actionsTaken,
+        executedAt: now,
+        status: 'SUCCESS',
+        details: actionsTaken.join(' | '),
+        originatingUser: userName
+      });
+
+      this.save();
+    } catch (err: any) {
+      console.error('[Automação] Falha segura na rotina APPROVAL_COMPLETED:', err.message);
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'APPROVAL_COMPLETED',
+        routineName: 'Aprovação Concluída',
+        admissionId: admission.id,
+        employeeName: admission.employee?.name,
+        triggerEvent: `Aprovação concluída`,
+        actionsTaken: [],
+        executedAt: new Date().toISOString(),
+        status: 'ERROR',
+        details: 'Erro seguro: ' + (err.message || 'Erro inesperado'),
+        originatingUser: userName
+      });
+      this.save();
+    }
+  }
+
+  executeAutomationOnTaskCompleted(
+    task: OperationalTask, 
+    performerName: string
+  ): void {
+    if (!this.isAutomationEnabled('TASK_COMPLETED')) return;
+
+    try {
+      const now = new Date().toISOString();
+      const actionsTaken: string[] = [];
+
+      const admission = this.data.admissions.find(a => a.id === task.admissionId);
+      if (admission) {
+        // Se a tarefa possuía stepKey e a etapa estava bloqueada
+        if (task.stepKey) {
+          const step = (admission.processSteps || []).find(s => s.stepKey === task.stepKey);
+          if (step && step.blockReason) {
+            // Checa se ainda existem outras tarefas abertas para esta mesma etapa
+            const otherTasksOpen = (this.data.operationalTasks || []).some(
+              t => t.id !== task.id &&
+                   t.admissionId === admission.id &&
+                   t.stepKey === task.stepKey &&
+                   (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
+            );
+            if (!otherTasksOpen) {
+              step.blockReason = undefined;
+              actionsTaken.push(`Impedimento na etapa "${step.stepName}" removido após conclusão da tarefa`);
+            }
+          }
+        }
+
+        // NÃO MODIFICA DOCUMENTOS NEM APROVAÇÕES INDEVIDAMENTE (Regra 2.E / 5)
+        admission.updatedAt = now;
+      }
+
+      actionsTaken.push(`Situação operacional sincronizada após conclusão da tarefa "${task.title}"`);
+
+      // Auditoria
+      this.addAuditLog({
+        userName: 'Sistema (Automação)',
+        action: 'automation_task_completed',
+        entityType: 'automation',
+        entityId: task.id,
+        entityName: task.title,
+        admissionId: task.admissionId,
+        employeeName: task.employeeName,
+        details: `[Automação] Tarefa "${task.title}" concluída por ${performerName}. ${actionsTaken.join('; ')}.`,
+        isAutomatic: true
+      });
+
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'TASK_COMPLETED',
+        routineName: 'Tarefa Concluída',
+        admissionId: task.admissionId,
+        employeeName: task.employeeName,
+        triggerEvent: `Tarefa "${task.title}" concluída por ${performerName}`,
+        actionsTaken,
+        executedAt: now,
+        status: 'SUCCESS',
+        details: actionsTaken.join(' | '),
+        originatingUser: performerName
+      });
+
+      this.save();
+    } catch (err: any) {
+      console.error('[Automação] Falha segura na rotina TASK_COMPLETED:', err.message);
+      this.data.automationExecutions.push({
+        id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
+        routineKey: 'TASK_COMPLETED',
+        routineName: 'Tarefa Concluída',
+        admissionId: task.admissionId,
+        employeeName: task.employeeName,
+        triggerEvent: `Tarefa concluída`,
+        actionsTaken: [],
+        executedAt: new Date().toISOString(),
+        status: 'ERROR',
+        details: 'Erro seguro: ' + (err.message || 'Erro inesperado'),
+        originatingUser: performerName
+      });
+      this.save();
+    }
   }
 }
 

@@ -605,7 +605,7 @@ export interface AuditLog {
   userName: string;
   performedBy?: string;
   action: string;
-  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step' | 'admission_approval' | 'admission_assignment';
+  entityType?: 'job_position' | 'document_type' | 'job_position_document' | 'admission' | 'admission_document' | 'user' | 'system' | 'settings' | 'communication_template' | 'employee' | 'employee_document' | 'admission_process' | 'admission_process_step' | 'admission_approval' | 'admission_assignment' | 'operational_task' | 'automation';
   entityId?: string;
   entityName?: string;
   admissionId?: string;
@@ -617,6 +617,7 @@ export interface AuditLog {
   changes?: AuditLogChange[];
   details: string;
   ipAddress?: string;
+  isAutomatic?: boolean;
 }
 
 export interface NotificationItem {
@@ -1301,6 +1302,7 @@ export interface SystemSettings {
   tracking: SystemTrackingSettings;
   reports: SystemReportSettings;
   security: SystemSecuritySettings;
+  automations?: Record<string, boolean>;
   updatedAt: string;
   updatedBy?: string;
 }
@@ -2399,6 +2401,56 @@ export interface UpdateOperationalTaskInput {
   responsibleUserId?: string | null;
   reason?: string;
 }
+
+// ------------------------------------------------------------------
+// BLOCO 6.6: AUTOMAÇÃO DE ROTINAS INTERNAS
+// ------------------------------------------------------------------
+
+export type AutomationRoutineKey =
+  | 'DOCUMENT_REJECTED'
+  | 'DOCUMENT_RESUBMITTED'
+  | 'ALL_REQUIRED_DOCUMENTS_APPROVED'
+  | 'APPROVAL_COMPLETED'
+  | 'TASK_COMPLETED';
+
+export interface AutomationRoutineRule {
+  key: AutomationRoutineKey;
+  name: string;
+  triggerEvent: string;
+  description: string;
+  deterministicActions: string[];
+  enabled: boolean;
+  totalExecutions: number;
+  lastExecutedAt?: string;
+  lastExecutionStatus?: 'SUCCESS' | 'SKIPPED' | 'ERROR';
+  lastExecutionSummary?: string;
+}
+
+export interface AutomationExecutionRecord {
+  id: string;
+  routineKey: AutomationRoutineKey;
+  routineName: string;
+  admissionId?: string;
+  employeeName?: string;
+  triggerEvent: string;
+  actionsTaken: string[];
+  executedAt: string;
+  status: 'SUCCESS' | 'SKIPPED' | 'ERROR';
+  details?: string;
+  originatingUser?: string;
+}
+
+export interface AutomationsHubResponse {
+  routines: AutomationRoutineRule[];
+  summary: {
+    totalRoutines: number;
+    activeRoutines: number;
+    inactiveRoutines: number;
+    totalExecutions: number;
+  };
+  recentExecutions: AutomationExecutionRecord[];
+}
+
 
 
 

@@ -1070,5 +1070,25 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
     };
   }
 
+  // 17. Tarefas Operacionais
+  if (path.includes('/tarefas') || path.includes('/tasks')) {
+    const localTasks = db.operationalTasks || [];
+    return {
+      tasks: localTasks,
+      total: localTasks.length,
+      page: 1,
+      totalPages: 1,
+      summary: {
+        totalOpen: localTasks.filter((t: any) => t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO').length,
+        dueToday: 0,
+        overdue: 0,
+        critical: localTasks.filter((t: any) => t.priority === 'CRITICA').length,
+        unassigned: localTasks.filter((t: any) => !t.assignedTo).length,
+        myTasks: 0,
+        completedToday: 0
+      }
+    };
+  }
+
   return undefined;
 }

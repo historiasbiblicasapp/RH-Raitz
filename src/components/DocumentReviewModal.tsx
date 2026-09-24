@@ -148,6 +148,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const previewUrl = `/api/documents/${document.id}/file${selectedVersionNumber ? `?version=${selectedVersionNumber}` : ''}`;
   const downloadUrl = `/api/documents/${document.id}/file?download=true${selectedVersionNumber ? `&version=${selectedVersionNumber}` : ''}`;
 
+  const isImage = Boolean(
+    currentVersionToDisplay?.mimeType?.startsWith('image/') ||
+    /\.(jpg|jpeg|png|webp)$/i.test(currentVersionToDisplay?.fileName || '') ||
+    document.mimeType?.startsWith('image/') ||
+    /\.(jpg|jpeg|png|webp)$/i.test(document.fileName || '')
+  );
+
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 0.25, 2.5));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 0.25, 0.6));
   const handleRotate = () => setRotation(prev => (prev + 90) % 360);
@@ -277,11 +284,19 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                     transform: `scale(${zoomLevel}) rotate(${rotation}deg)`
                   }}
                 >
-                  <iframe
-                    src={previewUrl}
-                    title="Visualizador de documento seguro"
-                    className="w-full h-full min-h-[350px] lg:min-h-[460px] border-0 rounded bg-white"
-                  />
+                  {isImage ? (
+                    <img
+                      src={previewUrl}
+                      alt={document.documentType}
+                      className="max-h-[65vh] max-w-full object-contain rounded-lg shadow-md bg-white"
+                    />
+                  ) : (
+                    <iframe
+                      src={previewUrl}
+                      title="Visualizador de documento seguro"
+                      className="w-full h-full min-h-[350px] lg:min-h-[460px] border-0 rounded bg-white"
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="text-center text-slate-400 p-8 max-w-md">

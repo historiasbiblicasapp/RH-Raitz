@@ -5,6 +5,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { db, STORAGE_DIR } from './db.ts';
 import { maskCPF, validateCPF } from '../src/lib/cpf.ts';
+import { generateSupabaseSignedUrl, isSupabaseStorageEnabled, renderFriendlyDocumentError } from './storage.ts';
 
 const router = express.Router();
 
@@ -1373,14 +1374,14 @@ router.delete('/employees/documents/:docId', (req: Request, res: Response) => {
 });
 
 // 7. Visualização e Download Seguro do Arquivo com Suporte a Versões e Auditoria LGPD
-router.get('/employees/documents/:docId/file', (req: Request, res: Response) => {
+router.get('/employees/documents/:docId/file', async (req: Request, res: Response) => {
   const auth = checkRhAuth(req, res);
   if (!auth) return;
 
   try {
     const doc = db.getEmployeeDocumentById(req.params.docId);
     if (!doc) {
-      return res.status(404).send('Documento não encontrado.');
+      return renderFriendlyDocumentError(res, 404, 'Documento não encontrado', 'Documento não encontrado ou indisponível.');
     }
 
     const versionParam = req.query.version ? Number(req.query.version) : undefined;
@@ -1410,14 +1411,42 @@ router.get('/employees/documents/:docId/file', (req: Request, res: Response) => 
       details: `${isDownload ? 'Download' : 'Visualização'} do arquivo "${targetFileName}" (v${versionParam || doc.currentVersion}) realizado por ${auth.user.name || 'RH'}.`
     });
 
-    // Se o arquivo existir fisicamente no STORAGE_DIR
+    // 1. Tenta obter Signed URL do Supabase Storage se configurado
+    if (isSupabaseStorageEnabled && targetStoragePath) {
+      const { signedUrl } = await generateSupabaseSignedUrl({
+        storagePath: targetStoragePath,
+        documentId: doc.id,
+        employeeId: doc.employeeId,
+        fileName: targetFileName,
+        isDownload,
+        expiresInSeconds: 1800 // 30 minutos
+      });
+
+      if (signedUrl) {
+        return res.redirect(302, signedUrl);
+      }
+    }
+
+    // 2. Se o arquivo existir fisicamente no STORAGE_DIR
     if (targetStoragePath) {
       const fullPath = path.join(STORAGE_DIR, targetStoragePath);
       if (fs.existsSync(fullPath)) {
         res.setHeader('Content-Type', targetMimeType);
         res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(targetFileName)}"`);
-        return fs.createReadStream(fullPath).pipe(res);
+        res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        const stream = fs.createReadStream(fullPath);
+        stream.on('error', (err) => {
+          console.error('[Employee Doc Stream Error]', err);
+          renderFriendlyDocumentError(res, 500, 'Aviso de Visualização', 'Não foi possível abrir o documento. Tente novamente.');
+        });
+        return stream.pipe(res);
       }
+    }
+
+    // Se download foi requisitado e arquivo físico não existe em lugar algum
+    if (isDownload) {
+      return renderFriendlyDocumentError(res, 404, 'Arquivo Indisponível', 'Documento não encontrado ou indisponível.');
     }
 
     // Fallback: visualização rica e elegante de documento digital corporativo
@@ -1523,7 +1552,8 @@ router.get('/employees/documents/:docId/file', (req: Request, res: Response) => 
     res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(targetFileName.replace(/\.pdf$/, ''))}.svg"`);
     return res.send(svg);
   } catch (err: any) {
-    return res.status(500).send('Erro ao processar visualização do documento.');
+    console.error('[Employee Document View Error]', err?.message || err);
+    return renderFriendlyDocumentError(res, 500, 'Aviso de Visualização', 'Não foi possível abrir o documento. Tente novamente.');
   }
 });
 
@@ -1961,50 +1991,72 @@ function generateDocumentSignature(docId: string, version: number | string, expi
     .digest('hex');
 }
 
-// Endpoint para obter URL assinada temporária (15 minutos) / preview seguro
-router.get(['/documents/:id/signed-url', '/documents/:id/preview'], (req: Request, res: Response) => {
-  const docId = req.params.id;
-  const versionParam = req.query.version ? Number(req.query.version) : 0;
-  const tokenParam = (req.query.token as string) || (req.headers['x-invite-token'] as string);
-  const emailHeader = req.headers['x-user-email'] as string;
+// Endpoint para obter URL assinada temporária (30 minutos) / preview seguro
+router.get(['/documents/:id/signed-url', '/documents/:id/preview'], async (req: Request, res: Response) => {
+  try {
+    const docId = req.params.id;
+    const versionParam = req.query.version ? Number(req.query.version) : 0;
+    const tokenParam = (req.query.token as string) || (req.headers['x-invite-token'] as string);
+    const emailHeader = req.headers['x-user-email'] as string;
 
-  // Localiza o documento e sua admissão
-  let foundDoc;
-  let foundAdm;
-  for (const adm of db.getAdmissions()) {
-    const d = adm.documents.find(doc => doc.id === docId);
-    if (d) {
-      foundDoc = d;
-      foundAdm = adm;
-      break;
+    // Localiza o documento e sua admissão
+    let foundDoc;
+    let foundAdm;
+    for (const adm of db.getAdmissions()) {
+      const d = adm.documents.find(doc => doc.id === docId);
+      if (d) {
+        foundDoc = d;
+        foundAdm = adm;
+        break;
+      }
     }
+
+    if (!foundDoc || !foundAdm) {
+      return res.status(404).json({ error: 'Documento não encontrado ou indisponível.' });
+    }
+
+    // Validação estrita de autorização (Storage privado):
+    // Se não foi fornecido token de convite e não há cabeçalho de usuário RH
+    if (!tokenParam && !emailHeader) {
+      return res.status(403).json({ error: 'Acesso negado. Acesso anônimo direto ao preview é restrito.' });
+    }
+
+    // Se houver token de convite, valida se corresponde a esta admissão e está ativo
+    if (tokenParam && (foundAdm.inviteToken !== tokenParam || foundAdm.inviteRevoked)) {
+      return res.status(403).json({ error: 'Acesso negado. Token de convite inválido ou expirado para este documento.' });
+    }
+
+    const version = versionParam || foundDoc.currentVersion || 1;
+    const expires = Date.now() + 30 * 60 * 1000; // 30 minutos
+    const signature = generateDocumentSignature(docId, version, expires);
+
+    let supabaseSignedUrl: string | undefined;
+    const targetStoragePath = (foundDoc.versions && foundDoc.versions.find(v => v.version === version)?.storagePath) || foundDoc.storagePath;
+
+    if (isSupabaseStorageEnabled && targetStoragePath) {
+      const { signedUrl } = await generateSupabaseSignedUrl({
+        storagePath: targetStoragePath,
+        admissionId: foundAdm.id,
+        documentId: foundDoc.id,
+        employeeId: foundAdm.employee?.id,
+        fileName: foundDoc.fileName,
+        expiresInSeconds: 1800 // 30 minutos
+      });
+      supabaseSignedUrl = signedUrl;
+    }
+
+    const internalSignedUrl = `/api/documents/${docId}/file?version=${version}&expires=${expires}&signature=${signature}`;
+    return res.json({
+      success: true,
+      signedUrl: supabaseSignedUrl || internalSignedUrl,
+      internalSignedUrl,
+      directStorageUrl: supabaseSignedUrl || null,
+      expiresAt: new Date(expires).toISOString()
+    });
+  } catch (err: any) {
+    console.error('[Document Signed URL Error]', err?.message || err);
+    return res.status(500).json({ error: 'Não foi possível abrir o documento. Tente novamente.' });
   }
-
-  if (!foundDoc || !foundAdm) {
-    return res.status(404).json({ error: 'Documento não encontrado.' });
-  }
-
-  // Validação estrita de autorização (Storage privado):
-  // Se não foi fornecido token de convite e não há cabeçalho de usuário RH
-  if (!tokenParam && !emailHeader) {
-    return res.status(403).json({ error: 'Acesso negado. Acesso anônimo direto ao preview é restrito.' });
-  }
-
-  // Se houver token de convite, valida se corresponde a esta admissão e está ativo
-  if (tokenParam && (foundAdm.inviteToken !== tokenParam || foundAdm.inviteRevoked)) {
-    return res.status(403).json({ error: 'Acesso negado. Token de convite inválido ou expirado para este documento.' });
-  }
-
-  const version = versionParam || foundDoc.currentVersion || 1;
-  const expires = Date.now() + 15 * 60 * 1000; // 15 minutos
-  const signature = generateDocumentSignature(docId, version, expires);
-
-  const signedUrl = `/api/documents/${docId}/file?version=${version}&expires=${expires}&signature=${signature}`;
-  return res.json({
-    success: true,
-    signedUrl,
-    expiresAt: new Date(expires).toISOString()
-  });
 });
 
 // Registro de auditoria quando o RH visualiza um documento
@@ -2075,93 +2127,147 @@ router.post('/documents/:id/review', (req: Request, res: Response) => {
 });
 
 // Visualização Segura de Documentos (Storage Privado LGPD com proteção contra IDOR)
-router.get('/documents/:id/file', (req: Request, res: Response) => {
-  const docId = req.params.id;
-  const versionParam = req.query.version;
-  const expiresParam = req.query.expires ? Number(req.query.expires) : undefined;
-  const signatureParam = req.query.signature as string | undefined;
-  const tokenParam = req.query.token as string | undefined;
-  const isDownload = req.query.download === 'true';
+router.get('/documents/:id/file', async (req: Request, res: Response) => {
+  try {
+    const docId = req.params.id;
+    const versionParam = req.query.version;
+    const expiresParam = req.query.expires ? Number(req.query.expires) : undefined;
+    const signatureParam = req.query.signature as string | undefined;
+    const tokenParam = req.query.token as string | undefined;
+    const isDownload = req.query.download === 'true';
 
-  let foundDoc;
-  let foundAdm;
-  for (const adm of db.getAdmissions()) {
-    const d = adm.documents.find(doc => doc.id === docId);
-    if (d) {
-      foundDoc = d;
-      foundAdm = adm;
-      break;
+    let foundDoc;
+    let foundAdm;
+    for (const adm of db.getAdmissions()) {
+      const d = adm.documents.find(doc => doc.id === docId);
+      if (d) {
+        foundDoc = d;
+        foundAdm = adm;
+        break;
+      }
     }
-  }
 
-  if (!foundDoc || !foundAdm) {
-    return res.status(404).send('Documento não encontrado.');
-  }
-
-  // Validação de Acesso / Anti-IDOR
-  const user = getAuthenticatedUser(req);
-  let isAuthorized = false;
-
-  // 1. Se tem assinatura válida
-  if (signatureParam && expiresParam) {
-    if (Date.now() > expiresParam) {
-      return res.status(403).send('Link seguro expirado. Solicite nova visualização.');
+    if (!foundDoc || !foundAdm) {
+      return renderFriendlyDocumentError(res, 404, 'Documento não encontrado', 'Documento não encontrado ou indisponível.');
     }
-    const versionToCheck = versionParam ? Number(versionParam) : (foundDoc.currentVersion || 1);
-    const expectedSig = generateDocumentSignature(docId, versionToCheck, expiresParam);
-    if (crypto.timingSafeEqual(Buffer.from(signatureParam), Buffer.from(expectedSig))) {
+
+    // Validação de Acesso / Anti-IDOR
+    const user = getAuthenticatedUser(req);
+    let isAuthorized = false;
+
+    // 1. Se tem assinatura temporária válida
+    if (signatureParam && expiresParam) {
+      if (Date.now() > expiresParam) {
+        return renderFriendlyDocumentError(res, 403, 'Link Expirado', 'Link seguro expirado. Solicite nova visualização.');
+      }
+      const versionToCheck = versionParam ? Number(versionParam) : (foundDoc.currentVersion || 1);
+      const expectedSig = generateDocumentSignature(docId, versionToCheck, expiresParam);
+      try {
+        const sigBuf = Buffer.from(signatureParam);
+        const expBuf = Buffer.from(expectedSig);
+        if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
+          isAuthorized = true;
+        }
+      } catch {
+        isAuthorized = false;
+      }
+    }
+
+    // 2. Se for acesso do RH/Admin/Gestor autenticado
+    if (!isAuthorized && user && (user.role === 'RH' || user.role === 'ADMIN' || user.role === 'GESTOR')) {
       isAuthorized = true;
     }
-  }
 
-  // 2. Se for acesso do RH/Admin autenticado
-  if (!isAuthorized && (user.role === 'RH' || user.role === 'ADMIN')) {
-    isAuthorized = true;
-  }
+    // 3. Se for acesso via token do candidato
+    if (!isAuthorized && tokenParam) {
+      if (foundAdm.inviteToken === tokenParam && !foundAdm.inviteRevoked) {
+        isAuthorized = true;
+      } else {
+        return renderFriendlyDocumentError(res, 403, 'Acesso Negado', 'Acesso não autorizado a este documento.');
+      }
+    }
 
-  // 3. Se for acesso via token do candidato
-  if (!isAuthorized && tokenParam) {
-    if (foundAdm.inviteToken === tokenParam && !foundAdm.inviteRevoked) {
-      isAuthorized = true;
+    if (!isAuthorized) {
+      return renderFriendlyDocumentError(res, 403, 'Acesso Restrito', 'Acesso não autorizado ao documento protegido.');
+    }
+
+    let filePath: string | undefined;
+    let targetStoragePath = foundDoc.storagePath;
+    let mimeType = foundDoc.mimeType || 'application/pdf';
+    let originalName = foundDoc.fileName || `${foundDoc.documentType}.pdf`;
+    const versionNumber = versionParam ? Number(versionParam) : (foundDoc.currentVersion || 1);
+
+    if (versionParam && foundDoc.versions && foundDoc.versions.length > 0) {
+      const targetVersion = foundDoc.versions.find(v => v.version === Number(versionParam));
+      if (targetVersion) {
+        targetStoragePath = targetVersion.storagePath || targetStoragePath;
+        if (targetVersion.storagePath) {
+          filePath = path.join(STORAGE_DIR, targetVersion.storagePath);
+        }
+        mimeType = targetVersion.mimeType || mimeType;
+        originalName = targetVersion.fileName || originalName;
+      }
+    } else if (foundDoc.storagePath) {
+      filePath = path.join(STORAGE_DIR, foundDoc.storagePath);
+    }
+
+    // Registro de auditoria
+    if (isDownload) {
+      db.recordDocumentAction(
+        docId,
+        'RH realizou download de documento',
+        user?.name || 'RH',
+        `Download efetuado do arquivo ${originalName} (Versão ${versionNumber}) da admissão de ${foundAdm.employee.name}.`
+      );
     } else {
-      return res.status(403).send('Acesso não autorizado a este documento.');
+      db.recordDocumentAction(
+        docId,
+        'RH visualizou documento',
+        user?.name || 'RH',
+        `Visualização do arquivo ${originalName} (Versão ${versionNumber}) da admissão de ${foundAdm.employee.name}.`
+      );
     }
-  }
 
-  if (!isAuthorized) {
-    return res.status(403).send('Acesso não autorizado ao arquivo protegido.');
-  }
+    // 1. Tenta obter Signed URL do Supabase Storage se configurado
+    if (isSupabaseStorageEnabled && targetStoragePath) {
+      const { signedUrl } = await generateSupabaseSignedUrl({
+        storagePath: targetStoragePath,
+        admissionId: foundAdm.id,
+        documentId: foundDoc.id,
+        employeeId: foundAdm.employee?.id,
+        fileName: originalName,
+        isDownload,
+        expiresInSeconds: 1800 // 30 minutos
+      });
 
-  let filePath: string | undefined;
-  let mimeType = foundDoc.mimeType || 'application/pdf';
-  let originalName = foundDoc.fileName || `${foundDoc.documentType}.pdf`;
-
-  if (versionParam) {
-    const targetVersion = foundDoc.versions.find(v => v.version === Number(versionParam));
-    if (targetVersion && targetVersion.storagePath) {
-      filePath = path.join(STORAGE_DIR, targetVersion.storagePath);
-      mimeType = targetVersion.mimeType;
-      originalName = targetVersion.fileName;
+      if (signedUrl) {
+        return res.redirect(302, signedUrl);
+      }
     }
-  } else if (foundDoc.storagePath) {
-    filePath = path.join(STORAGE_DIR, foundDoc.storagePath);
-  }
 
-  // Registro de auditoria se for download
-  if (isDownload) {
-    db.recordDocumentAction(
-      docId,
-      'RH realizou download de documento',
-      user.name,
-      `Download efetuado do arquivo ${originalName} (Versão ${versionParam || foundDoc.currentVersion}) da admissão de ${foundAdm.employee.name}.`
-    );
-  }
+    // 2. Se o arquivo existir fisicamente no STORAGE_DIR local
+    if (filePath && fs.existsSync(filePath)) {
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(originalName)}"`);
+      res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  // Se for um arquivo de amostra seed ou arquivo ainda inexistente no disco local, gera um PDF/SVG seguro representativo
-  if (!filePath || !fs.existsSync(filePath)) {
-    // Retorna imagem placeholder de alta qualidade com os dados do documento para visualização
-    res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${foundDoc.documentType.toLowerCase()}.svg"`);
+      const stream = fs.createReadStream(filePath);
+      stream.on('error', (err) => {
+        console.error('[Document Read Stream Error]', err);
+        renderFriendlyDocumentError(res, 500, 'Aviso de Visualização', 'Não foi possível abrir o documento. Tente novamente.');
+      });
+      return stream.pipe(res);
+    }
+
+    // Se download foi requisitado e arquivo físico não existe
+    if (isDownload) {
+      return renderFriendlyDocumentError(res, 404, 'Arquivo Indisponível', 'Documento não encontrado ou indisponível.');
+    }
+
+    // Se for um arquivo de amostra seed ou arquivo ainda inexistente no disco local, gera um SVG seguro representativo
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.setHeader('Content-Disposition', `inline; filename="${foundDoc.documentType.toLowerCase()}.svg"`);
     res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const svg = `
@@ -2209,15 +2315,10 @@ router.get('/documents/:id/file', (req: Request, res: Response) => {
       </svg>
     `;
     return res.send(svg);
+  } catch (err: any) {
+    console.error('[Document Review Route Error]', err?.message || err);
+    return renderFriendlyDocumentError(res, 500, 'Aviso de Visualização', 'Não foi possível abrir o documento. Tente novamente.');
   }
-
-  // Cabeçalhos de proteção de privacidade LGPD
-  res.setHeader('Content-Type', mimeType);
-  res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${encodeURIComponent(originalName)}"`);
-  res.setHeader('Cache-Control', 'private, no-cache, no-store, must-revalidate');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-
-  return res.sendFile(filePath);
 });
 
 // ------------------------------------------------------------------
@@ -3798,6 +3899,68 @@ router.get(['/api/admissoes/:id/tarefas', '/api/admissions/:id/tasks', '/admisso
     return res.json({ tasks });
   } catch (error: any) {
     return res.status(404).json({ error: error.message || 'Admissão não encontrada.' });
+  }
+});
+
+// =========================================================================
+// BLOCO 6.6 — AUTOMAÇÃO DE ROTINAS INTERNAS DO RH (ROTAS DA API)
+// =========================================================================
+
+/**
+ * GET /api/automations & /api/automacoes
+ * Retorna as 5 automações determinísticas do RH, seus status, estatísticas de execução e histórico recente.
+ */
+router.get(['/api/automations', '/api/automacoes', '/automations', '/automacoes'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  try {
+    const data = db.getAutomationsHubData();
+    return res.json(data);
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao carregar rotinas de automação: ' + error.message });
+  }
+});
+
+/**
+ * PATCH /api/automations/:key & /api/automacoes/:key
+ * Ativa ou desativa uma rotina de automação específica
+ */
+router.patch(['/api/automations/:key', '/api/automacoes/:key', '/automations/:key', '/automacoes/:key'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const { key } = req.params;
+  const { enabled } = req.body;
+
+  const validKeys = [
+    'DOCUMENT_REJECTED',
+    'DOCUMENT_RESUBMITTED',
+    'ALL_REQUIRED_DOCUMENTS_APPROVED',
+    'APPROVAL_COMPLETED',
+    'TASK_COMPLETED'
+  ];
+
+  if (!validKeys.includes(key)) {
+    return res.status(400).json({ error: `Rotina de automação inválida: "${key}".` });
+  }
+
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'O parâmetro "enabled" (boolean) é obrigatório.' });
+  }
+
+  try {
+    const newStatus = db.toggleAutomationRoutine(key as any, enabled, auth.user.name || 'RH');
+    const updatedHub = db.getAutomationsHubData();
+    return res.json({
+      success: true,
+      routineKey: key,
+      enabled: newStatus,
+      message: `Rotina de automação ${newStatus ? 'ativada' : 'desativada'} com sucesso.`,
+      automations: updatedHub
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Erro ao atualizar rotina de automação: ' + error.message });
   }
 });
 

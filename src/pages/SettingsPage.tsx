@@ -16,7 +16,8 @@ import {
   ShieldCheck,
   CheckCircle2,
   Loader2,
-  GitBranch
+  GitBranch,
+  Zap
 } from 'lucide-react';
 import { SystemSettings, User as UserType } from '../types/index.ts';
 import { GeneralSettingsTab } from '../components/settings/GeneralSettingsTab.tsx';
@@ -28,6 +29,7 @@ import { NotificationSettingsTab } from '../components/settings/NotificationSett
 import { ReportsSettingsTab } from '../components/settings/ReportsSettingsTab.tsx';
 import { UsersSettingsTab } from '../components/settings/UsersSettingsTab.tsx';
 import { AuditHistoryTab } from '../components/settings/AuditHistoryTab.tsx';
+import { AutomationsTab } from '../components/settings/AutomationsTab.tsx';
 import { safeFetchJson } from '../lib/api.ts';
 import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 
@@ -36,6 +38,7 @@ type TabKey =
   | 'admission' 
   | 'process'
   | 'documents' 
+  | 'automations'
   | 'communication' 
   | 'notifications' 
   | 'reports' 
@@ -179,6 +182,7 @@ export const SettingsPage: React.FC = () => {
     { key: 'admission', label: 'Fluxo de Admissão', icon: UserCheck },
     { key: 'process', label: 'Processo Admissional', icon: GitBranch },
     { key: 'documents', label: 'Documentos', icon: Files },
+    { key: 'automations', label: 'Automações do RH', icon: Zap },
     { key: 'communication', label: 'Comunicação WhatsApp', icon: MessageSquare },
     { key: 'notifications', label: 'Alertas Operacionais', icon: Bell },
     { key: 'reports', label: 'Relatórios & LGPD', icon: BarChart3 },
@@ -323,6 +327,10 @@ export const SettingsPage: React.FC = () => {
               settings={settings.documents}
               onChange={(updates) => updateSubSettings('documents', updates)}
             />
+          )}
+
+          {activeTab === 'automations' && (
+            <AutomationsTab />
           )}
 
           {activeTab === 'communication' && (
