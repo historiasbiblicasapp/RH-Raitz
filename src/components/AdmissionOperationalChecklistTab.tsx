@@ -16,7 +16,8 @@ import {
   ChevronRight,
   CheckCircle2,
   XCircle,
-  HelpCircle
+  HelpCircle,
+  Plus
 } from 'lucide-react';
 import { 
   Admission, 
@@ -24,10 +25,13 @@ import {
   OperationalPriority, 
   OperationalChecklistSituation, 
   OperationalResponsible,
-  OperationalTaskItem
+  OperationalTaskItem,
+  JobPosition,
+  JobPositionDocument
 } from '../types/index.ts';
 import { safeFetchJson } from '../lib/api.ts';
 import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
+import { CreateJobPositionWithChecklistModal } from './CreateJobPositionWithChecklistModal.tsx';
 
 interface AdmissionOperationalChecklistTabProps {
   admission: Admission;
@@ -43,6 +47,7 @@ export const AdmissionOperationalChecklistTab: React.FC<AdmissionOperationalChec
   const [data, setData] = useState<OperationalChecklistItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [priorityModalOpen, setPriorityModalOpen] = useState(false);
+  const [isCreateCargoModalOpen, setIsCreateCargoModalOpen] = useState(false);
   const [newPriority, setNewPriority] = useState<OperationalPriority>(admission.operationalPriority || 'NORMAL');
   const [priorityReason, setPriorityReason] = useState(admission.operationalPriorityReason || '');
   const [savingPriority, setSavingPriority] = useState(false);
@@ -140,6 +145,17 @@ export const AdmissionOperationalChecklistTab: React.FC<AdmissionOperationalChec
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              id="btn-tab-create-cargo"
+              onClick={() => setIsCreateCargoModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-2xs"
+              title="Cadastrar novo cargo e definir documentos exigidos no checklist"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Novo Cargo & Checklist</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setPriorityModalOpen(true)}
@@ -481,6 +497,16 @@ export const AdmissionOperationalChecklistTab: React.FC<AdmissionOperationalChec
           </div>
         </div>
       )}
+
+      {/* Modal de Criação de Cargo com Checklist de Documentos Exigidos */}
+      <CreateJobPositionWithChecklistModal
+        isOpen={isCreateCargoModalOpen}
+        onClose={() => setIsCreateCargoModalOpen(false)}
+        onSuccess={(_pos, _docs) => {
+          setIsCreateCargoModalOpen(false);
+          loadData();
+        }}
+      />
     </div>
   );
 };

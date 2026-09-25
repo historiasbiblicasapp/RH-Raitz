@@ -256,12 +256,12 @@ router.get(['/job-positions/:id', '/cargos/:id'], (req: Request, res: Response) 
   }
 });
 
-// Cadastrar novo cargo
+// Cadastrar novo cargo (com suporte a checklist de documentos exigidos)
 router.post(['/job-positions', '/cargos'], (req: Request, res: Response) => {
   const auth = checkJobPositionAuth(req, res);
   if (!auth) return;
 
-  const { name, code, description, active } = req.body;
+  const { name, code, description, active, documents } = req.body;
 
   if (!name || typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'O nome do cargo é obrigatório.' });
@@ -272,9 +272,37 @@ router.post(['/job-positions', '/cargos'], (req: Request, res: Response) => {
       { name, code, description, active }, 
       auth.user.name || auth.user.email
     );
+
+    const createdDocuments = [];
+    if (Array.isArray(documents) && documents.length > 0) {
+      let order = 1;
+      for (const item of documents) {
+        if (item && item.document_type_id) {
+          try {
+            const doc = db.addJobPositionDocument(
+              newPosition.id,
+              {
+                document_type_id: item.document_type_id,
+                required: item.required !== false,
+                sort_order: typeof item.sort_order === 'number' ? item.sort_order : order++,
+                instructions: item.instructions ? String(item.instructions).trim() : undefined
+              },
+              auth.user.name || auth.user.email
+            );
+            createdDocuments.push(doc);
+          } catch (docErr: any) {
+            console.warn(`[Novo Cargo] Documento ${item.document_type_id} não adicionado:`, docErr.message);
+          }
+        }
+      }
+    }
+
     return res.status(201).json({ 
       jobPosition: newPosition, 
-      message: 'Cargo cadastrado com sucesso.' 
+      documents: createdDocuments,
+      message: createdDocuments.length > 0
+        ? `Cargo "${newPosition.name}" cadastrado com sucesso com ${createdDocuments.length} documento(s) configurado(s).`
+        : 'Cargo cadastrado com sucesso.' 
     });
   } catch (err: any) {
     return res.status(400).json({ error: err.message || 'Não foi possível cadastrar o cargo.' });
@@ -1978,6 +2006,25 @@ router.post('/invite/:token/upload/:documentId', upload.single('file'), (req: Re
   }
 });
 
+// Finalizar cadastro / envio dos documentos pelo colaborador
+router.post('/invite/:token/finish', (req: Request, res: Response) => {
+  const admission = db.getAdmissionByToken(req.params.token);
+  if (!admission) {
+    return res.status(404).json({ error: 'Convite não encontrado ou link expirado.' });
+  }
+
+  try {
+    const updated = db.finishEmployeeSubmission(admission.id);
+    return res.json({ 
+      success: true, 
+      message: 'Cadastro finalizado com sucesso! Nossa equipe de RH já foi notificada para iniciar a conferência.',
+      admission: updated 
+    });
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message || 'Erro ao finalizar o cadastro.' });
+  }
+});
+
 // ------------------------------------------------------------------
 // CONFERÊNCIA DE DOCUMENTOS (RH) - BLOCO 3.5
 // ------------------------------------------------------------------
@@ -2093,6 +2140,9 @@ router.post('/documents/:id/view-audit', (req: Request, res: Response) => {
 // Análise e Conferência (Aprovar / Rejeitar) com Concorrência e Permissões
 router.post('/documents/:id/review', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
+  if (!user) {
+    return res.status(401).json({ error: 'Não autenticado.' });
+  }
 
   // Apenas RH e Administradores podem conferir documentos
   if (user.role === 'FUNCIONARIO') {

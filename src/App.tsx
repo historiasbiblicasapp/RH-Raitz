@@ -63,6 +63,7 @@ export function App() {
 
           {/* Rota do Colaborador (Convite individual e seguro) */}
           <Route path="/convite/:token" element={<EmployeePortal />} />
+          <Route path="/invite/:token" element={<EmployeePortal />} />
 
           {/* Rotas Autenticadas do Setor de RH */}
           <Route element={<Layout />}>

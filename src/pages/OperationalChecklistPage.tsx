@@ -27,7 +27,10 @@ import {
   Lock,
   Flag,
   Sparkles,
-  ArrowUpRight
+  ArrowUpRight,
+  ListChecks,
+  Plus,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   OperationalChecklistItem, 
@@ -35,11 +38,14 @@ import {
   OperationalPendingSummary, 
   OperationalPriority, 
   OperationalChecklistSituation, 
-  OperationalResponsible 
+  OperationalResponsible,
+  JobPosition,
+  JobPositionDocument
 } from '../types/index.ts';
 import { safeFetchJson } from '../lib/api.ts';
 import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
 import { CommunicationModal } from '../components/CommunicationModal.tsx';
+import { CreateJobPositionWithChecklistModal } from '../components/CreateJobPositionWithChecklistModal.tsx';
 
 export const OperationalChecklistPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,6 +66,10 @@ export const OperationalChecklistPage: React.FC = () => {
     inactiveAdmissions: 0,
     blockedAdmissions: 0
   });
+
+  // Modal de Criação de Cargo com Checklist
+  const [isCreateCargoModalOpen, setIsCreateCargoModalOpen] = useState(false);
+  const [createdCargoFeedback, setCreatedCargoFeedback] = useState<{ id: string; name: string; count: number } | null>(null);
 
   const [filterOptions, setFilterOptions] = useState<{
     roles: string[];
@@ -386,7 +396,28 @@ export const OperationalChecklistPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 self-start md:self-auto">
+        <div className="flex flex-wrap items-center gap-2.5 self-start md:self-auto">
+          <button
+            type="button"
+            id="btn-op-create-cargo"
+            onClick={() => setIsCreateCargoModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg transition-colors shadow-2xs cursor-pointer"
+            title="Cadastrar um novo cargo e definir quais documentos são exigidos"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Novo Cargo & Checklist</span>
+          </button>
+
+          <Link
+            to="/cadastros/checklists"
+            id="link-go-to-cargo-checklists"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-2xs"
+            title="Configurar documentos exigidos por cargo"
+          >
+            <ListChecks className="w-4 h-4 text-blue-600" />
+            <span>Checklists por Cargo</span>
+          </Link>
+
           <button
             type="button"
             id="btn-refresh-checklist"
@@ -408,6 +439,34 @@ export const OperationalChecklistPage: React.FC = () => {
           </Link>
         </div>
       </div>
+
+      {/* Banner de Feedback de Cargo Criado */}
+      {createdCargoFeedback && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-3 shadow-2xs animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <div className="text-xs text-emerald-900">
+              <span className="font-bold">Cargo cadastrado com sucesso!</span>{' '}
+              <span>O cargo <strong>"{createdCargoFeedback.name}"</strong> foi criado com {createdCargoFeedback.count} documento(s) configurado(s).</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/cadastros/checklists?cargo=${createdCargoFeedback.id}`}
+              className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+            >
+              Visualizar Checklist do Cargo
+            </Link>
+            <button
+              type="button"
+              onClick={() => setCreatedCargoFeedback(null)}
+              className="p-1 text-emerald-600 hover:text-emerald-800 rounded-md"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Indicadores Operacionais (9 Cards com Filtro Direto) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3">
@@ -1058,6 +1117,19 @@ export const OperationalChecklistPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Modal de Criação de Cargo com Checklist de Documentos */}
+      <CreateJobPositionWithChecklistModal
+        isOpen={isCreateCargoModalOpen}
+        onClose={() => setIsCreateCargoModalOpen(false)}
+        onSuccess={(newPos, newDocs) => {
+          setCreatedCargoFeedback({
+            id: newPos.id,
+            name: newPos.name,
+            count: newDocs.length
+          });
+        }}
+      />
     </div>
   );
 };

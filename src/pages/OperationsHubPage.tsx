@@ -31,7 +31,8 @@ import {
   HelpCircle,
   Layers,
   ArrowRight,
-  TrendingUp
+  TrendingUp,
+  Zap
 } from 'lucide-react';
 import {
   OperationalHubItem,
@@ -336,6 +337,15 @@ export const OperationsHubPage: React.FC = () => {
           >
             <Layers className="w-4 h-4 text-amber-600" />
             <span>Análise de Gargalos</span>
+          </Link>
+
+          <Link
+            to="/configuracoes?tab=automations"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors shadow-xs"
+            title="Configuração e monitoramento de rotinas de automação interna (Bloco 6.6)"
+          >
+            <Zap className="w-4 h-4 text-amber-500" />
+            <span>Automações</span>
           </Link>
 
           <Link

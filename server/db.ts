@@ -1051,6 +1051,34 @@ export function buildDefaultJobPositionDocuments(
 
 export class Database {
   private data: DatabaseSchema;
+  private activeAutomationLocks = new Set<string>();
+  private automationDeduplicationCache = new Map<string, number>();
+
+  private tryAcquireAutomationLock(key: string, minIntervalMs = 2000): boolean {
+    if (this.activeAutomationLocks.has(key)) {
+      return false; // Bloqueio ativo: previne concorrência simultânea
+    }
+    const lastRan = this.automationDeduplicationCache.get(key);
+    const now = Date.now();
+    if (lastRan && now - lastRan < minIntervalMs) {
+      return false; // Previne duplicidade de eventos repetidos em curto intervalo (idempotência)
+    }
+    this.activeAutomationLocks.add(key);
+    return true;
+  }
+
+  private releaseAutomationLock(key: string): void {
+    this.activeAutomationLocks.delete(key);
+    this.automationDeduplicationCache.set(key, Date.now());
+    if (this.automationDeduplicationCache.size > 200) {
+      const cutoff = Date.now() - 60000;
+      for (const [k, ts] of this.automationDeduplicationCache.entries()) {
+        if (ts < cutoff) {
+          this.automationDeduplicationCache.delete(k);
+        }
+      }
+    }
+  }
 
   constructor() {
     ensureDirectories();
@@ -1067,9 +1095,9 @@ export class Database {
           this.data.settings.automations = {
             DOCUMENT_REJECTED: true,
             DOCUMENT_RESUBMITTED: true,
-            ALL_REQUIRED_DOCUMENTS_APPROVED: true,
-            APPROVAL_COMPLETED: true,
-            TASK_COMPLETED: true
+            ALL_REQUIRED_DOCUMENTS_APPROVED: false,
+            APPROVAL_COMPLETED: false,
+            TASK_COMPLETED: false
           };
         }
 
@@ -4860,6 +4888,53 @@ export class Database {
     return admission;
   }
 
+  finishEmployeeSubmission(admissionId: string) {
+    const admission = this.getAdmissionById(admissionId);
+    if (!admission) throw new Error('Admissão não encontrada');
+
+    const requiredDocs = (admission.documents || []).filter(d => d.required);
+    const missingDocs = requiredDocs.filter(d => d.status === 'Não enviado' || d.currentVersion === 0);
+
+    if (missingDocs.length > 0) {
+      const names = missingDocs.map(d => d.documentType).join(', ');
+      throw new Error(`Ainda restam ${missingDocs.length} documento(s) obrigatório(s) para enviar: ${names}.`);
+    }
+
+    const now = new Date().toISOString();
+    admission.candidateCompletedSubmission = true;
+    admission.candidateFinishedAt = now;
+    admission.updatedAt = now;
+
+    // Se estava em Aguardando documentos ou Rascunho, avança para Em conferência
+    if (admission.status === 'Aguardando documentos' || admission.status === 'Rascunho') {
+      admission.status = 'Em conferência';
+    }
+
+    this.recalculateAdmissionStatus(admission);
+
+    // Avalia etapas do processo admissional
+    this.evaluateAdmissionProcessSteps(admission, admission.employee?.name || 'Colaborador');
+
+    this.addAuditLog({
+      userName: admission.employee.name,
+      action: 'Colaborador finalizou cadastro e envio de documentos',
+      admissionId,
+      employeeName: admission.employee.name,
+      details: 'Colaborador concluiu o preenchimento e enviou todos os documentos pelo portal mobile para conferência do RH.'
+    });
+
+    this.addNotification({
+      title: 'Documentos enviados pelo colaborador',
+      message: `${admission.employee.name} finalizou o envio de todos os documentos pelo portal mobile. A admissão aguarda conferência do RH.`,
+      type: 'document_uploaded',
+      admissionId,
+      link: `/admissoes/${admissionId}`
+    });
+
+    this.save();
+    return admission;
+  }
+
   requestDataCorrection(admissionId: string, details: string) {
     const admission = this.getAdmissionById(admissionId);
     if (!admission) throw new Error('Admissão não encontrada');
@@ -5088,7 +5163,7 @@ export class Database {
 
     // Bloco 6.6: Disparo de rotinas determinísticas de automação
     if (decision === 'Aprovado') {
-      this.executeAutomationOnAllRequiredApproved(targetAdmission, reviewerName);
+      // Bloco 6.6C - Documentos aprovados reservado para microbloco posterior
     } else {
       this.executeAutomationOnDocumentRejected(
         targetAdmission,
@@ -5113,6 +5188,7 @@ export class Database {
     const requiredDocs = admission.documents.filter(d => d.required);
     const approvedDocs = requiredDocs.filter(d => d.status === 'Aprovado');
     const rejectedDocs = requiredDocs.filter(d => d.status === 'Rejeitado');
+    const anyRejectedDoc = (admission.documents || []).some(d => d.status === 'Rejeitado');
     const inReviewDocs = requiredDocs.filter(d => d.status === 'Em análise' || d.status === 'Reenviado');
     const notSentDocs = requiredDocs.filter(d => d.status === 'Não enviado');
 
@@ -5160,7 +5236,7 @@ export class Database {
           });
         }
       }
-    } else if (rejectedDocs.length > 0 || (admission.correctionRequest && !admission.correctionRequest.resolved)) {
+    } else if (anyRejectedDoc || (admission.correctionRequest && !admission.correctionRequest.resolved)) {
       // Se possui qualquer documento rejeitado ou correção pendente -> Pendência
       admission.status = 'Pendência';
     } else if (inReviewDocs.length > 0) {
@@ -12918,21 +12994,25 @@ export class Database {
       settings.automations = {
         DOCUMENT_REJECTED: true,
         DOCUMENT_RESUBMITTED: true,
-        ALL_REQUIRED_DOCUMENTS_APPROVED: true,
-        APPROVAL_COMPLETED: true,
-        TASK_COMPLETED: true
+        ALL_REQUIRED_DOCUMENTS_APPROVED: false,
+        APPROVAL_COMPLETED: false,
+        TASK_COMPLETED: false
       };
       this.save();
     }
   }
 
   isAutomationEnabled(routineKey: AutomationRoutineKey): boolean {
+    // No Bloco 6.6B, apenas DOCUMENT_REJECTED e DOCUMENT_RESUBMITTED são executados
+    if (routineKey !== 'DOCUMENT_REJECTED' && routineKey !== 'DOCUMENT_RESUBMITTED') {
+      return false;
+    }
     this.ensureAutomationsInitialized();
     const settings = this.getSettings();
     if (settings.automations && typeof settings.automations[routineKey] === 'boolean') {
       return settings.automations[routineKey];
     }
-    return true; // Padrão ativo
+    return true; // Padrão ativo para 6.6B
   }
 
   toggleAutomationRoutine(routineKey: AutomationRoutineKey, enabled: boolean, userName: string): boolean {
@@ -13082,53 +13162,87 @@ export class Database {
   ): void {
     if (!this.isAutomationEnabled('DOCUMENT_REJECTED')) return;
 
+    const dedupKey = `${admission.id}:${doc.id}:REJECTED:v${doc.currentVersion}`;
+    if (!this.tryAcquireAutomationLock(dedupKey)) {
+      return;
+    }
+
     try {
       const now = new Date().toISOString();
       const actionsTaken: string[] = [];
 
-      // 1. Atualizar o fluxo existente de pendência e processo 5.4
+      // 1. Manter histórico: histórico e versões já foram preservados pelo reviewDocument.
+      // 2. Registrar a pendência na etapa de DOCUMENTOS do processo (5.4)
       const docsStep = (admission.processSteps || []).find(s => s.stepKey === 'DOCUMENTOS');
       if (docsStep) {
+        docsStep.status = 'BLOQUEADA';
         docsStep.blockReason = `Documento ${doc.documentType} rejeitado: ${reason}. Aguardando reenvio pelo colaborador.`;
+        docsStep.history = docsStep.history || [];
+        docsStep.history.push({
+          action: 'bloqueada',
+          timestamp: now,
+          userName: 'Sistema (Automação)',
+          reason: docsStep.blockReason,
+          details: docsStep.blockReason
+        });
         actionsTaken.push(`Sinalizado bloqueio na etapa "${docsStep.stepName}" do processo admissional`);
       }
 
-      // Situação operacional da admissão -> Pendência
+      // 3. Atualizar o status operacional da admissão -> Pendência
       admission.status = 'Pendência';
       admission.updatedAt = now;
       actionsTaken.push('Situação da admissão atualizada para "Pendência"');
 
-      // 2. Criar tarefa operacional (6.5) somente se não existir equivalente ativa (Idempotência Regra 10)
-      const existingTask = (this.data.operationalTasks || []).find(
-        t => t.admissionId === admission.id &&
-             t.documentId === doc.id &&
-             t.sourceType === 'DOCUMENTO' &&
-             (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
-      );
+      // 4. Disponibilizar o reenvio ao funcionário
+      actionsTaken.push(`Reenvio do documento ${doc.documentType} disponibilizado ao colaborador no portal`);
 
-      if (!existingTask) {
-        // Reutilizar responsável já definido na admissão (Regra 9 / Bloco 6.4)
-        const responsibleUserId = admission.responsibleUserId || null;
+      // 5. Criar tarefa operacional SOMENTE SE REALMENTE NECESSÁRIO (6.5 / Idempotência):
+      // Apenas cria se for documento obrigatório (impeditivo para admissão) e não houver tarefa ativa
+      if (doc.required) {
+        const existingTask = (this.data.operationalTasks || []).find(
+          t => t.admissionId === admission.id &&
+               t.documentId === doc.id &&
+               t.sourceType === 'DOCUMENTO' &&
+               (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
+        );
 
-        const task = this.createOperationalTask({
-          admissionId: admission.id,
-          title: `Cobrar reenvio: ${doc.documentType}`,
-          description: `Documento rejeitado pelo RH. Motivo: ${reason}.${notes ? ` Orientação: "${notes}".` : ''} Cobrar reenvio de nova versão do colaborador.`,
-          priority: doc.required ? 'ALTA' : 'NORMAL',
-          sourceType: 'DOCUMENTO',
-          documentId: doc.id,
-          responsibleUserId: responsibleUserId || undefined
-        }, {
-          name: 'Sistema (Automação)',
-          id: 'system-automation'
-        });
+        if (!existingTask) {
+          // Reutilizar responsável da admissão (Bloco 6.4)
+          let responsibleUserId: string | undefined = undefined;
+          if (admission.responsibleUserId) {
+            const respUser = this.data.users.find(
+              u => (u.id === admission.responsibleUserId || u.email.toLowerCase() === admission.responsibleUserId?.toLowerCase()) &&
+                   u.active !== false &&
+                   ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'].includes(u.role)
+            );
+            if (respUser) {
+              responsibleUserId = respUser.id;
+            }
+          }
 
-        actionsTaken.push(`Tarefa operacional "${task.title}" criada automaticamente e atribuída a ${task.responsibleUserName || 'Sem responsável'}`);
+          const task = this.createOperationalTask({
+            admissionId: admission.id,
+            title: `Cobrar reenvio: ${doc.documentType}`,
+            description: `Documento obrigatório rejeitado pelo RH. Motivo: ${reason}.${notes ? ` Orientação: "${notes}".` : ''} Cobrar reenvio de nova versão do colaborador.`,
+            priority: 'ALTA',
+            sourceType: 'DOCUMENTO',
+            documentId: doc.id,
+            stepKey: 'DOCUMENTOS',
+            responsibleUserId: responsibleUserId || undefined
+          }, {
+            name: 'Sistema (Automação)',
+            id: 'system-automation'
+          });
+
+          actionsTaken.push(`Tarefa operacional "${task.title}" criada automaticamente e atribuída a ${task.responsibleUserName || 'Sem responsável'}`);
+        } else {
+          actionsTaken.push(`Tarefa operacional ativa já existente (#${existingTask.id}); criação duplicada evitada por idempotência`);
+        }
       } else {
-        actionsTaken.push(`Tarefa operacional ativa já existente (#${existingTask.id}); criação duplicada evitada por idempotência`);
+        actionsTaken.push(`Documento opcional: pendência registrada sem abertura de tarefa impeditiva`);
       }
 
-      // 3. Auditoria unificada (Bloco 5.7)
+      // 6. Auditoria unificada (Bloco 5.7)
       this.addAuditLog({
         userName: 'Sistema (Automação)',
         action: 'automation_document_rejected',
@@ -13141,7 +13255,7 @@ export class Database {
         isAutomatic: true
       });
 
-      // 4. Registro de execução
+      // 7. Registro de execução
       this.data.automationExecutions.push({
         id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
         routineKey: 'DOCUMENT_REJECTED',
@@ -13173,6 +13287,8 @@ export class Database {
         originatingUser: reviewerName
       });
       this.save();
+    } finally {
+      this.releaseAutomationLock(dedupKey);
     }
   }
 
@@ -13182,20 +13298,42 @@ export class Database {
   ): void {
     if (!this.isAutomationEnabled('DOCUMENT_RESUBMITTED')) return;
 
+    const dedupKey = `${admission.id}:${doc.id}:RESUBMITTED:v${doc.currentVersion}`;
+    if (!this.tryAcquireAutomationLock(dedupKey)) {
+      return;
+    }
+
     try {
       const now = new Date().toISOString();
       const actionsTaken: string[] = [];
 
-      // 1. Atualizar status e retirar situação de "aguardando reenvio"
+      // 1. Nova versão já criada e versões anteriores preservadas pelo uploadDocument
+      actionsTaken.push(`Nova versão V${doc.currentVersion} criada; versões anteriores preservadas no histórico`);
+
+      // 2. Retornar documento para conferência
+      actionsTaken.push(`Documento ${doc.documentType} retornado para conferência do RH`);
+
+      // 3. Atualizar status e retirar impedimento se não restarem documentos rejeitados
       const remainingRejected = (admission.documents || []).filter(d => d.id !== doc.id && d.status === 'Rejeitado');
 
       const docsStep = (admission.processSteps || []).find(s => s.stepKey === 'DOCUMENTOS');
       if (docsStep) {
         if (remainingRejected.length === 0) {
+          docsStep.status = 'EM_ANDAMENTO';
           docsStep.blockReason = undefined;
+          docsStep.history = docsStep.history || [];
+          docsStep.history.push({
+            action: 'iniciada',
+            timestamp: now,
+            userName: 'Sistema (Automação)',
+            reason: 'Desbloqueio operacional após reenvio de documento',
+            details: 'Desbloqueio operacional após reenvio de documento'
+          });
           actionsTaken.push('Impedimento na etapa "Documentos" removido');
         } else {
+          docsStep.status = 'BLOQUEADA';
           docsStep.blockReason = `Ainda existem ${remainingRejected.length} documento(s) com rejeição aguardando reenvio.`;
+          actionsTaken.push(`Impedimento mantido na etapa "Documentos": ${remainingRejected.length} pendência(s) restante(s)`);
         }
       }
 
@@ -13205,7 +13343,7 @@ export class Database {
         actionsTaken.push('Situação da admissão retornada para "Em conferência"');
       }
 
-      // 2. Concluir tarefas operacionais ativas de cobrança deste documento (6.5)
+      // 4. Concluir tarefas operacionais ativas de cobrança deste documento (6.5)
       const tasksToComplete = (this.data.operationalTasks || []).filter(
         t => t.admissionId === admission.id &&
              t.documentId === doc.id &&
@@ -13221,7 +13359,7 @@ export class Database {
         actionsTaken.push(`Tarefa operacional #${t.id} ("${t.title}") concluída automaticamente`);
       }
 
-      // 3. Auditoria unificada
+      // 5. Auditoria unificada
       this.addAuditLog({
         userName: 'Sistema (Automação)',
         action: 'automation_document_resubmitted',
@@ -13234,7 +13372,7 @@ export class Database {
         isAutomatic: true
       });
 
-      // 4. Registro de execução
+      // 6. Registro de execução
       this.data.automationExecutions.push({
         id: 'auto-exec-' + crypto.randomUUID().slice(0, 8),
         routineKey: 'DOCUMENT_RESUBMITTED',
@@ -13265,6 +13403,8 @@ export class Database {
         details: 'Erro seguro: ' + (err.message || 'Erro inesperado')
       });
       this.save();
+    } finally {
+      this.releaseAutomationLock(dedupKey);
     }
   }
 
@@ -13274,11 +13414,16 @@ export class Database {
   ): void {
     if (!this.isAutomationEnabled('ALL_REQUIRED_DOCUMENTS_APPROVED')) return;
 
-    try {
-      const requiredDocs = (admission.documents || []).filter(d => d.required);
-      const allRequiredApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
-      if (!allRequiredApproved) return;
+    const requiredDocs = (admission.documents || []).filter(d => d.required);
+    const allRequiredApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
+    if (!allRequiredApproved) return;
 
+    const dedupKey = `${admission.id}:ALL_REQUIRED_DOCS_APPROVED`;
+    if (!this.tryAcquireAutomationLock(dedupKey)) {
+      return;
+    }
+
+    try {
       const now = new Date().toISOString();
       const actionsTaken: string[] = [];
 
@@ -13292,7 +13437,10 @@ export class Database {
         actionsTaken.push(`Etapa "${docsStep.stepName}" concluída com 100% dos documentos obrigatórios aprovados`);
       }
 
-      // 2. Verificar aprovação interna 5.6:
+      // 2. Verificar pendências e aprovações obrigatórias
+      const hasRejectedDocs = (admission.documents || []).some(d => d.status === 'Rejeitado');
+      const hasPendingCorrection = Boolean(admission.correctionRequest && !admission.correctionRequest.resolved);
+
       // "NUNCA CONCLUIR AUTOMATICAMENTE UMA ADMISSÃO SE AINDA EXISTIR APROVAÇÃO OBRIGATÓRIA."
       const hasPendingMandatoryApproval = Boolean(
         admission.approval &&
@@ -13311,7 +13459,9 @@ export class Database {
           actionsTaken.push(`Etapa de "${apprStep.stepName}" liberada e colocada em andamento`);
         }
 
-        admission.status = 'Em conferência';
+        if (admission.status !== 'Pendência') {
+          admission.status = 'Em conferência';
+        }
         admission.updatedAt = now;
         actionsTaken.push('Admissão mantida em andamento aguardando aprovação interna obrigatória (conclusão automática bloqueada)');
 
@@ -13319,7 +13469,7 @@ export class Database {
         const existingApprovalTask = (this.data.operationalTasks || []).find(
           t => t.admissionId === admission.id &&
                t.sourceType === 'APROVACAO' &&
-               (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO')
+               (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
         );
 
         if (!existingApprovalTask) {
@@ -13345,9 +13495,7 @@ export class Database {
           .filter(s => s.required)
           .every(s => s.status === 'CONCLUIDA' || s.status === 'IGNORADA');
 
-        const hasPendingCorrection = admission.correctionRequest && !admission.correctionRequest.resolved;
-
-        if (allMandatoryStepsCompleted && !hasPendingCorrection && admission.status !== 'Concluída') {
+        if (allMandatoryStepsCompleted && !hasRejectedDocs && !hasPendingCorrection && admission.status !== 'Concluída') {
           admission.status = 'Concluída';
           admission.completedAt = now;
           admission.completedBy = 'Sistema (Automação)';
@@ -13361,6 +13509,8 @@ export class Database {
             admissionId: admission.id,
             link: `/admissoes/${admission.id}`
           });
+        } else {
+          actionsTaken.push('Documentos obrigatórios aprovados; processo avançado para a próxima etapa configurada');
         }
       }
 
@@ -13408,6 +13558,8 @@ export class Database {
         details: 'Erro seguro: ' + (err.message || 'Erro inesperado')
       });
       this.save();
+    } finally {
+      this.releaseAutomationLock(dedupKey);
     }
   }
 
@@ -13417,6 +13569,11 @@ export class Database {
     userName: string
   ): void {
     if (!this.isAutomationEnabled('APPROVAL_COMPLETED')) return;
+
+    const dedupKey = `${admission.id}:${approval.id}:APPROVAL_COMPLETED`;
+    if (!this.tryAcquireAutomationLock(dedupKey)) {
+      return;
+    }
 
     try {
       const now = new Date().toISOString();
@@ -13452,7 +13609,12 @@ export class Database {
       const requiredDocs = (admission.documents || []).filter(d => d.required);
       const allDocsApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
       const hasPendingIssues = (admission.documents || []).some(d => d.status === 'Rejeitado') ||
-                               (admission.correctionRequest && !admission.correctionRequest.resolved);
+                               Boolean(admission.correctionRequest && !admission.correctionRequest.resolved);
+      const hasPendingMandatoryApproval = Boolean(
+        admission.approval &&
+        admission.approval.required &&
+        admission.approval.status !== 'APROVADA'
+      );
 
       this.evaluateAdmissionProcessSteps(admission, userName);
 
@@ -13460,7 +13622,7 @@ export class Database {
         .filter(s => s.required)
         .every(s => s.status === 'CONCLUIDA' || s.status === 'IGNORADA');
 
-      if (allDocsApproved && allStepsDone && !hasPendingIssues && admission.status !== 'Concluída') {
+      if (allDocsApproved && allStepsDone && !hasPendingIssues && !hasPendingMandatoryApproval && admission.status !== 'Concluída') {
         admission.status = 'Concluída';
         admission.completedAt = admission.completedAt || now;
         admission.completedBy = admission.completedBy || userName;
@@ -13523,6 +13685,8 @@ export class Database {
         originatingUser: userName
       });
       this.save();
+    } finally {
+      this.releaseAutomationLock(dedupKey);
     }
   }
 
@@ -13531,6 +13695,11 @@ export class Database {
     performerName: string
   ): void {
     if (!this.isAutomationEnabled('TASK_COMPLETED')) return;
+
+    const dedupKey = `${task.id}:TASK_COMPLETED`;
+    if (!this.tryAcquireAutomationLock(dedupKey)) {
+      return;
+    }
 
     try {
       const now = new Date().toISOString();
@@ -13606,6 +13775,8 @@ export class Database {
         originatingUser: performerName
       });
       this.save();
+    } finally {
+      this.releaseAutomationLock(dedupKey);
     }
   }
 }

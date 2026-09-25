@@ -403,6 +403,8 @@ export interface Admission {
   consentTextVersion?: string;
   dataConfirmed: boolean;
   dataConfirmedAt?: string;
+  candidateCompletedSubmission?: boolean;
+  candidateFinishedAt?: string;
   correctionRequest?: DataCorrectionRequest;
   documents: AdmissionDocument[];
   progressPercent: number;

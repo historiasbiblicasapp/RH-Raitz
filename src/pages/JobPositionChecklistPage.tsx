@@ -26,6 +26,7 @@ import { safeFetchJson } from '../lib/api.ts';
 import { AddJobPositionDocumentModal } from '../components/AddJobPositionDocumentModal.tsx';
 import { EditJobPositionDocumentModal } from '../components/EditJobPositionDocumentModal.tsx';
 import { RemoveJobPositionDocModal } from '../components/RemoveJobPositionDocModal.tsx';
+import { CreateJobPositionWithChecklistModal } from '../components/CreateJobPositionWithChecklistModal.tsx';
 
 export const JobPositionChecklistPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -44,6 +45,7 @@ export const JobPositionChecklistPage: React.FC = () => {
 
   // Modais
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [isCreateCargoModalOpen, setIsCreateCargoModalOpen] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<JobPositionDocument | null>(null);
   const [removingItem, setRemovingItem] = useState<JobPositionDocument | null>(null);
 
@@ -56,6 +58,20 @@ export const JobPositionChecklistPage: React.FC = () => {
     setTimeout(() => {
       setToastMessage(prev => (prev?.text === text ? null : prev));
     }, 4500);
+  };
+
+  const handleCargoCreatedWithChecklist = (newPosition: JobPosition, newDocuments: JobPositionDocument[]) => {
+    setJobPositions(prev => {
+      const exists = prev.some(p => p.id === newPosition.id);
+      return exists ? prev.map(p => p.id === newPosition.id ? newPosition : p) : [...prev, newPosition];
+    });
+    setSelectedPositionId(newPosition.id);
+    if (newDocuments && newDocuments.length > 0) {
+      setDocuments(newDocuments);
+    } else {
+      loadDocumentsForPosition(newPosition.id, filterStatus);
+    }
+    showToast('success', `Cargo "${newPosition.name}" cadastrado com sucesso com ${newDocuments.length} documento(s) configurado(s)!`);
   };
 
   // Carrega a lista de cargos ativos
@@ -278,6 +294,16 @@ export const JobPositionChecklistPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            id="btn-create-cargo-with-checklist"
+            onClick={() => setIsCreateCargoModalOpen(true)}
+            className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Novo Cargo & Checklist</span>
+          </button>
+
           {documents.length === 0 && (
             <button
               type="button"
@@ -296,10 +322,10 @@ export const JobPositionChecklistPage: React.FC = () => {
               type="button"
               id="btn-add-document-to-cargo"
               onClick={() => setIsAddModalOpen(true)}
-              className="px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-lg shadow-xs transition-colors flex items-center gap-1.5"
+              className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg shadow-2xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              <span>Adicionar Documento</span>
+              <Plus className="w-4 h-4 text-blue-600" />
+              <span>Adicionar Documento Avulso</span>
             </button>
           )}
         </div>
@@ -335,6 +361,17 @@ export const JobPositionChecklistPage: React.FC = () => {
                 )}
               </select>
             </div>
+
+            <button
+              type="button"
+              id="btn-quick-new-cargo"
+              onClick={() => setIsCreateCargoModalOpen(true)}
+              className="px-3 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200/80 rounded-lg transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer shadow-2xs"
+              title="Cadastrar um novo cargo e definir seus documentos exigidos"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Novo Cargo</span>
+            </button>
 
             {currentPosition && (
               <div className="flex items-center gap-2">
@@ -691,6 +728,13 @@ export const JobPositionChecklistPage: React.FC = () => {
           }}
         />
       )}
+
+      {/* Modal de Criação de Cargo com Checklist de Documentos */}
+      <CreateJobPositionWithChecklistModal
+        isOpen={isCreateCargoModalOpen}
+        onClose={() => setIsCreateCargoModalOpen(false)}
+        onSuccess={handleCargoCreatedWithChecklist}
+      />
     </div>
   );
 };
