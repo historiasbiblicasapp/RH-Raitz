@@ -57,18 +57,23 @@ export const DocumentReviewPage: React.FC = () => {
     documentId: string, 
     decision: 'Aprovado' | 'Rejeitado', 
     reason?: string, 
-    notes?: string
+    notes?: string,
+    expectedVersion?: number,
+    notifyCandidate?: boolean,
+    whatsappMessage?: string
   ) => {
-    const res = await fetch(`/api/documents/${documentId}/review`, {
+    await safeFetchJson(`/api/documents/${documentId}/review`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ decision, rejectionReason: reason, rejectionNotes: notes })
+      body: JSON.stringify({ 
+        decision, 
+        rejectionReason: reason, 
+        rejectionNotes: notes,
+        expectedVersion,
+        notifyCandidate,
+        whatsappMessage
+      })
     });
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || 'Falha ao salvar decisão.');
-    }
 
     await loadData();
     setActiveReviewItem(null);

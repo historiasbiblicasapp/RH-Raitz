@@ -622,16 +622,45 @@ export interface AuditLog {
   isAutomatic?: boolean;
 }
 
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent' | string;
+export type NotificationCategory = 'admission' | 'document' | 'approval' | 'task' | 'system' | 'general' | string;
+
 export interface NotificationItem {
   id: string;
   timestamp: string;
   createdAt?: string;
   title: string;
   message: string;
-  type: 'admission_created' | 'document_uploaded' | 'document_reviewed' | 'pending' | 'completed' | 'correction_requested';
+  type: 'admission_created' | 'document_uploaded' | 'document_reviewed' | 'pending' | 'completed' | 'correction_requested' | string;
   admissionId?: string;
+  documentId?: string;
   read: boolean;
   link?: string;
+  targetUserId?: string;
+  targetRole?: UserRole | string;
+  category?: NotificationCategory;
+  sourceEvent?: string;
+  priority?: NotificationPriority;
+  dedupKey?: string;
+}
+
+export interface NotificationFilterOptions {
+  userId?: string;
+  targetUserId?: string;
+  role?: string;
+  targetRole?: string;
+  category?: string;
+  priority?: string;
+  read?: boolean | string;
+  unreadOnly?: boolean;
+  admissionId?: string;
+  documentId?: string;
+  type?: string;
+  sourceEvent?: string;
+  exactUser?: boolean;
+  exactRole?: boolean;
+  audience?: boolean;
+  limit?: number;
 }
 
 export type SystemNotification = NotificationItem;
@@ -793,6 +822,7 @@ export interface PendingHubResponse {
 export type CommunicationType = 
   | 'documents_pending' 
   | 'document_rejected' 
+  | 'document_approved'
   | 'reminder' 
   | 'admission_upcoming'
   | 'general_notice';

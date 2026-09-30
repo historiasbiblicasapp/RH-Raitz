@@ -107,6 +107,22 @@ async function startServer() {
   app.use('/api', apiRouter);
   app.use('/auth', apiRouter);
 
+  // Garantir que chamadas à API que não existam retornem JSON 404 em vez de cair no SPA HTML
+  app.use(['/api/*', '/auth/*'], (req, res) => {
+    res.status(404).json({ error: `Rota de API ${req.method} ${req.originalUrl} não encontrada.` });
+  });
+
+  // Handler de erro global para rotas de API (evita que erros no servidor retornem HTML)
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (req.originalUrl?.startsWith('/api') || req.originalUrl?.startsWith('/auth')) {
+      console.error('[API Server Error]', err);
+      return res.status(err.status || 500).json({ 
+        error: err.message || 'Erro interno no servidor ao processar requisição de API.' 
+      });
+    }
+    next(err);
+  });
+
   // Vite middleware no desenvolvimento ou arquivos estáticos na produção
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

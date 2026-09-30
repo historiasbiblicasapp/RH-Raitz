@@ -13,14 +13,20 @@ export const Layout: React.FC = () => {
 
   useEffect(() => {
     // Carrega contador de notificações não lidas
-    safeFetchJson<any[]>('/api/notifications')
-      .then(data => {
-        if (Array.isArray(data)) {
-          const unread = data.filter((n: any) => !n.read).length;
-          setUnreadCount(unread);
-        }
-      })
-      .catch(() => {});
+    const loadUnreadCount = () => {
+      safeFetchJson<any[]>('/api/notifications')
+        .then(data => {
+          if (Array.isArray(data)) {
+            const unread = data.filter((n: any) => !n.read).length;
+            setUnreadCount(unread);
+          }
+        })
+        .catch(() => {});
+    };
+
+    loadUnreadCount();
+    const interval = setInterval(loadUnreadCount, 30000);
+    return () => clearInterval(interval);
   }, [location.pathname]);
 
   if (isLoading) {

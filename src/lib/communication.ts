@@ -109,6 +109,19 @@ Acesse seu link de admissão para verificar o motivo da pendência e enviar uma 
 [LINK]`
   },
 
+  document_approved: {
+    id: 'document_approved',
+    title: 'Documento aprovado',
+    description: 'Comunica ao colaborador que seu documento foi conferido e aprovado pelo RH.',
+    templateText: `Olá, [NOME].
+
+Seu documento [DOCUMENTO] foi conferido e aprovado com sucesso pela equipe de Recursos Humanos da Raitz!
+
+Você pode acompanhar o andamento da sua admissão pelo seu link de acesso:
+
+[LINK]`
+  },
+
   reminder: {
     id: 'reminder',
     title: 'Lembrete de admissão',

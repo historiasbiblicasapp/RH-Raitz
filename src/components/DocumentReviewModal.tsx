@@ -18,10 +18,16 @@ import {
   ShieldCheck,
   Calendar,
   User,
-  HelpCircle
+  HelpCircle,
+  MessageSquare,
+  Send,
+  Smartphone,
+  AlertCircle,
+  Copy
 } from 'lucide-react';
 import { AdmissionDocument, Admission, REJECTION_REASONS } from '../types/index.ts';
 import { StatusBadge } from './StatusBadge.tsx';
+import { normalizeBrazilianPhone, generateWhatsAppLink } from '../lib/communication.ts';
 
 interface DocumentReviewModalProps {
   document: AdmissionDocument | null;
@@ -33,7 +39,9 @@ interface DocumentReviewModalProps {
     decision: 'Aprovado' | 'Rejeitado', 
     reason?: string, 
     notes?: string,
-    expectedVersion?: number
+    expectedVersion?: number,
+    notifyCandidate?: boolean,
+    whatsappMessage?: string
   ) => Promise<void>;
 }
 
@@ -46,6 +54,10 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 }) => {
   const [isRejecting, setIsRejecting] = useState(false);
   const [showApproveConfirm, setShowApproveConfirm] = useState(false);
+  const [notifyViaWhatsApp, setNotifyViaWhatsApp] = useState(true);
+  const [customWhatsAppMessage, setCustomWhatsAppMessage] = useState('');
+  const [copiedMessage, setCopiedMessage] = useState(false);
+  const [approveError, setApproveError] = useState('');
   const [selectedReason, setSelectedReason] = useState<string>(REJECTION_REASONS[0]);
   const [rejectionNotes, setRejectionNotes] = useState('');
   const [rejectionError, setRejectionError] = useState('');
@@ -56,6 +68,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
 
+  // Telefone e dados do colaborador
+  const phoneValidation = normalizeBrazilianPhone(admission?.employee.phone);
+  const firstName = admission?.employee.name.split(' ')[0] || 'Colaborador';
+  const inviteUrl = typeof window !== 'undefined' && admission?.inviteToken 
+    ? `${window.location.origin}/convite/${admission.inviteToken}` 
+    : '';
+
   // Efeito para registrar auditoria de visualização e resetar controles ao abrir
   useEffect(() => {
     if (isOpen && document) {
@@ -63,6 +82,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       setRotation(0);
       setIsRejecting(false);
       setShowApproveConfirm(false);
+      setApproveError('');
       setSelectedReason(REJECTION_REASONS[0]);
       setRejectionNotes('');
       setRejectionError('');
@@ -78,6 +98,15 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       }
     }
   }, [isOpen, document?.id]);
+
+  // Mensagem padrão de aprovação ao abrir confirmação
+  useEffect(() => {
+    if (showApproveConfirm && document && admission) {
+      setApproveError('');
+      const defaultMsg = `Olá, ${firstName}! Informamos que seu documento *${document.documentType}* foi conferido e *aprovado* com sucesso pela equipe de Recursos Humanos da Raitz! ✅\n\nAcompanhe o andamento da sua admissão pelo link:\n${inviteUrl}`;
+      setCustomWhatsAppMessage(defaultMsg);
+    }
+  }, [showApproveConfirm, document?.id]);
 
   // Registra auditoria ao alternar de versão
   useEffect(() => {
@@ -96,22 +125,52 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
     ? document.versions.find(v => v.version === selectedVersionNumber) || document
     : document;
 
-  const handleApproveConfirm = async () => {
+  const handleApproveConfirm = async (sendWhatsApp = false) => {
     if (document.status === 'Não enviado' || document.currentVersion === 0) {
-      alert('Não é possível aprovar um documento que ainda não foi enviado pelo colaborador.');
+      setApproveError('Não é possível aprovar um documento que ainda não foi enviado pelo colaborador.');
       return;
     }
 
+    setApproveError('');
     setIsSubmitting(true);
     try {
-      await onReviewSubmit(document.id, 'Aprovado', undefined, undefined, document.currentVersion);
+      const messageToSend = customWhatsAppMessage.trim();
+      await onReviewSubmit(
+        document.id, 
+        'Aprovado', 
+        undefined, 
+        undefined, 
+        document.currentVersion,
+        sendWhatsApp,
+        messageToSend
+      );
+
+      // Se solicitado envio pelo WhatsApp e telefone for válido, abre o WhatsApp
+      if (sendWhatsApp && phoneValidation.isValid) {
+        const waUrl = generateWhatsAppLink(phoneValidation.cleanDigits, messageToSend);
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+      }
+
       setShowApproveConfirm(false);
       onClose();
     } catch (err: any) {
-      alert(err.message || 'Erro ao aprovar documento.');
+      console.error('Erro ao aprovar documento:', err);
+      setApproveError(err.message || 'Erro ao aprovar documento.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleApproveAndCopyMessage = async () => {
+    const messageToSend = customWhatsAppMessage.trim();
+    if (messageToSend && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(messageToSend);
+        setCopiedMessage(true);
+        setTimeout(() => setCopiedMessage(false), 2500);
+      } catch {}
+    }
+    await handleApproveConfirm(false);
   };
 
   const handleConfirmReject = async () => {
@@ -445,36 +504,117 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                 </div>
               )}
 
-              {/* Diálogo de Confirmação de Aprovação */}
+              {/* Diálogo de Confirmação de Aprovação com Notificação ao Candidato */}
               {showApproveConfirm && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3 animate-in fade-in duration-150">
-                  <div className="flex items-start gap-2 text-emerald-900">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3.5 animate-in fade-in duration-150">
+                  <div className="flex items-start gap-2.5 text-emerald-900">
                     <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-950">
                         Tem certeza que deseja aprovar este documento?
                       </h4>
-                      <p className="text-xs mt-1 text-emerald-800">
+                      <p className="text-xs mt-1 text-emerald-800 leading-relaxed">
                         O documento <strong>{document.documentType}</strong> será marcado como <strong>APROVADO</strong> na versão {document.currentVersion}. O progresso da admissão será recalculado e a decisão ficará registrada na auditoria.
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-1">
+                  {approveError && (
+                    <div className="p-2.5 bg-rose-100 border border-rose-200 rounded-lg text-rose-800 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{approveError}</span>
+                    </div>
+                  )}
+
+                  {/* Opção de Comunicação via WhatsApp ao Candidato */}
+                  <div className="bg-white/85 border border-emerald-200 rounded-xl p-3 space-y-2.5">
+                    <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={notifyViaWhatsApp}
+                        onChange={(e) => setNotifyViaWhatsApp(e.target.checked)}
+                        className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer"
+                      />
+                      <div className="flex-1">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Notificar colaborador via WhatsApp sobre a aprovação</span>
+                        </span>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Abre uma mensagem para informar ao candidato que o documento foi aprovado.
+                        </p>
+                      </div>
+                    </label>
+
+                    {notifyViaWhatsApp && (
+                      <div className="pl-6 space-y-2 pt-1 border-t border-emerald-100">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-slate-600 font-medium">
+                            Destinatário: <strong className="text-slate-900">{admission.employee.name}</strong>
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full font-medium ${
+                            phoneValidation.isValid 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {phoneValidation.isValid ? `📱 ${phoneValidation.displayPhone}` : '⚠️ Sem telefone cadastrado'}
+                          </span>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                            Mensagem a ser enviada (editável):
+                          </label>
+                          <textarea
+                            rows={3}
+                            value={customWhatsAppMessage}
+                            onChange={(e) => setCustomWhatsAppMessage(e.target.value)}
+                            className="w-full text-xs bg-emerald-50/40 border border-emerald-200 rounded-lg p-2 font-sans text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none leading-relaxed"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
                     <button
                       type="button"
+                      disabled={isSubmitting}
                       onClick={() => setShowApproveConfirm(false)}
                       className="text-xs font-medium text-slate-600 px-3 py-1.5 hover:bg-slate-100 rounded-lg cursor-pointer"
                     >
                       Cancelar
                     </button>
+
                     <button
                       type="button"
                       disabled={isSubmitting}
-                      onClick={handleApproveConfirm}
-                      className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer"
+                      onClick={() => handleApproveConfirm(false)}
+                      className="text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                     >
-                      {isSubmitting ? 'Aprovando...' : 'Confirmar Aprovação'}
+                      {isSubmitting ? 'Salvando...' : 'Apenas Aprovar'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={handleApproveAndCopyMessage}
+                      className="text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
+                      title="Aprova o documento e copia a mensagem de aprovação para a área de transferência"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>{copiedMessage ? 'Copiado & Aprovando...' : 'Aprovar & Copiar Msg'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => handleApproveConfirm(true)}
+                      className="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white px-3.5 py-1.5 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                      title={phoneValidation.isValid ? 'Aprova e abre o WhatsApp com a mensagem pronta' : 'Aprova e tenta abrir o WhatsApp'}
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{isSubmitting ? 'Aprovando...' : 'Aprovar e Enviar WhatsApp'}</span>
                     </button>
                   </div>
                 </div>
@@ -578,26 +718,53 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setIsRejecting(true)}
-                      disabled={isSubmitting}
-                      className="flex items-center justify-center gap-1.5 bg-white hover:bg-rose-50 border border-rose-300 text-rose-700 text-xs font-bold py-2.5 px-4 rounded-xl transition-colors cursor-pointer"
-                    >
-                      <XCircle className="w-4 h-4" />
-                      <span>REJEITAR</span>
-                    </button>
+                  <div>
+                    {isAlreadyApproved ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            <span className="text-xs font-bold text-emerald-900">Documento Aprovado</span>
+                          </div>
+                          {phoneValidation.isValid && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const msg = `Olá, ${firstName}! Informamos que seu documento *${document.documentType}* está aprovado na sua admissão na Raitz! ✅\n\nAcompanhe seu processo: ${inviteUrl}`;
+                                const waUrl = generateWhatsAppLink(phoneValidation.cleanDigits, msg);
+                                window.open(waUrl, '_blank', 'noopener,noreferrer');
+                              }}
+                              className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-white border border-emerald-300 hover:bg-emerald-100/50 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Avisar no WhatsApp</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setIsRejecting(true)}
+                          disabled={isSubmitting}
+                          className="flex items-center justify-center gap-1.5 bg-white hover:bg-rose-50 border border-rose-300 text-rose-700 text-xs font-bold py-2.5 px-4 rounded-xl transition-colors cursor-pointer"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          <span>REJEITAR</span>
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setShowApproveConfirm(true)}
-                      disabled={isSubmitting || isAlreadyApproved}
-                      className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
-                    >
-                      <Check className="w-4 h-4 stroke-[2.5]" />
-                      <span>{isAlreadyApproved ? 'JÁ APROVADO' : 'APROVAR'}</span>
-                    </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowApproveConfirm(true)}
+                          disabled={isSubmitting}
+                          className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          <Check className="w-4 h-4 stroke-[2.5]" />
+                          <span>APROVAR</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 

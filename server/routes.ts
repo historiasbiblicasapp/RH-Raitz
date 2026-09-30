@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { db, STORAGE_DIR } from './db.ts';
+import { NotificationFilterOptions } from '../src/types/index.ts';
 import { maskCPF, validateCPF } from '../src/lib/cpf.ts';
 import { generateSupabaseSignedUrl, isSupabaseStorageEnabled, renderFriendlyDocumentError } from './storage.ts';
 
@@ -2166,13 +2167,37 @@ router.post('/documents/:id/review', (req: Request, res: Response) => {
       rejectionNotes,
       expectedVersion !== undefined ? Number(expectedVersion) : undefined
     );
+
+    // Registro opcional de comunicação se solicitado na conferência
+    if (req.body.notifyCandidate) {
+      try {
+        db.addCommunicationLog({
+          admissionId: result.admission.id,
+          employeeId: result.admission.employeeId,
+          userId: user.id,
+          userName: user.name,
+          communicationType: decision === 'Aprovado' ? 'document_approved' : 'document_rejected',
+          channel: 'whatsapp',
+          templateId: decision === 'Aprovado' ? 'document_approved' : 'document_rejected',
+          documentId: result.document.id,
+          documentName: result.document.documentType,
+          rejectionReason,
+          messagePreview: req.body.whatsappMessage || '',
+          actionStatus: 'whatsapp_opened',
+          actionStatusLabel: decision === 'Aprovado' ? 'Notificação de aprovação via WhatsApp' : 'Notificação de rejeição via WhatsApp'
+        });
+      } catch (logErr) {
+        console.warn('Falha ao registrar log de comunicação na conferência:', logErr);
+      }
+    }
+
     return res.json({
       success: true,
       admission: result.admission,
       document: result.document
     });
   } catch (err: any) {
-    return res.status(400).json({ error: err.message });
+    return res.status(400).json({ error: err.message || 'Erro ao processar conferência do documento.' });
   }
 });
 
@@ -2408,19 +2433,82 @@ router.get('/audit-logs', (req: Request, res: Response) => {
 });
 
 // ------------------------------------------------------------------
-// NOTIFICAÇÕES
+// NOTIFICAÇÕES (Bloco 6.7B)
 // ------------------------------------------------------------------
-router.get('/notifications', (_req: Request, res: Response) => {
-  return res.json(db.getNotifications() || []);
+router.get('/notifications', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  const userIdHeader = (req.headers['x-user-id'] as string) || undefined;
+  const effectiveUserId = userIdHeader || user?.id;
+  const isFuncionario = user?.role === 'FUNCIONARIO';
+
+  const {
+    userId,
+    targetUserId,
+    role,
+    targetRole,
+    category,
+    priority,
+    read,
+    unreadOnly,
+    admissionId,
+    documentId,
+    type,
+    sourceEvent,
+    exactUser,
+    exactRole,
+    audience
+  } = req.query;
+
+  const filterOptions: NotificationFilterOptions = {};
+
+  if (category) filterOptions.category = String(category);
+  if (priority) filterOptions.priority = String(priority);
+  if (admissionId) filterOptions.admissionId = String(admissionId);
+  if (documentId) filterOptions.documentId = String(documentId);
+  if (type) filterOptions.type = String(type);
+  if (sourceEvent) filterOptions.sourceEvent = String(sourceEvent);
+  if (read !== undefined) filterOptions.read = read === 'true' ? true : read === 'false' ? false : undefined;
+  if (unreadOnly === 'true') filterOptions.unreadOnly = true;
+
+  if (isFuncionario) {
+    // Regra 8: Usuário comum não recebe notificações destinadas exclusivamente a outro usuário ou perfil
+    filterOptions.audience = true;
+    filterOptions.userId = effectiveUserId;
+    filterOptions.role = 'FUNCIONARIO';
+  } else {
+    // RH / ADMIN: pode consultar geral ou filtrar por usuário/perfil
+    if (targetUserId) filterOptions.targetUserId = String(targetUserId);
+    if (targetRole) filterOptions.targetRole = String(targetRole);
+    if (userId) filterOptions.userId = String(userId);
+    if (role) filterOptions.role = String(role);
+    if (exactUser === 'true') filterOptions.exactUser = true;
+    if (exactRole === 'true') filterOptions.exactRole = true;
+    if (audience === 'true') filterOptions.audience = true;
+  }
+
+  let notifications = db.getNotifications(filterOptions);
+
+  if (isFuncionario) {
+    // Defesa em profundidade: restrição absoluta a nível de dados
+    notifications = notifications.filter(n => {
+      if (n.targetUserId && n.targetUserId !== effectiveUserId) return false;
+      if (n.targetRole && n.targetRole.toUpperCase() !== 'FUNCIONARIO') return false;
+      return true;
+    });
+  }
+
+  return res.json(notifications || []);
 });
 
 router.all('/notifications/:id/read', (req: Request, res: Response) => {
-  db.markNotificationRead(req.params.id);
-  return res.json({ success: true });
+  const success = db.markNotificationRead(req.params.id);
+  return res.json({ success });
 });
 
-router.all('/notifications/read-all', (_req: Request, res: Response) => {
-  db.markAllNotificationsRead();
+router.all('/notifications/read-all', (req: Request, res: Response) => {
+  const user = getAuthenticatedUser(req);
+  const userId = (req.query.userId as string) || (req.body?.userId as string) || (user?.role === 'FUNCIONARIO' ? user.id : undefined);
+  db.markAllNotificationsRead(userId);
   return res.json({ success: true });
 });
 

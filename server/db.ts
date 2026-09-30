@@ -11,6 +11,9 @@ import {
   AdmissionDocument, 
   AuditLog, 
   NotificationItem, 
+  NotificationFilterOptions,
+  NotificationPriority,
+  NotificationCategory,
   ConsentRecord,
   DashboardStats,
   DashboardStatsOptions,
@@ -1095,7 +1098,7 @@ export class Database {
           this.data.settings.automations = {
             DOCUMENT_REJECTED: true,
             DOCUMENT_RESUBMITTED: true,
-            ALL_REQUIRED_DOCUMENTS_APPROVED: false,
+            ALL_REQUIRED_DOCUMENTS_APPROVED: true,
             APPROVAL_COMPLETED: false,
             TASK_COMPLETED: false
           };
@@ -1796,7 +1799,9 @@ export class Database {
       const allRequiredApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
       const anyRejected = (admission.documents || []).some(d => d.status === 'Rejeitado');
 
-      if (anyRejected) {
+      if (allRequiredApproved || docsStep.status === 'CONCLUIDA') {
+        docsStep.blockReason = undefined;
+      } else if (anyRejected) {
         docsStep.blockReason = 'Existem documentos com status "Rejeitado" que precisam de reenvio pelo colaborador.';
       } else {
         docsStep.blockReason = undefined;
@@ -5163,7 +5168,7 @@ export class Database {
 
     // Bloco 6.6: Disparo de rotinas determinísticas de automação
     if (decision === 'Aprovado') {
-      // Bloco 6.6C - Documentos aprovados reservado para microbloco posterior
+      this.executeAutomationOnAllRequiredApproved(targetAdmission, reviewerName);
     } else {
       this.executeAutomationOnDocumentRejected(
         targetAdmission,
@@ -5199,8 +5204,11 @@ export class Database {
       : 100;
 
     // REGRA 6.6.C: Uma admissão só pode ser "CONCLUÍDA" se todos os obrigatórios estiverem aprovados,
-    // E NÃO houver aprovação interna obrigatória pendente, E não houver outras etapas obrigatórias pendentes!
-    // "Nunca concluir automaticamente uma admissão se ainda existir aprovação obrigatória."
+    // E NÃO houver aprovação interna obrigatória pendente, E não houver pendências ativas ou outras etapas pendentes!
+    // "Nunca concluir automaticamente uma admissão se ainda existir documento obrigatório pendente/rejeitado ou aprovação obrigatória."
+    const hasActiveDocumentPendency = anyRejectedDoc || Boolean(admission.correctionRequest && !admission.correctionRequest.resolved);
+    const hasBlockedRequiredStep = (admission.processSteps || []).some(s => s.required && s.status === 'BLOQUEADA');
+
     const hasPendingMandatoryApproval = Boolean(
       admission.approval &&
       admission.approval.required &&
@@ -5211,8 +5219,11 @@ export class Database {
       s => s.required && s.stepKey !== 'DOCUMENTOS' && s.stepKey !== 'CADASTRO' && s.stepKey !== 'DADOS_PESSOAIS' && s.status !== 'CONCLUIDA' && s.status !== 'IGNORADA'
     );
 
-    if (approvedDocs.length === requiredDocs.length && requiredDocs.length > 0) {
-      if (hasPendingMandatoryApproval || otherRequiredStepsPending) {
+    if (hasActiveDocumentPendency) {
+      // Se possui qualquer documento rejeitado ou correção pendente -> Pendência
+      admission.status = 'Pendência';
+    } else if (approvedDocs.length === requiredDocs.length && requiredDocs.length > 0) {
+      if (hasPendingMandatoryApproval || otherRequiredStepsPending || hasBlockedRequiredStep) {
         admission.status = 'Em conferência';
       } else {
         admission.status = 'Concluída';
@@ -5236,9 +5247,6 @@ export class Database {
           });
         }
       }
-    } else if (anyRejectedDoc || (admission.correctionRequest && !admission.correctionRequest.resolved)) {
-      // Se possui qualquer documento rejeitado ou correção pendente -> Pendência
-      admission.status = 'Pendência';
     } else if (inReviewDocs.length > 0) {
       // Se há documentos aguardando análise -> Em conferência
       admission.status = 'Em conferência';
@@ -6333,35 +6341,183 @@ export class Database {
     return logs;
   }
 
-  // Notificações
-  addNotification(notif: Omit<NotificationItem, 'id' | 'timestamp' | 'read'>) {
-    const newNotif: NotificationItem = {
-      id: 'notif-' + crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      read: false,
-      ...notif
-    };
-    this.data.notifications.unshift(newNotif);
-    if (this.data.notifications.length > 100) {
-      this.data.notifications = this.data.notifications.slice(0, 100);
+  // Notificações (Bloco 6.7B)
+  addNotification(notif: Partial<NotificationItem> & {
+    title: string;
+    message: string;
+    type?: NotificationItem['type'];
+  }): NotificationItem | null {
+    // 1. Deduplicação baseada em dedupKey explícita ou derivada de sourceEvent + contexto
+    const dedupKey = notif.dedupKey || (
+      notif.sourceEvent
+        ? `notif:${notif.sourceEvent}:${notif.admissionId || ''}:${notif.targetUserId || ''}:${notif.targetRole || ''}:${notif.title}`
+        : undefined
+    );
+
+    if (dedupKey) {
+      // Idempotência: Se já existe notificação idêntica registrada
+      const existing = (this.data.notifications || []).find(n => n.dedupKey === dedupKey);
+      if (existing) {
+        return existing;
+      }
+
+      // Concorrência: Tenta adquirir lock usando a infraestrutura do Bloco 6.6
+      if (!this.tryAcquireAutomationLock('lock_' + dedupKey)) {
+        const recent = (this.data.notifications || []).find(n => n.dedupKey === dedupKey);
+        return recent || null;
+      }
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const newNotif: NotificationItem = {
+        id: notif.id || ('notif-' + crypto.randomUUID()),
+        timestamp: notif.timestamp || now,
+        createdAt: notif.createdAt || notif.timestamp || now,
+        read: notif.read ?? false,
+        title: notif.title,
+        message: notif.message,
+        type: notif.type || 'admission_created',
+        admissionId: notif.admissionId,
+        documentId: notif.documentId,
+        link: notif.link,
+        targetUserId: notif.targetUserId,
+        targetRole: notif.targetRole,
+        category: notif.category || 'general',
+        sourceEvent: notif.sourceEvent,
+        priority: notif.priority || 'normal',
+        dedupKey: dedupKey || notif.dedupKey
+      };
+
+      if (!this.data.notifications) {
+        this.data.notifications = [];
+      }
+      this.data.notifications.unshift(newNotif);
+      if (this.data.notifications.length > 200) {
+        this.data.notifications = this.data.notifications.slice(0, 200);
+      }
+      this.save();
+      return newNotif;
+    } finally {
+      if (dedupKey) {
+        this.releaseAutomationLock('lock_' + dedupKey);
+      }
     }
   }
 
-  getNotifications(): NotificationItem[] {
-    return this.data.notifications;
+  getNotifications(filters?: NotificationFilterOptions): NotificationItem[] {
+    const list = this.data.notifications || [];
+    if (!filters) {
+      return list;
+    }
+
+    return list.filter(n => {
+      // 1. Filtro por lida / não lida
+      if (filters.unreadOnly) {
+        if (n.read) return false;
+      } else if (filters.read !== undefined) {
+        const isRead = typeof filters.read === 'string' ? filters.read === 'true' : Boolean(filters.read);
+        if (n.read !== isRead) return false;
+      }
+
+      // 2. Filtro por categoria
+      if (filters.category) {
+        const cat = filters.category.toLowerCase();
+        if (!n.category || n.category.toLowerCase() !== cat) return false;
+      }
+
+      // 3. Filtro por prioridade
+      if (filters.priority) {
+        const prio = filters.priority.toLowerCase();
+        if (!n.priority || n.priority.toLowerCase() !== prio) return false;
+      }
+
+      // 4. Filtro por admissionId
+      if (filters.admissionId) {
+        if (n.admissionId !== filters.admissionId) return false;
+      }
+
+      // 4b. Filtro por documentId
+      if (filters.documentId) {
+        if (n.documentId !== filters.documentId) return false;
+      }
+
+      // 4c. Filtro por sourceEvent
+      if (filters.sourceEvent) {
+        if (n.sourceEvent !== filters.sourceEvent) return false;
+      }
+
+      // 5. Filtro por tipo
+      if (filters.type) {
+        if (n.type !== filters.type) return false;
+      }
+
+      // 6. Filtro estrito por targetUserId
+      if (filters.targetUserId !== undefined) {
+        if (n.targetUserId !== filters.targetUserId) return false;
+      }
+
+      // 7. Filtro estrito por targetRole
+      if (filters.targetRole !== undefined) {
+        if (!n.targetRole || n.targetRole.toUpperCase() !== filters.targetRole.toUpperCase()) return false;
+      }
+
+      // 8. Filtro por userId
+      if (filters.userId !== undefined && filters.targetUserId === undefined) {
+        if (filters.exactUser) {
+          if (n.targetUserId !== filters.userId) return false;
+        } else if (filters.audience) {
+          // No modo audiência: se tiver targetUserId, TEM que ser o do usuário
+          if (n.targetUserId && n.targetUserId !== filters.userId) return false;
+          // Se tiver targetRole e role foi fornecida, verifica se a role é compatível
+          if (n.targetRole && filters.role && n.targetRole.toUpperCase() !== filters.role.toUpperCase()) return false;
+        } else {
+          // Filtro padrão de userId: deve ter targetUserId === filters.userId
+          if (n.targetUserId !== filters.userId) return false;
+        }
+      }
+
+      // 9. Filtro por role
+      if (filters.role !== undefined && filters.targetRole === undefined) {
+        const roleUpper = filters.role.toUpperCase();
+        if (filters.exactRole) {
+          if (!n.targetRole || n.targetRole.toUpperCase() !== roleUpper) return false;
+        } else if (filters.audience) {
+          // No modo audiência: se tiver targetRole, tem que ser a role
+          if (n.targetRole && n.targetRole.toUpperCase() !== roleUpper) return false;
+        } else {
+          // Filtro padrão de role: deve ter targetRole === filters.role
+          if (!n.targetRole || n.targetRole.toUpperCase() !== roleUpper) return false;
+        }
+      }
+
+      return true;
+    });
   }
 
-  markNotificationRead(id: string) {
-    const n = this.data.notifications.find(item => item.id === id);
+  markNotificationRead(id: string): boolean {
+    const n = (this.data.notifications || []).find(item => item.id === id);
     if (n) {
       n.read = true;
       this.save();
+      return true;
     }
+    return false;
   }
 
-  markAllNotificationsRead() {
-    this.data.notifications.forEach(item => { item.read = true; });
-    this.save();
+  markAllNotificationsRead(targetUserId?: string): void {
+    let changed = false;
+    (this.data.notifications || []).forEach(item => {
+      if (!targetUserId || item.targetUserId === targetUserId) {
+        if (!item.read) {
+          item.read = true;
+          changed = true;
+        }
+      }
+    });
+    if (changed) {
+      this.save();
+    }
   }
 
   // =========================================================================
@@ -12994,17 +13150,24 @@ export class Database {
       settings.automations = {
         DOCUMENT_REJECTED: true,
         DOCUMENT_RESUBMITTED: true,
-        ALL_REQUIRED_DOCUMENTS_APPROVED: false,
+        ALL_REQUIRED_DOCUMENTS_APPROVED: true,
         APPROVAL_COMPLETED: false,
         TASK_COMPLETED: false
       };
+      this.save();
+    } else if (settings.automations.ALL_REQUIRED_DOCUMENTS_APPROVED === undefined) {
+      settings.automations.ALL_REQUIRED_DOCUMENTS_APPROVED = true;
       this.save();
     }
   }
 
   isAutomationEnabled(routineKey: AutomationRoutineKey): boolean {
-    // No Bloco 6.6B, apenas DOCUMENT_REJECTED e DOCUMENT_RESUBMITTED são executados
-    if (routineKey !== 'DOCUMENT_REJECTED' && routineKey !== 'DOCUMENT_RESUBMITTED') {
+    // No Bloco 6.6C, DOCUMENT_REJECTED, DOCUMENT_RESUBMITTED e ALL_REQUIRED_DOCUMENTS_APPROVED são executados
+    if (
+      routineKey !== 'DOCUMENT_REJECTED' && 
+      routineKey !== 'DOCUMENT_RESUBMITTED' &&
+      routineKey !== 'ALL_REQUIRED_DOCUMENTS_APPROVED'
+    ) {
       return false;
     }
     this.ensureAutomationsInitialized();
@@ -13012,7 +13175,7 @@ export class Database {
     if (settings.automations && typeof settings.automations[routineKey] === 'boolean') {
       return settings.automations[routineKey];
     }
-    return true; // Padrão ativo para 6.6B
+    return true; // Padrão ativo para 6.6C
   }
 
   toggleAutomationRoutine(routineKey: AutomationRoutineKey, enabled: boolean, userName: string): boolean {
@@ -13162,6 +13325,18 @@ export class Database {
   ): void {
     if (!this.isAutomationEnabled('DOCUMENT_REJECTED')) return;
 
+    // Idempotência: Se a automação já foi executada com sucesso para esta versão do documento, previne duplicidade
+    const alreadyExecuted = (this.data.automationExecutions || []).some(
+      e => e.admissionId === admission.id &&
+           e.routineKey === 'DOCUMENT_REJECTED' &&
+           e.status === 'SUCCESS' &&
+           (e.details?.includes(`doc:${doc.id}:v${doc.currentVersion}`) ||
+            (e.triggerEvent?.includes(doc.documentType) && e.triggerEvent?.includes(`V${doc.currentVersion}`)))
+    );
+    if (alreadyExecuted) {
+      return;
+    }
+
     const dedupKey = `${admission.id}:${doc.id}:REJECTED:v${doc.currentVersion}`;
     if (!this.tryAcquireAutomationLock(dedupKey)) {
       return;
@@ -13178,13 +13353,16 @@ export class Database {
         docsStep.status = 'BLOQUEADA';
         docsStep.blockReason = `Documento ${doc.documentType} rejeitado: ${reason}. Aguardando reenvio pelo colaborador.`;
         docsStep.history = docsStep.history || [];
-        docsStep.history.push({
-          action: 'bloqueada',
-          timestamp: now,
-          userName: 'Sistema (Automação)',
-          reason: docsStep.blockReason,
-          details: docsStep.blockReason
-        });
+        const lastStepHistory = docsStep.history[docsStep.history.length - 1];
+        if (!lastStepHistory || lastStepHistory.action !== 'bloqueada' || lastStepHistory.reason !== docsStep.blockReason) {
+          docsStep.history.push({
+            action: 'bloqueada',
+            timestamp: now,
+            userName: 'Sistema (Automação)',
+            reason: docsStep.blockReason,
+            details: docsStep.blockReason
+          });
+        }
         actionsTaken.push(`Sinalizado bloqueio na etapa "${docsStep.stepName}" do processo admissional`);
       }
 
@@ -13242,7 +13420,30 @@ export class Database {
         actionsTaken.push(`Documento opcional: pendência registrada sem abertura de tarefa impeditiva`);
       }
 
-      // 6. Auditoria unificada (Bloco 5.7)
+      // 6. Notificação interna para o responsável adequado (Bloco 6.7C)
+      const notifTargetUserId = admission.responsibleUserId || undefined;
+      const notifTargetRole = notifTargetUserId ? undefined : 'RH';
+      const notifPriority = doc.required ? 'high' : 'normal';
+
+      const notifRejected = this.addNotification({
+        title: `Documento com pendência: ${doc.documentType}`,
+        message: `O documento ${doc.documentType} de ${admission.employee?.name || 'Colaborador'} possui pendência/rejeição. Motivo: ${reason}.${notes ? ` Observação: "${notes}".` : ''}`,
+        type: 'pending',
+        admissionId: admission.id,
+        documentId: doc.id,
+        link: `/admissoes/${admission.id}`,
+        category: 'DOCUMENTOS',
+        priority: notifPriority,
+        targetUserId: notifTargetUserId,
+        targetRole: notifTargetRole || 'RH',
+        sourceEvent: 'automation_document_rejected',
+        dedupKey: `notif:automation_document_rejected:${admission.id}:${doc.id}:v${doc.currentVersion}`
+      });
+      if (notifRejected) {
+        actionsTaken.push(`Notificação interna (#${notifRejected.id}) gerada para o responsável`);
+      }
+
+      // 7. Auditoria unificada (Bloco 5.7)
       this.addAuditLog({
         userName: 'Sistema (Automação)',
         action: 'automation_document_rejected',
@@ -13262,11 +13463,11 @@ export class Database {
         routineName: 'Documento Rejeitado',
         admissionId: admission.id,
         employeeName: admission.employee?.name,
-        triggerEvent: `Documento ${doc.documentType} rejeitado por ${reviewerName}`,
+        triggerEvent: `Documento ${doc.documentType} rejeitado por ${reviewerName} (V${doc.currentVersion})`,
         actionsTaken,
         executedAt: now,
         status: 'SUCCESS',
-        details: actionsTaken.join(' | '),
+        details: `doc:${doc.id}:v${doc.currentVersion} | ` + actionsTaken.join(' | '),
         originatingUser: reviewerName
       });
 
@@ -13298,6 +13499,18 @@ export class Database {
   ): void {
     if (!this.isAutomationEnabled('DOCUMENT_RESUBMITTED')) return;
 
+    // Idempotência: Se a automação já foi executada com sucesso para esta versão do documento, previne duplicidade
+    const alreadyExecuted = (this.data.automationExecutions || []).some(
+      e => e.admissionId === admission.id &&
+           e.routineKey === 'DOCUMENT_RESUBMITTED' &&
+           e.status === 'SUCCESS' &&
+           (e.details?.includes(`doc:${doc.id}:v${doc.currentVersion}`) ||
+            (e.triggerEvent?.includes(doc.documentType) && e.triggerEvent?.includes(`V${doc.currentVersion}`)))
+    );
+    if (alreadyExecuted) {
+      return;
+    }
+
     const dedupKey = `${admission.id}:${doc.id}:RESUBMITTED:v${doc.currentVersion}`;
     if (!this.tryAcquireAutomationLock(dedupKey)) {
       return;
@@ -13322,17 +13535,31 @@ export class Database {
           docsStep.status = 'EM_ANDAMENTO';
           docsStep.blockReason = undefined;
           docsStep.history = docsStep.history || [];
-          docsStep.history.push({
-            action: 'iniciada',
-            timestamp: now,
-            userName: 'Sistema (Automação)',
-            reason: 'Desbloqueio operacional após reenvio de documento',
-            details: 'Desbloqueio operacional após reenvio de documento'
-          });
+          const lastStepHistory = docsStep.history[docsStep.history.length - 1];
+          if (!lastStepHistory || lastStepHistory.action !== 'iniciada' || lastStepHistory.reason !== 'Desbloqueio operacional após reenvio de documento') {
+            docsStep.history.push({
+              action: 'iniciada',
+              timestamp: now,
+              userName: 'Sistema (Automação)',
+              reason: 'Desbloqueio operacional após reenvio de documento',
+              details: 'Desbloqueio operacional após reenvio de documento'
+            });
+          }
           actionsTaken.push('Impedimento na etapa "Documentos" removido');
         } else {
           docsStep.status = 'BLOQUEADA';
           docsStep.blockReason = `Ainda existem ${remainingRejected.length} documento(s) com rejeição aguardando reenvio.`;
+          docsStep.history = docsStep.history || [];
+          const lastStepHistory = docsStep.history[docsStep.history.length - 1];
+          if (!lastStepHistory || lastStepHistory.action !== 'bloqueada' || lastStepHistory.reason !== docsStep.blockReason) {
+            docsStep.history.push({
+              action: 'bloqueada',
+              timestamp: now,
+              userName: 'Sistema (Automação)',
+              reason: docsStep.blockReason,
+              details: docsStep.blockReason
+            });
+          }
           actionsTaken.push(`Impedimento mantido na etapa "Documentos": ${remainingRejected.length} pendência(s) restante(s)`);
         }
       }
@@ -13359,7 +13586,29 @@ export class Database {
         actionsTaken.push(`Tarefa operacional #${t.id} ("${t.title}") concluída automaticamente`);
       }
 
-      // 5. Auditoria unificada
+      // 5. Notificação interna para o RH / responsável adequado (Bloco 6.7C)
+      const notifTargetUserId = admission.responsibleUserId || undefined;
+      const notifTargetRole = notifTargetUserId ? undefined : 'RH';
+
+      const notifResubmitted = this.addNotification({
+        title: 'Documento reenviado para conferência',
+        message: `Existe novo documento para conferência: ${doc.documentType} (V${doc.currentVersion}) de ${admission.employee?.name || 'Colaborador'}.`,
+        type: 'document_uploaded',
+        admissionId: admission.id,
+        documentId: doc.id,
+        link: `/admissoes/${admission.id}`,
+        category: 'DOCUMENTOS',
+        priority: doc.required ? 'high' : 'normal',
+        targetUserId: notifTargetUserId,
+        targetRole: notifTargetRole || 'RH',
+        sourceEvent: 'automation_document_resubmitted',
+        dedupKey: `notif:automation_document_resubmitted:${admission.id}:${doc.id}:v${doc.currentVersion}`
+      });
+      if (notifResubmitted) {
+        actionsTaken.push(`Notificação interna (#${notifResubmitted.id}) gerada para conferência do RH`);
+      }
+
+      // 6. Auditoria unificada
       this.addAuditLog({
         userName: 'Sistema (Automação)',
         action: 'automation_document_resubmitted',
@@ -13383,7 +13632,7 @@ export class Database {
         actionsTaken,
         executedAt: now,
         status: 'SUCCESS',
-        details: actionsTaken.join(' | '),
+        details: `doc:${doc.id}:v${doc.currentVersion} | ` + actionsTaken.join(' | '),
         originatingUser: admission.employee?.name || 'Colaborador'
       });
 
@@ -13418,6 +13667,16 @@ export class Database {
     const allRequiredApproved = requiredDocs.length > 0 && requiredDocs.every(d => d.status === 'Aprovado');
     if (!allRequiredApproved) return;
 
+    // Idempotência: Se a rotina já foi executada com sucesso para esta admissão, não reexecuta
+    const alreadyExecuted = (this.data.automationExecutions || []).some(
+      e => e.admissionId === admission.id &&
+           e.routineKey === 'ALL_REQUIRED_DOCUMENTS_APPROVED' &&
+           e.status === 'SUCCESS'
+    );
+    if (alreadyExecuted) {
+      return;
+    }
+
     const dedupKey = `${admission.id}:ALL_REQUIRED_DOCS_APPROVED`;
     if (!this.tryAcquireAutomationLock(dedupKey)) {
       return;
@@ -13429,12 +13688,27 @@ export class Database {
 
       // 1. Processo 5.4: Concluir etapa DOCUMENTOS se ativa
       const docsStep = (admission.processSteps || []).find(s => s.stepKey === 'DOCUMENTOS');
-      if (docsStep && docsStep.status !== 'CONCLUIDA') {
-        docsStep.status = 'CONCLUIDA';
-        docsStep.completedAt = now;
-        docsStep.completedBy = 'Sistema (Automação)';
-        docsStep.blockReason = undefined;
-        actionsTaken.push(`Etapa "${docsStep.stepName}" concluída com 100% dos documentos obrigatórios aprovados`);
+      if (docsStep) {
+        if (docsStep.status !== 'CONCLUIDA') {
+          docsStep.status = 'CONCLUIDA';
+          docsStep.completedAt = now;
+          docsStep.completedBy = 'Sistema (Automação)';
+          docsStep.blockReason = undefined;
+          docsStep.history = docsStep.history || [];
+          const lastHist = docsStep.history[docsStep.history.length - 1];
+          if (!lastHist || lastHist.action !== 'concluida') {
+            docsStep.history.push({
+              action: 'concluida',
+              timestamp: now,
+              userName: 'Sistema (Automação)',
+              details: 'Todos os documentos obrigatórios foram aprovados pela equipe.'
+            });
+          }
+          actionsTaken.push(`Etapa "${docsStep.stepName}" concluída com 100% dos documentos obrigatórios aprovados`);
+        } else if (docsStep.blockReason) {
+          docsStep.blockReason = undefined;
+          actionsTaken.push(`Impedimento residual na etapa "${docsStep.stepName}" removido`);
+        }
       }
 
       // 2. Verificar pendências e aprovações obrigatórias
@@ -13452,10 +13726,20 @@ export class Database {
         // NÃO PODE CONCLUIR A ADMISSÃO!
         // Avança etapa APROVACAO para EM_ANDAMENTO se existir
         const apprStep = (admission.processSteps || []).find(s => s.stepKey === 'APROVACAO');
-        if (apprStep && apprStep.status !== 'CONCLUIDA') {
+        if (apprStep && (apprStep.status === 'PENDENTE' || apprStep.status === 'BLOQUEADA')) {
           apprStep.status = 'EM_ANDAMENTO';
           apprStep.startedAt = apprStep.startedAt || now;
           apprStep.blockReason = undefined;
+          apprStep.history = apprStep.history || [];
+          const lastApprHist = apprStep.history[apprStep.history.length - 1];
+          if (!lastApprHist || lastApprHist.action !== 'iniciada') {
+            apprStep.history.push({
+              action: 'iniciada',
+              timestamp: now,
+              userName: 'Sistema (Automação)',
+              details: 'Etapa iniciada: aguardando parecer e validação da aprovação interna.'
+            });
+          }
           actionsTaken.push(`Etapa de "${apprStep.stepName}" liberada e colocada em andamento`);
         }
 
@@ -13473,6 +13757,18 @@ export class Database {
         );
 
         if (!existingApprovalTask) {
+          let responsibleUserId: string | undefined = admission.approval?.assignedUserId;
+          if (!responsibleUserId && admission.responsibleUserId) {
+            const respUser = this.data.users.find(
+              u => (u.id === admission.responsibleUserId || u.email.toLowerCase() === admission.responsibleUserId?.toLowerCase()) &&
+                   u.active !== false &&
+                   ['RH', 'ADMIN', 'RH_CONFERENCIA', 'GESTOR'].includes(u.role)
+            );
+            if (respUser) {
+              responsibleUserId = respUser.id;
+            }
+          }
+
           const apprTask = this.createOperationalTask({
             admissionId: admission.id,
             title: `Aprovação interna necessária: ${admission.employee.name}`,
@@ -13480,22 +13776,50 @@ export class Database {
             priority: 'ALTA',
             sourceType: 'APROVACAO',
             approvalId: admission.approval?.id,
-            responsibleUserId: admission.approval?.assignedUserId || admission.responsibleUserId || undefined
+            stepKey: 'APROVACAO',
+            responsibleUserId
           }, {
             name: 'Sistema (Automação)',
             id: 'system-automation'
           });
           actionsTaken.push(`Tarefa de aprovação operacional #${apprTask.id} gerada`);
+        } else {
+          actionsTaken.push(`Tarefa de aprovação operacional já existente (#${existingApprovalTask.id}); criação duplicada evitada`);
+        }
+
+        // Notificação para a alçada responsável pela próxima aprovação (Bloco 6.7C)
+        const approvalTargetUserId = admission.approval?.assignedUserId;
+        const approvalTargetRole = admission.approval?.responsibleRole;
+
+        // Regra 4: não gerar notificação se não houver destinatário aplicável
+        if (approvalTargetUserId || approvalTargetRole) {
+          const notifApproval = this.addNotification({
+            title: 'Aprovação interna necessária',
+            message: `Todos os documentos obrigatórios de ${admission.employee.name} foram aprovados. A admissão aguarda aprovação formal da alçada competente (${admission.approval?.approvalType || 'Gestão'}).`,
+            type: 'pending',
+            admissionId: admission.id,
+            link: `/admissoes/${admission.id}`,
+            category: 'APROVACAO',
+            priority: 'high',
+            targetUserId: approvalTargetUserId || undefined,
+            targetRole: approvalTargetRole || undefined,
+            sourceEvent: 'automation_all_required_documents_approved',
+            dedupKey: `notif:automation_all_required_documents_approved:${admission.id}:${admission.approval?.id || 'approval'}`
+          });
+          if (notifApproval) {
+            actionsTaken.push(`Notificação de aprovação pendente (#${notifApproval.id}) gerada para ${approvalTargetUserId || approvalTargetRole}`);
+          }
         }
       } else {
         // Sem aprovação pendente. Verificar se todas as etapas do processo 5.4 estão concluídas
         this.evaluateAdmissionProcessSteps(admission, 'Sistema (Automação)');
 
+        const hasBlockedRequiredStep = (admission.processSteps || []).some(s => s.required && s.status === 'BLOQUEADA');
         const allMandatoryStepsCompleted = (admission.processSteps || [])
           .filter(s => s.required)
           .every(s => s.status === 'CONCLUIDA' || s.status === 'IGNORADA');
 
-        if (allMandatoryStepsCompleted && !hasRejectedDocs && !hasPendingCorrection && admission.status !== 'Concluída') {
+        if (allMandatoryStepsCompleted && !hasRejectedDocs && !hasPendingCorrection && !hasBlockedRequiredStep && admission.status !== 'Concluída') {
           admission.status = 'Concluída';
           admission.completedAt = now;
           admission.completedBy = 'Sistema (Automação)';
@@ -13517,8 +13841,8 @@ export class Database {
       // 3. Auditoria unificada
       this.addAuditLog({
         userName: 'Sistema (Automação)',
-        action: 'automation_all_required_docs_approved',
-        entityType: 'automation',
+        action: 'automation_all_required_documents_approved',
+        entityType: 'admission',
         entityId: admission.id,
         entityName: admission.employee.name,
         admissionId: admission.id,
@@ -13555,7 +13879,8 @@ export class Database {
         actionsTaken: [],
         executedAt: new Date().toISOString(),
         status: 'ERROR',
-        details: 'Erro seguro: ' + (err.message || 'Erro inesperado')
+        details: 'Erro seguro: ' + (err.message || 'Erro inesperado'),
+        originatingUser: reviewerName
       });
       this.save();
     } finally {

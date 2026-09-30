@@ -347,6 +347,85 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
     return (db.admissions || []).find((a: any) => a.status === 'Aguardando documentos') || db.admissions?.[0];
   }
 
+  // 16.1. Finalização do Envio pelo Candidato em Fallback (/api/invite/:token/finish)
+  const inviteFinishMatch = path.match(/^\/api\/invite\/([^/]+)\/finish$/);
+  if (inviteFinishMatch && method === 'POST') {
+    const token = inviteFinishMatch[1];
+    const match = (db.admissions || []).find((a: any) => a.inviteToken === token);
+    if (match) {
+      const now = new Date().toISOString();
+      match.candidateCompletedSubmission = true;
+      match.candidateFinishedAt = now;
+      if (match.status === 'Aguardando documentos' || match.status === 'Rascunho') {
+        match.status = 'Em conferência';
+      }
+      match.updatedAt = now;
+      saveLocalData(db);
+      return { success: true, admission: match, message: 'Envio concluído com sucesso.' };
+    }
+  }
+
+  // 16.2. Conferência e Avaliação de Documento (Aprovar / Rejeitar) em Fallback
+  const docReviewMatch = path.match(/^\/api\/documents\/([^/]+)\/review$/);
+  if (docReviewMatch && method === 'POST') {
+    const docId = docReviewMatch[1];
+    const body = typeof options?.body === 'string' ? JSON.parse(options.body) : options?.body || {};
+    const { decision, rejectionReason, rejectionNotes } = body;
+
+    let targetAdm: any = null;
+    let targetDoc: any = null;
+
+    for (const adm of (db.admissions || [])) {
+      const found = (adm.documents || []).find((d: any) => d.id === docId);
+      if (found) {
+        targetAdm = adm;
+        targetDoc = found;
+        break;
+      }
+    }
+
+    if (targetDoc && targetAdm) {
+      const now = new Date().toISOString();
+      targetDoc.status = decision;
+      targetDoc.reviewedAt = now;
+      targetDoc.reviewedBy = 'RH Galvanização Raitz';
+      targetDoc.rejectionReason = decision === 'Rejeitado' ? (rejectionReason || 'Documento reprovado') : undefined;
+      targetDoc.rejectionNotes = decision === 'Rejeitado' ? rejectionNotes : undefined;
+      targetDoc.updatedAt = now;
+
+      if (targetDoc.versions && targetDoc.versions.length > 0) {
+        const lastVer = targetDoc.versions[targetDoc.versions.length - 1];
+        lastVer.status = decision;
+        lastVer.reviewedAt = now;
+        lastVer.reviewedBy = 'RH Galvanização Raitz';
+        lastVer.rejectionReason = targetDoc.rejectionReason;
+        lastVer.rejectionNotes = targetDoc.rejectionNotes;
+      }
+
+      // Recalcula progresso da admissão
+      const requiredDocs = (targetAdm.documents || []).filter((d: any) => d.required);
+      const approvedDocs = requiredDocs.filter((d: any) => d.status === 'Aprovado');
+      const rejectedDocs = (targetAdm.documents || []).filter((d: any) => d.status === 'Rejeitado');
+
+      targetAdm.approvedDocuments = approvedDocs.length;
+      targetAdm.totalDocuments = requiredDocs.length;
+      targetAdm.progressPercent = requiredDocs.length > 0 ? Math.round((approvedDocs.length / requiredDocs.length) * 100) : 100;
+
+      if (approvedDocs.length === requiredDocs.length && requiredDocs.length > 0) {
+        targetAdm.status = 'Concluída';
+        targetAdm.completedAt = targetAdm.completedAt || now;
+      } else if (rejectedDocs.length > 0) {
+        targetAdm.status = 'Pendência';
+      } else {
+        targetAdm.status = 'Em conferência';
+      }
+
+      targetAdm.updatedAt = now;
+      saveLocalData(db);
+      return { success: true, admission: targetAdm, document: targetDoc };
+    }
+  }
+
   // 17. Processo Admissional (Bloco 5.4)
   if (path === '/api/admission-process' || path === '/admission-process') {
     const defaultSteps = [

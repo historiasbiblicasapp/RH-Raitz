@@ -24,11 +24,13 @@ import {
   Send,
   CheckCheck,
   FileCheck,
-  LogOut
+  LogOut,
+  RotateCcw
 } from 'lucide-react';
 import { Admission, AdmissionDocument } from '../types/index.ts';
 import { StatusBadge } from '../components/StatusBadge.tsx';
 import { formatCPF } from '../lib/cpf.ts';
+import { safeFetchJson } from '../lib/api.ts';
 
 export const EmployeePortal: React.FC = () => {
   const { token } = useParams<{ token: string }>();
@@ -66,15 +68,16 @@ export const EmployeePortal: React.FC = () => {
   const [isFinishingSubmission, setIsFinishingSubmission] = useState(false);
   const [finishSuccessModal, setFinishSuccessModal] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
+  const [showDocumentsDetail, setShowDocumentsDetail] = useState(false);
+  const [isSessionClosed, setIsSessionClosed] = useState(false);
 
   const fetchAdmission = async () => {
     if (!token) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/invite/${token}`);
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Convite de admissão inválido, expirado ou cancelado.');
+      const data = await safeFetchJson<Admission>(`/api/invite/${token}`);
+      if (!data) {
+        throw new Error('Convite de admissão inválido, expirado ou cancelado.');
       }
       setAdmission(data);
 
@@ -105,17 +108,16 @@ export const EmployeePortal: React.FC = () => {
     }
     setIsSubmittingConsent(true);
     try {
-      const res = await fetch(`/api/invite/${token}/consent`, {
+      await safeFetchJson(`/api/invite/${token}/consent`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ termVersion: '1.0-2025' })
       });
-      if (!res.ok) throw new Error('Erro ao registrar consentimento.');
       
       setAdmission(prev => prev ? { ...prev, consentGiven: true } : null);
       setActiveStep(2);
     } catch (err: any) {
-      alert(err.message);
+      alert(err.message || 'Erro ao registrar consentimento.');
     } finally {
       setIsSubmittingConsent(false);
     }
@@ -125,16 +127,16 @@ export const EmployeePortal: React.FC = () => {
   const handleConfirmData = async () => {
     setIsSubmittingData(true);
     try {
-      const res = await fetch(`/api/invite/${token}/confirm-data`, {
+      const data = await safeFetchJson<{ admission: Admission }>(`/api/invite/${token}/confirm-data`, {
         method: 'POST'
       });
-      if (!res.ok) throw new Error('Erro ao confirmar dados.');
       
-      const data = await res.json();
-      setAdmission(data.admission);
+      if (data?.admission) {
+        setAdmission(data.admission);
+      }
       setActiveStep(3);
     } catch (err: any) {
-      alert(err.message);
+      alert(err.message || 'Erro ao confirmar dados.');
     } finally {
       setIsSubmittingData(false);
     }
@@ -148,19 +150,19 @@ export const EmployeePortal: React.FC = () => {
     }
     setIsSubmittingData(true);
     try {
-      const res = await fetch(`/api/invite/${token}/request-correction`, {
+      const data = await safeFetchJson<{ admission: Admission }>(`/api/invite/${token}/request-correction`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ details: correctionDetails })
       });
-      if (!res.ok) throw new Error('Erro ao registrar solicitação.');
       
-      const data = await res.json();
-      setAdmission(data.admission);
+      if (data?.admission) {
+        setAdmission(data.admission);
+      }
       setShowCorrectionModal(false);
       setActiveStep(3);
     } catch (err: any) {
-      alert(err.message);
+      alert(err.message || 'Erro ao registrar solicitação.');
     } finally {
       setIsSubmittingData(false);
     }
@@ -209,13 +211,21 @@ export const EmployeePortal: React.FC = () => {
         body: formData
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Falha ao enviar arquivo.');
+      let data: any = null;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        data = null;
       }
 
-      setAdmission(data.admission);
+      if (!res.ok) {
+        throw new Error(data?.error || `Falha no servidor (${res.status}) ao enviar arquivo.`);
+      }
+
+      if (data?.admission) {
+        setAdmission(data.admission);
+      }
       setUploadSuccessMessage(`Documento "${targetDocForUpload.documentType}" enviado com sucesso! Status: Em análise.`);
       
       // Limpa os inputs
@@ -248,17 +258,15 @@ export const EmployeePortal: React.FC = () => {
     setIsFinishingSubmission(true);
     setUploadErrorMessage(null);
     try {
-      const res = await fetch(`/api/invite/${token}/finish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await res.json();
+      const data = await safeFetchJson<{ success: boolean; message: string; admission: Admission }>(
+        `/api/invite/${token}/finish`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Erro ao finalizar o cadastro.');
-      }
-
-      if (data.admission) {
+      if (data?.admission) {
         setAdmission(data.admission);
       }
       setFinishSuccessModal(true);
@@ -298,6 +306,66 @@ export const EmployeePortal: React.FC = () => {
 
   const firstName = admission.employee.name.split(' ')[0];
   const isCompleted = admission.status === 'Concluída';
+
+  if (isSessionClosed) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 text-center shadow-lg space-y-5 animate-in zoom-in-95">
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <img
+              src="/raitz-logo.jpg"
+              alt="Logo Raitz"
+              referrerPolicy="no-referrer"
+              className="w-10 h-10 rounded-xl object-cover shadow-xs border border-slate-200"
+            />
+            <div className="text-left">
+              <span className="font-bold text-slate-900 text-sm block leading-none">
+                Admissão Digital
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">Galvanização Raitz</span>
+            </div>
+          </div>
+
+          <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+            <CheckCheck className="w-9 h-9" />
+          </div>
+
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">
+              {admission?.candidateCompletedSubmission
+                ? 'Cadastro Finalizado e Entregue!'
+                : 'Cadastro Salvo com Sucesso!'}
+            </h2>
+            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+              {admission?.candidateCompletedSubmission
+                ? `Obrigado, ${firstName}! Seus dados e documentos já foram encaminhados à equipe de RH. Você pode fechar o navegador do seu celular com tranquilidade.`
+                : `Seu progresso e documentos foram salvos com segurança. Você pode fechar o navegador agora e retornar quando desejar pelo link do seu convite.`}
+            </p>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-left text-xs text-slate-600 space-y-2">
+            <div className="flex items-center gap-2 text-slate-800 font-semibold">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Dados protegidos pela LGPD</span>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              Para encerrar totalmente no seu celular, basta fechar esta aba no seu navegador (Google Chrome, Safari, etc.).
+            </p>
+          </div>
+
+          <button
+            type="button"
+            id="btn-reopen-portal"
+            onClick={() => setIsSessionClosed(false)}
+            className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reabrir Meu Cadastro</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-12">
@@ -346,18 +414,18 @@ export const EmployeePortal: React.FC = () => {
               type="button"
               id="btn-header-close-portal"
               onClick={() => setShowExitModal(true)}
-              className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-              title="Fechar ou Sair do Cadastro"
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-300/80 px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-2xs"
+              title="Terminar ou Fechar Cadastro"
             >
-              <LogOut className="w-3.5 h-3.5 text-slate-500" />
-              <span>Fechar</span>
+              <LogOut className="w-3.5 h-3.5 text-slate-600" />
+              <span>Terminar / Fechar</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Conteúdo Principal (Mobile-First Container) */}
-      <main className="max-w-lg mx-auto p-4 space-y-4">
+      <main className="max-w-lg mx-auto p-4 space-y-4 pb-32">
         {/* Banner de Boas-Vindas */}
         <div className="bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 text-white rounded-2xl p-5 shadow-sm relative overflow-hidden">
           <div className="relative z-10">
@@ -589,17 +657,109 @@ export const EmployeePortal: React.FC = () => {
         )}
 
         {/* PASSO 3: Checklist de Documentos e Envio */}
-        {(admission.dataConfirmed || admission.correctionRequest || activeStep === 3) && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-sm font-bold text-slate-900">Meus Documentos</h2>
-              <span className="text-xs text-slate-500 font-medium">
-                {admission.approvedDocuments}/{admission.totalDocuments} aprovados
-              </span>
-            </div>
+        {(admission.dataConfirmed || admission.correctionRequest || activeStep === 3) && (() => {
+          const requiredDocs = admission.documents.filter(d => d.required);
+          const pendingRequiredDocs = requiredDocs.filter(d => d.status === 'Não enviado' || d.currentVersion === 0);
+          const isAllRequiredSent = requiredDocs.length > 0 && pendingRequiredDocs.length === 0;
 
-            {/* Lista dos 5 Documentos com Status e Ações */}
-            <div className="space-y-2.5">
+          return (
+            <div className="space-y-4">
+              {/* TELA DE CONCLUSÃO / CADASTRO FINALIZADO (quando já enviado pelo colaborador) */}
+              {admission.candidateCompletedSubmission && (
+                <div className="bg-white rounded-2xl border-2 border-emerald-500/40 p-5 shadow-sm space-y-4 animate-in fade-in">
+                  <div className="flex items-start gap-3.5">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <CheckCheck className="w-7 h-7" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 mb-1">
+                        <Sparkles className="w-3 h-3" />
+                        Envio Finalizado pelo Candidato
+                      </span>
+                      <h3 className="text-base font-bold text-slate-900 leading-tight">
+                        Cadastro Finalizado com Sucesso!
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        Obrigado, <strong>{firstName}</strong>! Seus dados e documentos foram enviados para o RH da Raitz em {new Date(admission.candidateFinishedAt || admission.updatedAt).toLocaleDateString('pt-BR')} às {new Date(admission.candidateFinishedAt || admission.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-3 text-xs space-y-1.5">
+                    <p className="font-semibold text-emerald-950">Status atual: Em conferência pelo RH</p>
+                    <p className="text-[11px] text-emerald-800 leading-relaxed">
+                      Nossa equipe de Recursos Humanos já recebeu seus dados e iniciou a validação. Você já pode fechar esta página no seu celular com tranquilidade. Se precisarmos de algo, você será avisado via WhatsApp.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      id="btn-close-completed-screen"
+                      onClick={() => setShowExitModal(true)}
+                      className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Fechar / Terminar Cadastro</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="btn-toggle-docs-detail"
+                      onClick={() => setShowDocumentsDetail(prev => !prev)}
+                      className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4" />
+                      <span>{showDocumentsDetail ? 'Ocultar Documentos' : 'Ver Documentos Enviados'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* AVISO DE TUDO PREENCHIDO / BOTÃO DE TERMINAR O CADASTRO (quando ainda não finalizou) */}
+              {!admission.candidateCompletedSubmission && isAllRequiredSent && (
+                <div className="p-4 bg-emerald-50 border-2 border-emerald-300 rounded-2xl shadow-xs space-y-3 animate-in fade-in">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
+                        Todos os documentos obrigatórios foram carregados!
+                      </h3>
+                      <p className="text-xs text-emerald-800 mt-0.5 leading-relaxed">
+                        Excelente, você anexou tudo o que é necessário. Clique no botão abaixo para concluir o envio e notificar a equipe de RH.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    id="btn-employee-top-finish-submission"
+                    onClick={handleFinishSubmission}
+                    disabled={isFinishingSubmission}
+                    className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <span>{isFinishingSubmission ? 'Finalizando cadastro...' : 'Concluir e Finalizar Cadastro Agora'}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Lista dos Documentos (visível se ainda não concluiu OU se clicou em ver detalhes) */}
+              {(!admission.candidateCompletedSubmission || showDocumentsDetail) && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <h2 className="text-sm font-bold text-slate-900">
+                      {admission.candidateCompletedSubmission ? 'Documentos Enviados' : 'Meus Documentos'}
+                    </h2>
+                    <span className="text-xs text-slate-500 font-medium">
+                      {admission.approvedDocuments}/{admission.totalDocuments} aprovados
+                    </span>
+                  </div>
+
+                  {/* Lista dos 5 Documentos com Status e Ações */}
+                  <div className="space-y-2.5">
               {admission.documents.map((doc) => {
                 const isUploadingThis = uploadingDocId === doc.id;
                 const isApproved = doc.status === 'Aprovado';
@@ -719,86 +879,78 @@ export const EmployeePortal: React.FC = () => {
                   </div>
                 );
               })}
-            </div>
-
-            {/* Ação Operacional do Colaborador: Finalizar / Concluir Envio do Cadastro */}
-            {!isCompleted && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3 mt-4">
-                <div className="flex items-start gap-3">
-                  <div className={`p-2.5 rounded-xl shrink-0 ${
-                    admission.candidateCompletedSubmission
-                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                      : (admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length === 0)
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {admission.candidateCompletedSubmission ? (
-                      <CheckCheck className="w-5 h-5 text-blue-600" />
-                    ) : (
-                      <Send className="w-5 h-5 text-emerald-600" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-xs font-bold text-slate-900">
-                      {admission.candidateCompletedSubmission 
-                        ? 'Envio Finalizado pelo Colaborador' 
-                        : 'Finalizar e Concluir Envio de Documentos'}
-                    </h3>
-                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                      {admission.candidateCompletedSubmission ? (
-                        <>Você já finalizou e enviou seus documentos para o RH em {new Date(admission.candidateFinishedAt || admission.updatedAt).toLocaleDateString('pt-BR')} às {new Date(admission.candidateFinishedAt || admission.updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Se precisar reenviar algum item, você ainda pode utilizar os botões acima.</>
-                      ) : (admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length === 0) ? (
-                        'Todos os seus documentos obrigatórios foram carregados! Clique no botão abaixo para concluir o envio e notificar a equipe de Recursos Humanos para conferência.'
-                      ) : (
-                        `Você já enviou ${admission.documents.filter(d => d.currentVersion > 0).length} de ${admission.totalDocuments} documento(s). Restam ${admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length} obrigatório(s) para poder concluir o envio.`
-                      )}
-                    </p>
                   </div>
                 </div>
+              )}
 
-                {!admission.candidateCompletedSubmission && (
-                  <button
-                    type="button"
-                    id="btn-employee-finish-submission"
-                    onClick={handleFinishSubmission}
-                    disabled={
-                      isFinishingSubmission || 
-                      admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length > 0
-                    }
-                    className={`w-full py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm ${
-                      admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length === 0
-                        ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white ring-2 ring-emerald-500/20'
-                        : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                    }`}
-                  >
-                    {isFinishingSubmission ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Finalizando cadastro...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCheck className="w-4 h-4" />
-                        <span>
-                          {admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length === 0
-                            ? 'Concluir e Finalizar Envio para o RH'
-                            : `Preencha os obrigatórios para finalizar (${admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length} pendente)`}
-                        </span>
-                      </>
-                    )}
-                  </button>
-                )}
-
-                {admission.candidateCompletedSubmission && (
-                  <div className="p-2.5 bg-blue-50/70 border border-blue-100 rounded-xl text-[11px] text-blue-800 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
-                    <span>Cadastro enviado! Sua admissão agora está na fila de conferência do RH.</span>
+              {/* Ação Operacional do Colaborador: Finalizar / Concluir Envio do Cadastro */}
+              {!isCompleted && !admission.candidateCompletedSubmission && (
+                <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3 mt-4">
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2.5 rounded-xl shrink-0 ${
+                      isAllRequiredSent ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500'
+                    }`}>
+                      <Send className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-xs font-bold text-slate-900">
+                        {isAllRequiredSent 
+                          ? 'Tudo Pronto para Concluir' 
+                          : 'Finalizar e Concluir Envio de Documentos'}
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                        {isAllRequiredSent ? (
+                          'Todos os seus documentos obrigatórios foram carregados! Clique no botão abaixo para concluir o envio e notificar a equipe de Recursos Humanos para conferência.'
+                        ) : (
+                          `Você já enviou ${admission.documents.filter(d => d.currentVersion > 0).length} de ${admission.totalDocuments} documento(s). Restam ${pendingRequiredDocs.length} obrigatório(s) para poder concluir o envio.`
+                        )}
+                      </p>
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <button
+                      type="button"
+                      id="btn-employee-finish-submission"
+                      onClick={handleFinishSubmission}
+                      disabled={isFinishingSubmission || !isAllRequiredSent}
+                      className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs ${
+                        isAllRequiredSent
+                          ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white ring-2 ring-emerald-500/20'
+                          : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                      }`}
+                    >
+                      {isFinishingSubmission ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Finalizando cadastro...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCheck className="w-4 h-4" />
+                          <span>
+                            {isAllRequiredSent
+                              ? 'Concluir e Finalizar Envio para o RH'
+                              : `Preencha os obrigatórios para finalizar (${pendingRequiredDocs.length} pendente)`}
+                          </span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowExitModal(true)}
+                      className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Fechar Cadastro</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Modal de Sucesso após Finalizar Envio */}
         {finishSuccessModal && (
@@ -822,10 +974,13 @@ export const EmployeePortal: React.FC = () => {
               <button
                 type="button"
                 id="btn-close-finish-modal"
-                onClick={() => setFinishSuccessModal(false)}
-                className="w-full py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl transition-colors cursor-pointer"
+                onClick={() => {
+                  setFinishSuccessModal(false);
+                  setIsSessionClosed(true);
+                }}
+                className="w-full py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl transition-colors cursor-pointer"
               >
-                Entendi, Fechar
+                Concluir e Fechar Cadastro
               </button>
             </div>
           </div>
@@ -842,11 +997,11 @@ export const EmployeePortal: React.FC = () => {
                 <h3 className="text-base font-bold text-slate-900">Fechar Cadastro</h3>
                 <p className="text-xs text-slate-600 mt-2 leading-relaxed">
                   {admission.candidateCompletedSubmission ? (
-                    'Seu cadastro já foi finalizado e enviado com sucesso ao RH! Você pode fechar esta aba no navegador do seu celular com segurança.'
+                    'Seu cadastro já foi finalizado e enviado com sucesso ao RH! Você pode fechar esta tela com total segurança.'
                   ) : admission.documents.filter(d => d.required && (d.status === 'Não enviado' || d.currentVersion === 0)).length === 0 ? (
                     'Você já carregou todos os documentos obrigatórios! Deseja concluir o envio agora para o RH ou fechar para continuar mais tarde?'
                   ) : (
-                    'Seu progresso e documentos já enviados ficam salvos automaticamente. Você pode fechar agora e retornar a qualquer momento pelo mesmo link recebido.'
+                    'Seu progresso e documentos já enviados ficam salvos automaticamente na nuvem. Você pode fechar agora e retornar a qualquer momento pelo mesmo link recebido.'
                   )}
                 </p>
               </div>
@@ -871,17 +1026,14 @@ export const EmployeePortal: React.FC = () => {
                   id="btn-confirm-exit-portal"
                   onClick={() => {
                     setShowExitModal(false);
-                    // Em navegadores mobile, window.close() pode ser bloqueado se não aberto via window.open,
-                    // então fornecemos feedback claro de que o usuário pode fechar a aba
                     try {
                       window.close();
-                    } catch {
-                      // Silencioso
-                    }
+                    } catch {}
+                    setIsSessionClosed(true);
                   }}
                   className="w-full py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
-                  Fechar Janela / Aba
+                  Fechar Janela / Salvar Sessão
                 </button>
 
                 <button
@@ -914,6 +1066,72 @@ export const EmployeePortal: React.FC = () => {
           <p>Admissão Digital • Sistema Seguro em conformidade com a LGPD</p>
         </div>
       </main>
+
+      {/* Barra Fixa Inferior Mobile para Terminar/Fechar Cadastro */}
+      {admission && (admission.dataConfirmed || admission.correctionRequest || activeStep === 3) && (() => {
+        const requiredDocs = admission.documents.filter(d => d.required);
+        const pendingRequiredDocs = requiredDocs.filter(d => d.status === 'Não enviado' || d.currentVersion === 0);
+        const isAllRequiredSent = requiredDocs.length > 0 && pendingRequiredDocs.length === 0;
+
+        return (
+          <aside aria-label="Ações de Conclusão e Fechamento" className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-xl px-4 py-3">
+            <div className="max-w-lg mx-auto flex items-center gap-2.5">
+              {admission.candidateCompletedSubmission ? (
+                <button
+                  type="button"
+                  id="btn-sticky-close-completed"
+                  onClick={() => setShowExitModal(true)}
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Cadastro Finalizado • Fechar Janela</span>
+                </button>
+              ) : isAllRequiredSent ? (
+                <>
+                  <button
+                    type="button"
+                    id="btn-sticky-finish-submission"
+                    onClick={handleFinishSubmission}
+                    disabled={isFinishingSubmission}
+                    className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer ring-2 ring-emerald-500/30"
+                  >
+                    <CheckCheck className="w-4 h-4" />
+                    <span>{isFinishingSubmission ? 'Finalizando...' : 'Concluir e Finalizar'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowExitModal(true)}
+                    className="py-3 px-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0"
+                    title="Fechar ou Sair"
+                  >
+                    Fechar
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-[11px] font-bold text-slate-800 block truncate">
+                      {admission.documents.filter(d => d.currentVersion > 0).length}/{admission.totalDocuments} documentos enviados
+                    </span>
+                    <span className="text-[10px] text-slate-500 block truncate">
+                      Faltam {pendingRequiredDocs.length} obrigatório(s)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    id="btn-sticky-save-exit"
+                    onClick={() => setShowExitModal(true)}
+                    className="py-2.5 px-3.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Salvar e Fechar</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </aside>
+        );
+      })()}
     </div>
   );
 };
