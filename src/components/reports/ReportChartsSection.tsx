@@ -32,6 +32,12 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
+  const byStatus = charts?.byStatus ?? [];
+  const evolution = charts?.evolution ?? [];
+  const byDepartment = charts?.byDepartment ?? [];
+  const byDocumentStatus = charts?.byDocumentStatus ?? [];
+  const byUnit = charts?.byUnit ?? [];
+
   if (totalAdmissions === 0) {
     return null;
   }
@@ -82,7 +88,7 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
 
             <div className="h-56 w-full pt-2">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={charts.byStatus} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                <BarChart data={byStatus} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                   <XAxis 
                     dataKey="name" 
@@ -107,7 +113,7 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
                     }} 
                   />
                   <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {charts.byStatus.map((entry, index) => (
+                    {byStatus.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color || '#3b82f6'} />
                     ))}
                   </Bar>
@@ -129,9 +135,9 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
             </div>
 
             <div className="h-56 w-full pt-2">
-              {charts.evolution && charts.evolution.length > 0 ? (
+              {evolution.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={charts.evolution} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                  <AreaChart data={evolution} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                     <defs>
                       <linearGradient id="colorEvolution" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
@@ -184,12 +190,12 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
                 Admissões por Departamento
               </span>
               <span className="text-[11px] text-slate-500 font-medium">
-                {charts.byDepartment.length} setores
+                {byDepartment.length} setores
               </span>
             </div>
 
             <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-              {charts.byDepartment.map((dept) => (
+              {byDepartment.map((dept) => (
                 <div key={dept.name} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-slate-700 truncate max-w-[200px]" title={dept.name}>
@@ -223,7 +229,7 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
-              {charts.byDocumentStatus.map((docSt) => (
+              {byDocumentStatus.map((docSt) => (
                 <div 
                   key={docSt.name}
                   className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 flex flex-col justify-between"
@@ -250,11 +256,11 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
             </div>
 
             {/* Distribuição por Unidade */}
-            {charts.byUnit.length > 0 && (
+            {byUnit.length > 0 && (
               <div className="pt-2 border-t border-slate-100 flex items-center gap-3 text-xs text-slate-600">
                 <span className="font-semibold text-slate-700 shrink-0">Unidades:</span>
                 <div className="flex flex-wrap gap-2">
-                  {charts.byUnit.map(u => (
+                  {byUnit.map(u => (
                     <span key={u.name} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px]">
                       {u.name}: <strong className="font-semibold text-slate-900">{u.count}</strong>
                     </span>

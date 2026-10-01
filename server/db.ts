@@ -6602,6 +6602,51 @@ export class Database {
       details: `Comunicação (${newLog.actionStatusLabel}) via ${logData.channel.toUpperCase()} - Tipo: ${logData.communicationType}.`
     });
 
+    // Bloco 6.8B: Integração Comunicação x Tarefas Operacionais
+    // Conclusão automática de tarefa operacional de cobrança quando houver comunicação efetiva
+    const isEffectiveCollection =
+      (logData.actionStatus === 'whatsapp_opened' || logData.actionStatus === 'message_copied') ||
+      (logData.actionStatus === 'link_copied' && (logData.communicationType === 'document_rejected' || !!logData.rejectionReason));
+
+    if (isEffectiveCollection && logData.admissionId && logData.documentId) {
+      // Localiza a tarefa de cobrança aberta especificamente para esta admissão e este documento
+      const matchingOpenTask = (this.data.operationalTasks || []).find(
+        t => t.admissionId === logData.admissionId &&
+             t.documentId === logData.documentId &&
+             t.sourceType === 'DOCUMENTO' &&
+             (t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO' || t.status === 'BLOQUEADA')
+      );
+
+      if (matchingOpenTask) {
+        newLog.taskId = matchingOpenTask.id;
+        const channelLabel = logData.channel === 'whatsapp' ? 'WhatsApp' : 'Área de transferência';
+        const actionLabel = logData.actionStatusLabel || (
+          logData.actionStatus === 'whatsapp_opened' ? 'WhatsApp aberto' :
+          logData.actionStatus === 'message_copied' ? 'Mensagem copiada' : 'Link copiado'
+        );
+
+        this.completeOperationalTask(
+          matchingOpenTask.id,
+          `Cobrança realizada pelo RH via ${channelLabel} (${actionLabel}): "${(newLog.messagePreview || 'Comunicação realizada').slice(0, 100)}".`,
+          {
+            id: logData.userId,
+            name: logData.userName
+          }
+        );
+        matchingOpenTask.communicationId = newLog.id;
+      } else {
+        // Se a tarefa já tiver sido concluída anteriormente, vincula o ID para rastreabilidade sem reprocessar
+        const existingTask = (this.data.operationalTasks || []).find(
+          t => t.admissionId === logData.admissionId &&
+               t.documentId === logData.documentId &&
+               t.sourceType === 'DOCUMENTO'
+        );
+        if (existingTask) {
+          newLog.taskId = existingTask.id;
+        }
+      }
+    }
+
     this.save();
     return newLog;
   }

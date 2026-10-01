@@ -949,6 +949,18 @@ router.get('/admissions/:id/communications', (req: Request, res: Response) => {
   return res.json({ logs });
 });
 
+/**
+ * GET /api/communications/logs ou /api/communications/history
+ * Retorna o histórico global cronológico de comunicações realizadas.
+ */
+router.get(['/communications/logs', '/communications/history'], (req: Request, res: Response) => {
+  const auth = checkRhAuth(req, res);
+  if (!auth) return;
+
+  const logs = db.getCommunicationLogs();
+  return res.json({ logs });
+});
+
 // =========================================================================
 // BLOCO 4.4 — PRAZOS E ACOMPANHAMENTO OPERACIONAL (RH)
 // =========================================================================

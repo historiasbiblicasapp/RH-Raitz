@@ -61,6 +61,8 @@ export const ReportTable: React.FC<ReportTableProps> = ({
     }
   };
 
+  const safeRows = rows ?? [];
+
   if (isLoading) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
@@ -71,7 +73,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
     );
   }
 
-  if (rows.length === 0) {
+  if (safeRows.length === 0) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
         <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3 text-slate-400">
@@ -235,7 +237,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
 
           <tbody className="divide-y divide-slate-100 text-slate-700">
             {/* 1. Linhas para Relatório Geral de Admissões */}
-            {reportType === 'admissoes' && (rows as ReportRowAdmission[]).map((r) => (
+            {reportType === 'admissoes' && (safeRows as ReportRowAdmission[]).map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="py-3 px-4 font-mono font-medium text-blue-600">
                   {r.admissionCode}
@@ -292,7 +294,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
             ))}
 
             {/* 2. Linhas para Relatório de Documentos */}
-            {reportType === 'documentos' && (rows as ReportRowDocument[]).map((r) => (
+            {reportType === 'documentos' && (safeRows as ReportRowDocument[]).map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="py-3 px-4">
                   <div className="font-mono text-[11px] text-blue-600 font-medium">{r.admissionCode}</div>
@@ -352,7 +354,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
             ))}
 
             {/* 3. Linhas para Relatório de Pendências */}
-            {reportType === 'pendencias' && (rows as ReportRowPending[]).map((r) => (
+            {reportType === 'pendencias' && (safeRows as ReportRowPending[]).map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="py-3 px-4">
                   <div className="font-mono text-[11px] text-blue-600 font-medium">{r.admissionCode}</div>
@@ -402,7 +404,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
             ))}
 
             {/* 4. Linhas para Relatório de Concluídas */}
-            {reportType === 'concluidas' && (rows as ReportRowCompleted[]).map((r) => (
+            {reportType === 'concluidas' && (safeRows as ReportRowCompleted[]).map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="py-3 px-4 font-mono font-medium text-emerald-600">
                   {r.admissionCode}
@@ -444,7 +446,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
             ))}
 
             {/* 5. Linhas para Relatório de Canceladas */}
-            {reportType === 'canceladas' && (rows as ReportRowCancelled[]).map((r) => (
+            {reportType === 'canceladas' && (safeRows as ReportRowCancelled[]).map((r) => (
               <tr key={r.id} className="hover:bg-slate-50/60 transition-colors">
                 <td className="py-3 px-4 font-mono font-medium text-slate-600">
                   {r.admissionCode}

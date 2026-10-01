@@ -847,6 +847,7 @@ export interface CommunicationLog {
   actionStatus: CommunicationActionStatus;
   actionStatusLabel: string;
   createdAt: string;
+  taskId?: string; // Bloco 6.8B: Tarefa de cobrança vinculada/concluída
 }
 
 export interface CommunicationPendingReason {
@@ -2361,6 +2362,7 @@ export interface OperationalTask {
   createdAt: string;
   updatedAt: string;
   history: OperationalTaskHistoryItem[];
+  communicationId?: string; // Bloco 6.8B: Id do registro de comunicação vinculado
 }
 
 export interface OperationalTaskSummary {

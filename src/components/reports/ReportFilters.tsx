@@ -22,6 +22,11 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
   reportType,
   availableFilters
 }) => {
+  const statuses = availableFilters?.statuses ?? [];
+  const roles = availableFilters?.roles ?? [];
+  const departments = availableFilters?.departments ?? [];
+  const units = availableFilters?.units ?? [];
+
   const isFiltered = Boolean(
     (filters.period && filters.period !== 'all') ||
     (filters.status && filters.status !== 'TODOS') ||

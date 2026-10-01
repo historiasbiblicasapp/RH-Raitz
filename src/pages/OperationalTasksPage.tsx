@@ -97,7 +97,7 @@ export const OperationalTasksPage: React.FC = () => {
         setData(res);
         // Atualiza a tarefa selecionada caso esteja com drawer aberto
         if (selectedTask) {
-          const updated = res.items.find(t => t.id === selectedTask.id);
+          const updated = (res.items || []).find(t => t.id === selectedTask.id);
           if (updated) setSelectedTask(updated);
         }
       }
@@ -255,6 +255,10 @@ export const OperationalTasksPage: React.FC = () => {
     critical: 0,
     overdue: 0
   };
+
+  const taskItems = data?.items ?? [];
+  const filterUsers = data?.filters?.users ?? [];
+  const filterUnits = data?.filters?.units ?? [];
 
   const renderStatusBadge = (status: OperationalTaskStatus) => {
     switch (status) {
@@ -524,7 +528,7 @@ export const OperationalTasksPage: React.FC = () => {
             >
               <option value="">Todos os Responsáveis</option>
               <option value="sem_responsavel">Apenas Sem Responsável</option>
-              {data?.filters?.users?.map((u) => (
+              {filterUsers.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
@@ -551,7 +555,7 @@ export const OperationalTasksPage: React.FC = () => {
               <option value="CHECKLIST">Checklist Operacional</option>
             </select>
 
-            {data?.filters?.units && data.filters.units.length > 0 && (
+            {filterUnits.length > 0 && (
               <>
                 <span className="font-semibold text-slate-600 ml-2">Unidade:</span>
                 <select
@@ -560,7 +564,7 @@ export const OperationalTasksPage: React.FC = () => {
                   className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700"
                 >
                   <option value="TODAS">Todas as unidades</option>
-                  {data.filters.units.map(u => (
+                  {filterUnits.map(u => (
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
@@ -587,7 +591,7 @@ export const OperationalTasksPage: React.FC = () => {
             <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
             <span className="text-xs text-slate-500 font-medium">Carregando tarefas operacionais...</span>
           </div>
-        ) : !data || data.items.length === 0 ? (
+        ) : taskItems.length === 0 ? (
           <div className="py-16 text-center px-4">
             <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <CheckSquare className="w-6 h-6" />
@@ -621,7 +625,7 @@ export const OperationalTasksPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {data.items.map((task) => {
+                {taskItems.map((task) => {
                   const isAssignedToMe = task.responsibleUserId === currentUserId;
                   const isPendingOrInProgress = task.status === 'PENDENTE' || task.status === 'EM_ANDAMENTO';
 
@@ -764,27 +768,27 @@ export const OperationalTasksPage: React.FC = () => {
         )}
 
         {/* Rodapé e Paginação */}
-        {data && data.totalPages > 1 && (
+        {data && (data.totalPages || 1) > 1 && (
           <div className="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>
-              Mostrando {((data.page - 1) * data.limit) + 1} a {Math.min(data.page * data.limit, data.total)} de {data.total} tarefas
+              Mostrando {(((data.page || 1) - 1) * (data.limit || 15)) + 1} a {Math.min((data.page || 1) * (data.limit || 15), data.total || 0)} de {data.total || 0} tarefas
             </span>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                disabled={data.page <= 1}
+                disabled={(data.page || 1) <= 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <span className="px-2 font-semibold text-slate-700">
-                Página {data.page} de {data.totalPages}
+                Página {data.page || 1} de {data.totalPages || 1}
               </span>
               <button
                 type="button"
-                disabled={data.page >= data.totalPages}
-                onClick={() => setPage(p => Math.min(data.totalPages, p + 1))}
+                disabled={(data.page || 1) >= (data.totalPages || 1)}
+                onClick={() => setPage(p => Math.min(data.totalPages || 1, p + 1))}
                 className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -856,7 +860,7 @@ export const OperationalTasksPage: React.FC = () => {
       <AssignTaskResponsibleModal
         isOpen={!!taskToAssign}
         task={taskToAssign}
-        users={data?.filters?.users || []}
+        users={filterUsers}
         onClose={() => setTaskToAssign(null)}
         onConfirm={handleAssignTask}
       />
