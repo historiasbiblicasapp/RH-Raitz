@@ -901,7 +901,8 @@ router.post('/communications/log', (req: Request, res: Response) => {
     rejectionReason,
     messagePreview,
     actionStatus,
-    actionStatusLabel
+    actionStatusLabel,
+    taskId
   } = req.body;
 
   if (!admissionId || !communicationType || !channel || !actionStatus) {
@@ -926,7 +927,8 @@ router.post('/communications/log', (req: Request, res: Response) => {
     rejectionReason,
     messagePreview: messagePreview || '',
     actionStatus,
-    actionStatusLabel
+    actionStatusLabel,
+    taskId: taskId || undefined
   });
 
   return res.status(201).json({ success: true, log });

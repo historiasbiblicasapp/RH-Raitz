@@ -22,10 +22,10 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
   reportType,
   availableFilters
 }) => {
-  const statuses = availableFilters?.statuses ?? [];
-  const roles = availableFilters?.roles ?? [];
-  const departments = availableFilters?.departments ?? [];
-  const units = availableFilters?.units ?? [];
+  const statuses = Array.isArray(availableFilters?.statuses) ? availableFilters.statuses : [];
+  const roles = Array.isArray(availableFilters?.roles) ? availableFilters.roles : [];
+  const departments = Array.isArray(availableFilters?.departments) ? availableFilters.departments : [];
+  const units = Array.isArray(availableFilters?.units) ? availableFilters.units : [];
 
   const isFiltered = Boolean(
     (filters.period && filters.period !== 'all') ||
@@ -141,7 +141,7 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
             className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-hidden focus:ring-2 focus:ring-blue-500"
           >
             <option value="TODOS">Todos os status</option>
-            {availableFilters.statuses.map((st) => (
+            {statuses.map((st) => (
               <option key={st} value={st}>
                 {st}
               </option>
@@ -161,7 +161,7 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
             className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
           >
             <option value="TODOS">Todos os cargos</option>
-            {availableFilters.roles.map((r) => (
+            {roles.map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
@@ -181,7 +181,7 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
             className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
           >
             <option value="TODOS">Todos os setores</option>
-            {availableFilters.departments.map((d) => (
+            {departments.map((d) => (
               <option key={d} value={d}>
                 {d}
               </option>
@@ -221,7 +221,7 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
               className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
             >
               <option value="TODOS">Todas as unidades</option>
-              {availableFilters.units.map((u) => (
+              {units.map((u) => (
                 <option key={u} value={u}>
                   {u}
                 </option>

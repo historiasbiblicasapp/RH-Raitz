@@ -431,7 +431,7 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
             </div>
 
             <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-              {task.history && task.history.map((hist) => (
+              {(task.history ?? []).map((hist) => (
                 <div key={hist.id} className="relative group">
                   <div className="absolute -left-6 top-0.5 w-4 h-4 rounded-full bg-white border-2 border-slate-400 flex items-center justify-center group-hover:border-blue-500 transition-colors">
                     <div className="w-1.5 h-1.5 rounded-full bg-slate-400 group-hover:bg-blue-500" />

@@ -21,6 +21,16 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
   reportType,
   periodLabel
 }) => {
+  const safeTotalAdmissions = indicators?.totalAdmissions ?? 0;
+  const safeInProgress = indicators?.inProgressAdmissions ?? 0;
+  const safeCompleted = indicators?.completedAdmissions ?? 0;
+  const safeCompletionRate = indicators?.completionRate ?? 0;
+  const safeCancelled = indicators?.cancelledAdmissions ?? 0;
+  const safeAvgDays = indicators?.avgDaysToCompletion ?? null;
+  const safeApprovalRate = indicators?.documentApprovalRate ?? 0;
+  const safeApprovedDocs = indicators?.approvedDocuments ?? 0;
+  const safeTotalDocs = indicators?.totalDocuments ?? 0;
+
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
       {/* 1. Total Admissões */}
@@ -34,7 +44,7 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
           </div>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-2xl font-bold text-slate-900">{indicators.totalAdmissions}</span>
+          <span className="text-2xl font-bold text-slate-900">{safeTotalAdmissions}</span>
           <span className="text-[11px] text-slate-400 font-medium truncate">no filtro</span>
         </div>
         <div className="mt-1 text-[11px] text-slate-400 truncate">
@@ -53,7 +63,7 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
           </div>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-2xl font-bold text-amber-600">{indicators.inProgressAdmissions}</span>
+          <span className="text-2xl font-bold text-amber-600">{safeInProgress}</span>
           <span className="text-[11px] text-slate-400 font-medium">ativas</span>
         </div>
         <div className="mt-1 text-[11px] text-slate-500">
@@ -72,9 +82,9 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
           </div>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-2xl font-bold text-emerald-600">{indicators.completedAdmissions}</span>
+          <span className="text-2xl font-bold text-emerald-600">{safeCompleted}</span>
           <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md">
-            {indicators.completionRate}%
+            {safeCompletionRate}%
           </span>
         </div>
         <div className="mt-1 text-[11px] text-slate-500">
@@ -93,9 +103,9 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
           </div>
         </div>
         <div className="flex items-baseline gap-1.5">
-          <span className="text-2xl font-bold text-slate-700">{indicators.cancelledAdmissions}</span>
+          <span className="text-2xl font-bold text-slate-700">{safeCancelled}</span>
           <span className="text-[11px] text-slate-400 font-medium">
-            {indicators.totalAdmissions > 0 ? `${Math.round((indicators.cancelledAdmissions / indicators.totalAdmissions) * 100)}%` : '0%'}
+            {safeTotalAdmissions > 0 ? `${Math.round((safeCancelled / safeTotalAdmissions) * 100)}%` : '0%'}
           </span>
         </div>
         <div className="mt-1 text-[11px] text-slate-500">
@@ -115,10 +125,10 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
         </div>
         <div className="flex items-baseline gap-1.5">
           <span className="text-2xl font-bold text-blue-600">
-            {indicators.avgDaysToCompletion !== null ? indicators.avgDaysToCompletion : '—'}
+            {safeAvgDays !== null && safeAvgDays !== undefined ? safeAvgDays : '—'}
           </span>
           <span className="text-[11px] text-slate-500 font-medium">
-            {indicators.avgDaysToCompletion !== null ? 'dias' : ''}
+            {safeAvgDays !== null && safeAvgDays !== undefined ? 'dias' : ''}
           </span>
         </div>
         <div className="mt-1 text-[11px] text-slate-500 truncate">
@@ -138,10 +148,10 @@ export const ReportKPIs: React.FC<ReportKPIsProps> = ({
         </div>
         <div className="flex items-baseline gap-1.5">
           <span className="text-2xl font-bold text-teal-600">
-            {indicators.documentApprovalRate}%
+            {safeApprovalRate}%
           </span>
           <span className="text-[11px] text-slate-400 font-medium">
-            ({indicators.approvedDocuments}/{indicators.totalDocuments})
+            ({safeApprovedDocs}/{safeTotalDocs})
           </span>
         </div>
         <div className="mt-1 text-[11px] text-slate-500 truncate">

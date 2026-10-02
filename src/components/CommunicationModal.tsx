@@ -41,7 +41,9 @@ export interface CommunicationModalProps {
     rejectionReason?: string;
     detail?: string;
     priority?: 'Alta' | 'Média' | 'Baixa';
+    taskId?: string;
   };
+  taskId?: string;
   onSuccess?: () => void;
 }
 
@@ -57,6 +59,7 @@ export const CommunicationModal: React.FC<CommunicationModalProps> = ({
   inviteToken,
   isInviteValid = true,
   initialReason,
+  taskId,
   onSuccess
 }) => {
   const modalTitleId = useId();
@@ -66,7 +69,7 @@ export const CommunicationModal: React.FC<CommunicationModalProps> = ({
   const phoneValidation = normalizeBrazilianPhone(employeePhone);
 
   // Link do convite
-  const inviteUrl = `${window.location.origin}/convite/${inviteToken}`;
+  const inviteUrl = inviteToken ? `${window.location.origin}/convite/${inviteToken}` : `${window.location.origin}/admissoes/${admissionId}`;
 
   // Modelo selecionado
   const defaultTemplateId: CommunicationType = initialReason?.type || 'documents_pending';
@@ -137,7 +140,8 @@ export const CommunicationModal: React.FC<CommunicationModalProps> = ({
           rejectionReason: initialReason?.rejectionReason,
           messagePreview: message.slice(0, 160),
           actionStatus,
-          actionStatusLabel
+          actionStatusLabel,
+          taskId: taskId || initialReason?.taskId || undefined
         })
       });
 

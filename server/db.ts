@@ -6542,6 +6542,7 @@ export class Database {
     messagePreview: string;
     actionStatus: CommunicationActionStatus;
     actionStatusLabel?: string;
+    taskId?: string;
   }): CommunicationLog {
     if (!this.data.communicationLogs) {
       this.data.communicationLogs = [];
@@ -6569,7 +6570,8 @@ export class Database {
       messagePreview: (logData.messagePreview || '').slice(0, 160),
       actionStatus: logData.actionStatus,
       actionStatusLabel: logData.actionStatusLabel || defaultLabelMap[logData.actionStatus] || 'Comunicação realizada',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      taskId: logData.taskId || undefined
     };
 
     this.data.communicationLogs.unshift(newLog);
@@ -6618,7 +6620,9 @@ export class Database {
       );
 
       if (matchingOpenTask) {
-        newLog.taskId = matchingOpenTask.id;
+        if (!newLog.taskId) {
+          newLog.taskId = matchingOpenTask.id;
+        }
         const channelLabel = logData.channel === 'whatsapp' ? 'WhatsApp' : 'Área de transferência';
         const actionLabel = logData.actionStatusLabel || (
           logData.actionStatus === 'whatsapp_opened' ? 'WhatsApp aberto' :
@@ -6641,7 +6645,7 @@ export class Database {
                t.documentId === logData.documentId &&
                t.sourceType === 'DOCUMENTO'
         );
-        if (existingTask) {
+        if (existingTask && !newLog.taskId) {
           newLog.taskId = existingTask.id;
         }
       }

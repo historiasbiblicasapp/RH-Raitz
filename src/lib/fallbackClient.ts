@@ -232,8 +232,8 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
     };
   }
 
-  // 9. Comunicação Hub
-  if (path.includes('/communication') || path.includes('/comunicacao')) {
+  // 9. Comunicação Hub (Legado e Novo)
+  if (path === '/api/communications/legacy' || path === '/api/communications/templates') {
     return {
       items: db.communicationLogs || [],
       templates: db.settings?.communicationTemplates || [],
@@ -241,28 +241,6 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
         totalSent: (db.communicationLogs || []).length,
         whatsappSent: (db.communicationLogs || []).length,
         emailSent: 0
-      }
-    };
-  }
-
-  // 10. Relatórios
-  if (path.includes('/reports')) {
-    return {
-      indicators: {
-        totalAdmissions: db.admissions?.length || 25,
-        completedAdmissions: 9,
-        pendingAdmissions: 1,
-        inProgressAdmissions: 15,
-        averageDaysToComplete: 3.5
-      },
-      admissions: db.admissions || [],
-      charts: {
-        byStatus: [
-          { name: 'Aguardando documentos', count: 11 },
-          { name: 'Concluída', count: 9 },
-          { name: 'Em conferência', count: 4 },
-          { name: 'Pendência', count: 1 }
-        ]
       }
     };
   }
@@ -1152,19 +1130,203 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
   // 17. Tarefas Operacionais
   if (path.includes('/tarefas') || path.includes('/tasks')) {
     const localTasks = db.operationalTasks || [];
+    const localUsers = (db.users || []).map((u: any) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      department: u.department,
+      active: u.active !== false
+    }));
     return {
+      items: localTasks,
       tasks: localTasks,
       total: localTasks.length,
       page: 1,
+      limit: 20,
       totalPages: 1,
       summary: {
-        totalOpen: localTasks.filter((t: any) => t.status === 'PENDENTE' || t.status === 'EM_ANDAMENTO').length,
-        dueToday: 0,
-        overdue: 0,
+        total: localTasks.length,
+        pending: localTasks.filter((t: any) => t.status === 'PENDENTE').length,
+        inProgress: localTasks.filter((t: any) => t.status === 'EM_ANDAMENTO').length,
+        completed: localTasks.filter((t: any) => t.status === 'CONCLUIDA').length,
+        blocked: localTasks.filter((t: any) => t.status === 'BLOQUEADA').length,
+        cancelled: localTasks.filter((t: any) => t.status === 'CANCELADA').length,
+        unassigned: localTasks.filter((t: any) => !t.responsibleUserId && !t.assignedTo).length,
+        myTasks: localTasks.filter((t: any) => t.responsibleUserId === 'user-rh-01').length,
         critical: localTasks.filter((t: any) => t.priority === 'CRITICA').length,
-        unassigned: localTasks.filter((t: any) => !t.assignedTo).length,
-        myTasks: 0,
-        completedToday: 0
+        overdue: localTasks.filter((t: any) => t.isOverdue).length
+      },
+      filters: {
+        users: localUsers,
+        sources: [
+          { key: 'TODAS', label: 'Todas as origens' },
+          { key: 'ADMISSAO', label: 'Admissão Geral' },
+          { key: 'PENDENCIA', label: 'Central de Pendências' },
+          { key: 'DOCUMENTO', label: 'Conferência Documental' },
+          { key: 'ETAPA', label: 'Etapa do Processo' },
+          { key: 'APROVACAO', label: 'Aprovação Interna' },
+          { key: 'CHECKLIST', label: 'Checklist Operacional' },
+          { key: 'COMUNICACAO', label: 'Comunicação' }
+        ],
+        units: Array.from(new Set(localTasks.map((t: any) => t.employeeUnit).filter(Boolean))),
+        departments: Array.from(new Set(localTasks.map((t: any) => t.department).filter(Boolean))),
+        statuses: [
+          { key: 'TODOS', label: 'Todos os status' },
+          { key: 'PENDENTE', label: 'Pendente' },
+          { key: 'EM_ANDAMENTO', label: 'Em Andamento' },
+          { key: 'BLOQUEADA', label: 'Bloqueada' },
+          { key: 'CONCLUIDA', label: 'Concluída' },
+          { key: 'CANCELADA', label: 'Cancelada' }
+        ],
+        priorities: ['CRITICA', 'ALTA', 'NORMAL']
+      }
+    };
+  }
+
+  // 17.5 Histórico e Logs de Comunicação (Bloco 4.3 / 6.8D)
+  if (path === '/api/communications/log' && init?.method === 'POST') {
+    let bodyData: any = {};
+    try {
+      bodyData = typeof init.body === 'string' ? JSON.parse(init.body) : init.body || {};
+    } catch {}
+    if (!db.communicationLogs) db.communicationLogs = [];
+    const newLog = {
+      id: 'comm-' + Date.now(),
+      admissionId: bodyData.admissionId,
+      employeeId: bodyData.employeeId,
+      userName: 'Usuário RH',
+      communicationType: bodyData.communicationType || 'lembrete_geral',
+      channel: bodyData.channel || 'whatsapp',
+      templateId: bodyData.templateId || bodyData.communicationType,
+      documentId: bodyData.documentId,
+      documentName: bodyData.documentName,
+      rejectionReason: bodyData.rejectionReason,
+      messagePreview: (bodyData.messagePreview || '').slice(0, 160),
+      actionStatus: bodyData.actionStatus || 'whatsapp_opened',
+      actionStatusLabel: bodyData.actionStatusLabel || (
+        bodyData.actionStatus === 'whatsapp_opened' ? 'WhatsApp aberto para envio' :
+        bodyData.actionStatus === 'message_copied' ? 'Mensagem copiada' : 'Link copiado'
+      ),
+      createdAt: new Date().toISOString(),
+      taskId: bodyData.taskId
+    };
+    db.communicationLogs.unshift(newLog);
+    return { success: true, log: newLog };
+  }
+
+  if (path.includes('/communications/logs') || path.includes('/communications/history') || path.match(/\/admissions\/[^/]+\/communications/)) {
+    const logs = db.communicationLogs || [];
+    const match = path.match(/\/admissions\/([^/]+)\/communications/);
+    if (match) {
+      const admissionId = match[1];
+      return { logs: logs.filter((l: any) => l.admissionId === admissionId) };
+    }
+    return { logs };
+  }
+
+  // 18. Central de Comunicação (Bloco 4.3 / 6.8)
+  if (path.includes('/communications') || path.includes('/comunicacao')) {
+    const allAdmissions = db.admissions || [];
+    const commItems = allAdmissions.map((adm: any) => {
+      const docs = adm.documents || [];
+      const pendingDocs = docs.filter((d: any) => d.status === 'Não enviado');
+      const rejectedDocs = docs.filter((d: any) => d.status === 'Rejeitado');
+      return {
+        id: `comm-${adm.id}`,
+        admissionId: adm.id,
+        admissionCode: adm.id.replace('adm-', 'ADM-').toUpperCase(),
+        employeeId: adm.employee?.id || adm.employeeId,
+        employeeName: adm.employee?.name || 'Colaborador',
+        employeeCpf: adm.employee?.cpf || '***.***.***-00',
+        employeePhone: adm.employee?.phone || '',
+        role: adm.employee?.role || 'Cargo',
+        department: adm.employee?.department || 'Setor',
+        unit: adm.employee?.unit || 'Matriz',
+        admissionStatus: adm.status || 'Aguardando documentos',
+        expectedStartDate: adm.expectedStartDate || adm.createdAt,
+        inviteToken: adm.inviteToken || 'token-fallback',
+        isInviteValid: true,
+        pendingDocumentsCount: pendingDocs.length,
+        rejectedDocumentsCount: rejectedDocs.length,
+        mainPendingReason: rejectedDocs.length > 0 ? {
+          type: 'document_rejected',
+          label: `Documento rejeitado: ${rejectedDocs[0].documentType}`,
+          documentId: rejectedDocs[0].id,
+          documentName: rejectedDocs[0].documentType,
+          rejectionReason: rejectedDocs[0].rejectionReason || 'Necessário reenvio',
+          priority: 'Alta'
+        } : pendingDocs.length > 0 ? {
+          type: 'documents_pending',
+          label: `${pendingDocs.length} documentos pendentes`,
+          priority: 'Média'
+        } : undefined,
+        lastCommunication: undefined
+      };
+    });
+
+    return {
+      items: commItems,
+      total: commItems.length,
+      page: 1,
+      limit: 15,
+      totalPages: 1,
+      summary: {
+        inProgressCount: commItems.filter((i: any) => !['Concluída', 'Cancelada'].includes(i.admissionStatus)).length,
+        waitingDocumentsCount: commItems.filter((i: any) => i.pendingDocumentsCount > 0).length,
+        rejectedDocumentsCount: commItems.filter((i: any) => i.rejectedDocumentsCount > 0).length,
+        waitingResponseCount: commItems.filter((i: any) => i.admissionStatus === 'Aguardando documentos').length,
+        upcomingWithIssuesCount: commItems.filter((i: any) => i.rejectedDocumentsCount > 0 || i.pendingDocumentsCount > 0).length
+      },
+      filters: {
+        roles: Array.from(new Set(commItems.map((i: any) => i.role).filter(Boolean))),
+        departments: Array.from(new Set(commItems.map((i: any) => i.department).filter(Boolean))),
+        units: Array.from(new Set(commItems.map((i: any) => i.unit).filter(Boolean))),
+        statuses: ['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada']
+      }
+    };
+  }
+
+  // 19. Relatórios Gerenciais (Bloco 5.7)
+  if (path.includes('/reports') || path.includes('/relatorios')) {
+    const allAdmissions = db.admissions || [];
+    return {
+      reportType: urlObj.searchParams.get('reportType') || 'admissoes',
+      indicators: {
+        totalAdmissions: allAdmissions.length,
+        inProgressAdmissions: allAdmissions.filter((a: any) => !['Concluída', 'Cancelada'].includes(a.status)).length,
+        completedAdmissions: allAdmissions.filter((a: any) => a.status === 'Concluída').length,
+        cancelledAdmissions: allAdmissions.filter((a: any) => a.status === 'Cancelada').length,
+        completionRate: allAdmissions.length > 0 ? Math.round((allAdmissions.filter((a: any) => a.status === 'Concluída').length / allAdmissions.length) * 100) : 0,
+        avgDaysToCompletion: 0,
+        totalDocuments: (db.documents || []).length,
+        approvedDocuments: (db.documents || []).filter((d: any) => d.status === 'Aprovado').length,
+        pendingDocuments: (db.documents || []).filter((d: any) => d.status === 'Não enviado' || d.status === 'Em análise').length,
+        rejectedDocuments: (db.documents || []).filter((d: any) => d.status === 'Rejeitado').length,
+        documentApprovalRate: (db.documents || []).length > 0 ? Math.round(((db.documents || []).filter((d: any) => d.status === 'Aprovado').length / (db.documents || []).length) * 100) : 0,
+        stalledAdmissionsCount: 0,
+        criticalPendingsCount: (db.operationalTasks || []).filter((t: any) => t.priority === 'CRITICA' && t.status !== 'CONCLUIDA').length
+      },
+      charts: {
+        byStatus: [
+          { name: 'Em andamento', count: allAdmissions.filter((a: any) => !['Concluída', 'Cancelada'].includes(a.status)).length, percentage: 90, color: '#3b82f6' },
+          { name: 'Concluídas', count: allAdmissions.filter((a: any) => a.status === 'Concluída').length, percentage: 10, color: '#10b981' }
+        ],
+        evolution: [],
+        byDepartment: [],
+        byDocumentStatus: [],
+        byUnit: []
+      },
+      rows: [],
+      total: 0,
+      page: 1,
+      limit: 15,
+      totalPages: 1,
+      availableFilters: {
+        roles: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.role).filter(Boolean))),
+        departments: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.department).filter(Boolean))),
+        units: Array.from(new Set(allAdmissions.map((a: any) => a.employee?.unit).filter(Boolean))),
+        statuses: ['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada']
       }
     };
   }

@@ -98,19 +98,22 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
     safeFetchJson<{ users: EligibleUser[] }>('/api/responsaveis/elegiveis')
       .then(res => {
-        if (res?.users) {
+        if (Array.isArray(res?.users)) {
           setEligibleUsers(res.users.filter(u => u.active !== false));
+        } else {
+          setEligibleUsers([]);
         }
       })
       .catch(err => {
         console.warn('Erro ao carregar usuários elegíveis:', err);
+        setEligibleUsers([]);
       });
 
     // Se não veio com admissionId fixo, busca lista de admissões ativas
     if (!initialAdmissionId) {
       safeFetchJson<{ admissions: any[] }>('/api/admissions?limit=50&status=Aguardando%20documentos')
         .then(res => {
-          if (res?.admissions) {
+          if (Array.isArray(res?.admissions)) {
             const list: AdmissionSimple[] = res.admissions.map(a => ({
               id: a.id,
               code: a.id.replace('adm-', 'ADM-').slice(0, 10).toUpperCase(),
@@ -119,9 +122,14 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
               unit: a.employee?.unit
             }));
             setAdmissionsList(list);
+          } else {
+            setAdmissionsList([]);
           }
         })
-        .catch(err => console.warn('Erro ao carregar lista de admissões:', err));
+        .catch(err => {
+          console.warn('Erro ao carregar lista de admissões:', err);
+          setAdmissionsList([]);
+        });
     }
   }, [isOpen, initialAdmissionId]);
 
@@ -232,10 +240,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     }
   };
 
-  const filteredAdmissions = admissionsList.filter(a => {
+  const filteredAdmissions = (admissionsList || []).filter(a => {
     if (!admissionSearch) return true;
     const q = admissionSearch.toLowerCase();
-    return a.employeeName.toLowerCase().includes(q) || a.code.toLowerCase().includes(q) || (a.role && a.role.toLowerCase().includes(q));
+    return (a.employeeName || '').toLowerCase().includes(q) || (a.code || '').toLowerCase().includes(q) || (a.role && a.role.toLowerCase().includes(q));
   });
 
   return (
@@ -327,12 +335,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                         autoFocus
                       />
                     </div>
-                    {filteredAdmissions.length === 0 ? (
+                    {(filteredAdmissions?.length ?? 0) === 0 ? (
                       <div className="py-2 px-3 text-xs text-slate-400 text-center">
                         Nenhuma admissão encontrada
                       </div>
                     ) : (
-                      filteredAdmissions.map(adm => (
+                      (filteredAdmissions ?? []).map(adm => (
                         <button
                           key={adm.id}
                           type="button"
@@ -451,7 +459,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all font-medium"
               >
                 <option value="">Sem responsável (Pool aberto)</option>
-                {eligibleUsers.map((u) => (
+                {(eligibleUsers ?? []).map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name} ({u.role})
                   </option>

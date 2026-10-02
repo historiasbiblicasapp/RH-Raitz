@@ -61,7 +61,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
     }
   };
 
-  const safeRows = rows ?? [];
+  const safeRows = Array.isArray(rows) ? rows : [];
 
   if (isLoading) {
     return (
@@ -73,7 +73,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
     );
   }
 
-  if (safeRows.length === 0) {
+  if ((safeRows?.length ?? 0) === 0) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
         <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3 text-slate-400">
@@ -495,7 +495,7 @@ export const ReportTable: React.FC<ReportTableProps> = ({
           <span>
             Mostrando <strong className="font-semibold text-slate-900">{startRecord}</strong> a{' '}
             <strong className="font-semibold text-slate-900">{endRecord}</strong> de{' '}
-            <strong className="font-semibold text-slate-900">{total}</strong> registros
+            <strong className="font-semibold text-slate-900">{total ?? 0}</strong> registros
           </span>
 
           <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200 pl-3">

@@ -256,9 +256,9 @@ export const OperationalTasksPage: React.FC = () => {
     overdue: 0
   };
 
-  const taskItems = data?.items ?? [];
-  const filterUsers = data?.filters?.users ?? [];
-  const filterUnits = data?.filters?.units ?? [];
+  const taskItems = Array.isArray(data?.items) ? data.items : [];
+  const filterUsers = Array.isArray(data?.filters?.users) ? data.filters.users : [];
+  const filterUnits = Array.isArray(data?.filters?.units) ? data.filters.units : [];
 
   const renderStatusBadge = (status: OperationalTaskStatus) => {
     switch (status) {
@@ -384,7 +384,7 @@ export const OperationalTasksPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Minha Fila</span>
             <User className="w-4 h-4 text-blue-600" />
           </div>
-          <p className="text-2xl font-bold text-blue-700 mt-2">{summary.myTasks}</p>
+          <p className="text-2xl font-bold text-blue-700 mt-2">{summary?.myTasks ?? 0}</p>
           <span className="text-[11px] text-slate-500 block mt-0.5">Atribuídas a você</span>
         </button>
 
@@ -401,7 +401,7 @@ export const OperationalTasksPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Sem Responsável</span>
             <Inbox className="w-4 h-4 text-amber-600" />
           </div>
-          <p className="text-2xl font-bold text-amber-700 mt-2">{summary.unassigned}</p>
+          <p className="text-2xl font-bold text-amber-700 mt-2">{summary?.unassigned ?? 0}</p>
           <span className="text-[11px] text-slate-500 block mt-0.5">Pool para triagem</span>
         </button>
 
@@ -418,7 +418,7 @@ export const OperationalTasksPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Críticas</span>
             <AlertCircle className="w-4 h-4 text-rose-600" />
           </div>
-          <p className="text-2xl font-bold text-rose-700 mt-2">{summary.critical}</p>
+          <p className="text-2xl font-bold text-rose-700 mt-2">{summary?.critical ?? 0}</p>
           <span className="text-[11px] text-slate-500 block mt-0.5">Atenção máxima</span>
         </button>
 
@@ -435,7 +435,7 @@ export const OperationalTasksPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Vencidas</span>
             <Clock className="w-4 h-4 text-red-600" />
           </div>
-          <p className="text-2xl font-bold text-red-700 mt-2">{summary.overdue}</p>
+          <p className="text-2xl font-bold text-red-700 mt-2">{summary?.overdue ?? 0}</p>
           <span className="text-[11px] text-slate-500 block mt-0.5">Prazo expirado</span>
         </button>
 
@@ -452,7 +452,7 @@ export const OperationalTasksPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Concluídas</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-600" />
           </div>
-          <p className="text-2xl font-bold text-emerald-700 mt-2">{summary.completed}</p>
+          <p className="text-2xl font-bold text-emerald-700 mt-2">{summary?.completed ?? 0}</p>
           <span className="text-[11px] text-slate-500 block mt-0.5">Finalizadas</span>
         </button>
 
@@ -469,7 +469,7 @@ export const OperationalTasksPage: React.FC = () => {
             <span className="text-xs font-bold text-slate-600 uppercase tracking-wider">Total</span>
             <Layers className="w-4 h-4 text-slate-600" />
           </div>
-          <p className="text-2xl font-bold text-slate-900 mt-2">{summary.total}</p>
+          <p className="text-2xl font-bold text-slate-900 mt-2">{summary?.total ?? 0}</p>
           <span className="text-[11px] text-slate-500 block mt-0.5">Todas registradas</span>
         </button>
       </div>
@@ -528,7 +528,7 @@ export const OperationalTasksPage: React.FC = () => {
             >
               <option value="">Todos os Responsáveis</option>
               <option value="sem_responsavel">Apenas Sem Responsável</option>
-              {filterUsers.map((u) => (
+              {(filterUsers ?? []).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                 </option>
@@ -555,7 +555,7 @@ export const OperationalTasksPage: React.FC = () => {
               <option value="CHECKLIST">Checklist Operacional</option>
             </select>
 
-            {filterUnits.length > 0 && (
+            {(filterUnits?.length ?? 0) > 0 && (
               <>
                 <span className="font-semibold text-slate-600 ml-2">Unidade:</span>
                 <select
@@ -564,7 +564,7 @@ export const OperationalTasksPage: React.FC = () => {
                   className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700"
                 >
                   <option value="TODAS">Todas as unidades</option>
-                  {filterUnits.map(u => (
+                  {(filterUnits ?? []).map(u => (
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
@@ -591,7 +591,7 @@ export const OperationalTasksPage: React.FC = () => {
             <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
             <span className="text-xs text-slate-500 font-medium">Carregando tarefas operacionais...</span>
           </div>
-        ) : taskItems.length === 0 ? (
+        ) : (taskItems?.length ?? 0) === 0 ? (
           <div className="py-16 text-center px-4">
             <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <CheckSquare className="w-6 h-6" />
@@ -625,7 +625,7 @@ export const OperationalTasksPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
-                {taskItems.map((task) => {
+                {(taskItems ?? []).map((task) => {
                   const isAssignedToMe = task.responsibleUserId === currentUserId;
                   const isPendingOrInProgress = task.status === 'PENDENTE' || task.status === 'EM_ANDAMENTO';
 
@@ -768,27 +768,27 @@ export const OperationalTasksPage: React.FC = () => {
         )}
 
         {/* Rodapé e Paginação */}
-        {data && (data.totalPages || 1) > 1 && (
+        {data && (data.totalPages ?? 1) > 1 && (
           <div className="p-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <span>
-              Mostrando {(((data.page || 1) - 1) * (data.limit || 15)) + 1} a {Math.min((data.page || 1) * (data.limit || 15), data.total || 0)} de {data.total || 0} tarefas
+              Mostrando {(((data.page ?? 1) - 1) * (data.limit ?? 15)) + 1} a {Math.min((data.page ?? 1) * (data.limit ?? 15), data.total ?? 0)} de {data.total ?? 0} tarefas
             </span>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                disabled={(data.page || 1) <= 1}
+                disabled={(data.page ?? 1) <= 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <span className="px-2 font-semibold text-slate-700">
-                Página {data.page || 1} de {data.totalPages || 1}
+                Página {data.page ?? 1} de {data.totalPages ?? 1}
               </span>
               <button
                 type="button"
-                disabled={(data.page || 1) >= (data.totalPages || 1)}
-                onClick={() => setPage(p => Math.min(data.totalPages || 1, p + 1))}
+                disabled={(data.page ?? 1) >= (data.totalPages ?? 1)}
+                onClick={() => setPage(p => Math.min(data.totalPages ?? 1, p + 1))}
                 className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -860,7 +860,7 @@ export const OperationalTasksPage: React.FC = () => {
       <AssignTaskResponsibleModal
         isOpen={!!taskToAssign}
         task={taskToAssign}
-        users={filterUsers}
+        users={filterUsers ?? []}
         onClose={() => setTaskToAssign(null)}
         onConfirm={handleAssignTask}
       />

@@ -1990,7 +1990,7 @@ export const AdmissionDetails: React.FC = () => {
               </button>
             </div>
 
-            {communicationLogs.length === 0 ? (
+            {(communicationLogs?.length ?? 0) === 0 ? (
               <div className="py-6 text-center text-slate-400">
                 <MessageSquare className="w-8 h-8 text-slate-300 mx-auto mb-1.5" />
                 <p className="text-xs font-medium text-slate-600">Nenhuma comunicação registrada ainda</p>
@@ -2000,7 +2000,7 @@ export const AdmissionDetails: React.FC = () => {
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {communicationLogs.map((log) => (
+                {(communicationLogs ?? []).map((log) => (
                   <div key={log.id} className="py-3 flex flex-col sm:flex-row sm:items-start justify-between gap-3 text-xs">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">

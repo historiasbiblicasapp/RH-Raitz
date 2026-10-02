@@ -32,13 +32,13 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
-  const byStatus = charts?.byStatus ?? [];
-  const evolution = charts?.evolution ?? [];
-  const byDepartment = charts?.byDepartment ?? [];
-  const byDocumentStatus = charts?.byDocumentStatus ?? [];
-  const byUnit = charts?.byUnit ?? [];
+  const byStatus = Array.isArray(charts?.byStatus) ? charts.byStatus : [];
+  const evolution = Array.isArray(charts?.evolution) ? charts.evolution : [];
+  const byDepartment = Array.isArray(charts?.byDepartment) ? charts.byDepartment : [];
+  const byDocumentStatus = Array.isArray(charts?.byDocumentStatus) ? charts.byDocumentStatus : [];
+  const byUnit = Array.isArray(charts?.byUnit) ? charts.byUnit : [];
 
-  if (totalAdmissions === 0) {
+  if (!totalAdmissions || totalAdmissions <= 0) {
     return null;
   }
 
@@ -100,7 +100,7 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
                   <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
                   <Tooltip 
                     content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
+                      if (active && payload && Array.isArray(payload) && payload.length > 0) {
                         const data = payload[0].payload;
                         return (
                           <div className="bg-slate-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
@@ -135,7 +135,7 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
             </div>
 
             <div className="h-56 w-full pt-2">
-              {evolution.length > 0 ? (
+              {(evolution?.length ?? 0) > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={evolution} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                     <defs>
@@ -152,7 +152,7 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
                     <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
                     <Tooltip 
                       content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
+                        if (active && payload && Array.isArray(payload) && payload.length > 0) {
                           const data = payload[0].payload;
                           return (
                             <div className="bg-slate-900 text-white text-xs px-3 py-2 rounded-lg shadow-lg">
@@ -190,12 +190,12 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
                 Admissões por Departamento
               </span>
               <span className="text-[11px] text-slate-500 font-medium">
-                {byDepartment.length} setores
+                {(byDepartment?.length ?? 0)} setores
               </span>
             </div>
 
             <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
-              {byDepartment.map((dept) => (
+              {(byDepartment ?? []).map((dept) => (
                 <div key={dept.name} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-medium text-slate-700 truncate max-w-[200px]" title={dept.name}>
@@ -256,11 +256,11 @@ export const ReportChartsSection: React.FC<ReportChartsSectionProps> = ({
             </div>
 
             {/* Distribuição por Unidade */}
-            {byUnit.length > 0 && (
+            {(byUnit?.length ?? 0) > 0 && (
               <div className="pt-2 border-t border-slate-100 flex items-center gap-3 text-xs text-slate-600">
                 <span className="font-semibold text-slate-700 shrink-0">Unidades:</span>
                 <div className="flex flex-wrap gap-2">
-                  {byUnit.map(u => (
+                  {(byUnit ?? []).map(u => (
                     <span key={u.name} className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px]">
                       {u.name}: <strong className="font-semibold text-slate-900">{u.count}</strong>
                     </span>

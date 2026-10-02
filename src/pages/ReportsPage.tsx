@@ -306,7 +306,7 @@ export const ReportsPage: React.FC = () => {
             id="reports-export-csv-btn"
             type="button"
             onClick={handleExport}
-            disabled={isExporting || isLoading || (data?.total === 0)}
+            disabled={isExporting || isLoading || ((data?.total ?? 0) === 0)}
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition-all"
             title="Exportar dados filtrados em CSV compatível com Microsoft Excel"
           >
@@ -363,13 +363,25 @@ export const ReportsPage: React.FC = () => {
       </div>
 
       {/* 1. Grade de Indicadores / KPIs */}
-      {data && (
-        <ReportKPIs 
-          indicators={data.indicators} 
-          reportType={reportType} 
-          periodLabel={getPeriodLabel()} 
-        />
-      )}
+      <ReportKPIs 
+        indicators={data?.indicators || {
+          totalAdmissions: 0,
+          inProgressAdmissions: 0,
+          completedAdmissions: 0,
+          cancelledAdmissions: 0,
+          completionRate: 0,
+          avgDaysToCompletion: 0,
+          totalDocuments: 0,
+          approvedDocuments: 0,
+          pendingDocuments: 0,
+          rejectedDocuments: 0,
+          documentApprovalRate: 0,
+          stalledAdmissionsCount: 0,
+          criticalPendingsCount: 0
+        }} 
+        reportType={reportType} 
+        periodLabel={getPeriodLabel()} 
+      />
 
       {/* 2. Barra de Filtros Reutilizáveis */}
       <ReportFilters
@@ -384,7 +396,7 @@ export const ReportsPage: React.FC = () => {
       {data && data.charts && (
         <ReportChartsSection 
           charts={data.charts} 
-          totalAdmissions={data.indicators.totalAdmissions} 
+          totalAdmissions={data.indicators?.totalAdmissions ?? 0} 
         />
       )}
 
@@ -392,7 +404,7 @@ export const ReportsPage: React.FC = () => {
       <div className="space-y-2">
         <div className="flex items-center justify-between px-1">
           <h2 className="text-xs font-bold text-slate-900 tracking-tight uppercase">
-            Registros Detalhados ({data ? data.total : 0})
+            Registros Detalhados ({data?.total ?? 0})
           </h2>
           <span className="text-[11px] text-slate-400">
             CPFs mascarados em cumprimento à LGPD
@@ -401,11 +413,11 @@ export const ReportsPage: React.FC = () => {
 
         <ReportTable
           reportType={reportType}
-          rows={data?.rows || []}
-          total={data?.total || 0}
-          page={filters.page || 1}
-          limit={filters.limit || 15}
-          totalPages={data?.totalPages || 1}
+          rows={Array.isArray(data?.rows) ? data.rows : []}
+          total={data?.total ?? 0}
+          page={filters.page ?? 1}
+          limit={filters.limit ?? 15}
+          totalPages={data?.totalPages ?? 1}
           sortBy={filters.sortBy}
           sortOrder={filters.sortOrder}
           onSort={handleSort}
