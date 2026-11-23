@@ -611,9 +611,11 @@ export const EmployeesPage: React.FC = () => {
       <NewEmployeeModal
         isOpen={isNewEmployeeModalOpen}
         onClose={() => setIsNewEmployeeModalOpen(false)}
-        onSuccess={newEmp => {
+        onSuccess={() => {
           fetchEmployees();
-          navigate(`/funcionarios/${newEmp.id}`);
+        }}
+        onOpenEmployee={empId => {
+          navigate(`/funcionarios/${empId}`);
         }}
         onOpenExisting={existingId => {
           navigate(`/funcionarios/${existingId}`);

@@ -146,6 +146,7 @@ import {
   AssignResponsibleRequest,
   OperationalTask,
   OperationalTaskStatus,
+  OperationalTaskAlertState,
   OperationalTaskSourceType,
   OperationalTaskActionType,
   OperationalTaskHistoryItem,
@@ -12213,6 +12214,254 @@ export class Database {
   // =========================================================================
 
   /**
+   * Bloco 6.9B.1: Calcula o SLA básico (dueAt) de uma OperationalTask a partir de createdAt
+   * com base na prioridade operacional:
+   * - NORMAL  -> +3 dias
+   * - ALTA    -> +2 dias
+   * - CRITICA -> +1 dia
+   */
+  calculateTaskSlaDueAt(priority: OperationalPriority, createdAtIso: string): string {
+    const slaDaysByPriority: Record<OperationalPriority, number> = {
+      NORMAL: 3,
+      ALTA: 2,
+      CRITICA: 1
+    };
+    const days = slaDaysByPriority[priority] ?? 3;
+    const baseMs = new Date(createdAtIso).getTime();
+    return new Date(baseMs + days * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  /**
+   * Bloco 6.9B.2 / 6.9B.3: Calcula dinamicamente na leitura os indicadores de prazo
+   * (isOverdue, isDueSoon) e a prioridade efetiva (effectivePriority) sem alterar
+   * a prioridade original armazenada no banco.
+   * Regras:
+   * - tarefa vencida (isOverdue) -> CRITICA
+   * - tarefa próxima do vencimento (isDueSoon: vence em até 24h) -> no mínimo ALTA
+   * - demais tarefas -> manter a prioridade original
+   * - nunca reduzir uma prioridade já maior (CRITICA permanece CRITICA; ALTA permanece pelo menos ALTA)
+   */
+  calculateEffectiveTaskPriority(
+    originalPriority: OperationalPriority,
+    isOverdue: boolean,
+    isDueSoon: boolean
+  ): OperationalPriority {
+    const weight: Record<OperationalPriority, number> = {
+      NORMAL: 1,
+      ALTA: 2,
+      CRITICA: 3
+    };
+    const byWeight: Record<number, OperationalPriority> = {
+      1: 'NORMAL',
+      2: 'ALTA',
+      3: 'CRITICA'
+    };
+
+    let targetWeight = weight[originalPriority] ?? 1;
+    if (isOverdue) {
+      targetWeight = Math.max(targetWeight, 3);
+    } else if (isDueSoon) {
+      targetWeight = Math.max(targetWeight, 2);
+    }
+    return byWeight[targetWeight] || originalPriority;
+  }
+
+  enrichTaskWithDynamicDeadlineAndPriority(task: OperationalTask, nowMs: number = Date.now()): OperationalTask {
+    const safeNowMs = typeof nowMs === 'number' && Number.isFinite(nowMs) ? nowMs : Date.now();
+    const isActive = task.status !== 'CONCLUIDA' && task.status !== 'CANCELADA';
+    const dueMs = task.dueAt ? new Date(task.dueAt).getTime() : NaN;
+    const hasValidDue = !isNaN(dueMs);
+
+    const isOverdue = Boolean(isActive && hasValidDue && dueMs < safeNowMs);
+    const isDueSoon = Boolean(
+      isActive &&
+      hasValidDue &&
+      dueMs >= safeNowMs &&
+      dueMs - safeNowMs <= 24 * 60 * 60 * 1000
+    );
+
+    const effectivePriority = this.calculateEffectiveTaskPriority(task.priority, isOverdue, isDueSoon);
+    const alertState = this.classifyOperationalTaskAlertState(
+      { ...task, isOverdue, isDueSoon },
+      safeNowMs
+    );
+
+    return {
+      ...task,
+      isOverdue,
+      isDueSoon,
+      effectivePriority,
+      alertState,
+      deadlineState: alertState
+    };
+  }
+
+  /**
+   * Bloco 6.9C.1: Classifica uma OperationalTask em apenas um estado de alerta de prazo
+   * ('NORMAL' | 'DUE_SOON' | 'OVERDUE') sem persistir no banco e reutilizando
+   * isOverdue e isDueSoon já calculados:
+   * - tarefa CONCLUIDA ou CANCELADA -> 'NORMAL'
+   * - sem dueAt -> 'NORMAL'
+   * - vencida (isOverdue === true) -> 'OVERDUE'
+   * - próxima do vencimento (isDueSoon === true) -> 'DUE_SOON'
+   * - demais casos -> 'NORMAL'
+   */
+  classifyOperationalTaskAlertState(
+    task: OperationalTask,
+    nowMs: number = Date.now()
+  ): OperationalTaskAlertState {
+    if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
+      return 'NORMAL';
+    }
+    if (!task.dueAt) {
+      return 'NORMAL';
+    }
+
+    const enriched =
+      task.isOverdue !== undefined && task.isDueSoon !== undefined
+        ? task
+        : this.enrichTaskWithDynamicDeadlineAndPriority(task, nowMs);
+
+    if (enriched.isOverdue) {
+      return 'OVERDUE';
+    }
+    if (enriched.isDueSoon) {
+      return 'DUE_SOON';
+    }
+    return 'NORMAL';
+  }
+
+  /**
+   * Bloco 6.9C.2: Gera uma notificação interna quando uma OperationalTask estiver no estado 'OVERDUE'
+   * e possuir um responsibleUserId definido, reutilizando classifyOperationalTaskAlertState (6.9C.1)
+   * e addNotification (6.7) com dedupKey determinístico.
+   */
+  notifyOverdueOperationalTask(
+    task: OperationalTask,
+    nowMs: number = Date.now()
+  ): NotificationItem | null {
+    const alertState = this.classifyOperationalTaskAlertState(task, nowMs);
+    if (alertState !== 'OVERDUE') {
+      return null;
+    }
+
+    const responsibleUserId = task.responsibleUserId ? task.responsibleUserId.trim() : '';
+    if (!responsibleUserId) {
+      return null;
+    }
+
+    const sourceEvent = 'operational_task_overdue';
+    const dedupKey = `notif:${sourceEvent}:${task.id}`;
+    const employeeInfo = task.employeeName ? ` (${task.employeeName})` : '';
+
+    return this.addNotification({
+      title: `Tarefa vencida: ${task.title}`,
+      message: `A tarefa operacional "${task.title}"${employeeInfo} está vencida e requer ação imediata.`,
+      type: 'pending',
+      targetUserId: responsibleUserId,
+      category: 'PRAZOS',
+      priority: 'urgent',
+      admissionId: task.admissionId || undefined,
+      sourceEvent,
+      dedupKey,
+      link: task.admissionId ? `/admissoes/${task.admissionId}` : '/tarefas-operacionais'
+    });
+  }
+
+  /**
+   * Bloco 6.9C.3: Gera uma notificação interna quando uma OperationalTask estiver no estado 'DUE_SOON'
+   * e possuir um responsibleUserId definido, reutilizando classifyOperationalTaskAlertState (6.9C.1)
+   * e addNotification (6.7) com dedupKey determinístico baseado no ID da tarefa + evento + janela de vencimento.
+   */
+  notifyDueSoonOperationalTask(
+    task: OperationalTask,
+    nowMs: number = Date.now()
+  ): NotificationItem | null {
+    const alertState = this.classifyOperationalTaskAlertState(task, nowMs);
+    if (alertState !== 'DUE_SOON') {
+      return null;
+    }
+
+    const responsibleUserId = task.responsibleUserId ? task.responsibleUserId.trim() : '';
+    if (!responsibleUserId || !task.dueAt) {
+      return null;
+    }
+
+    const dueWindowIso = new Date(task.dueAt).toISOString();
+    const sourceEvent = 'operational_task_due_soon';
+    const dedupKey = `notif:${sourceEvent}:${task.id}:${dueWindowIso}`;
+    const employeeInfo = task.employeeName ? ` (${task.employeeName})` : '';
+
+    return this.addNotification({
+      title: `Tarefa próxima do vencimento: ${task.title}`,
+      message: `A tarefa operacional "${task.title}"${employeeInfo} está próxima do vencimento (vence em menos de 24h).`,
+      type: 'pending',
+      targetUserId: responsibleUserId,
+      category: 'PRAZOS',
+      priority: 'high',
+      admissionId: task.admissionId || undefined,
+      sourceEvent,
+      dedupKey,
+      link: task.admissionId ? `/admissoes/${task.admissionId}` : '/tarefas-operacionais'
+    });
+  }
+
+  /**
+   * Bloco 6.9C.4 / 6.9C.5: Verifica as OperationalTask ativas e gera notificações internas
+   * para as tarefas com estado 'OVERDUE' e 'DUE_SOON', reutilizando a classificação do 6.9C.1,
+   * as funções de notificação do 6.9C.2 e 6.9C.3 e a idempotência por dedupKey.
+   */
+  processOverdueOperationalTasks(nowMs: number = Date.now()): NotificationItem[] {
+    const tasks = this.data.operationalTasks || [];
+    const createdNotifications: NotificationItem[] = [];
+
+    for (const task of tasks) {
+      if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
+        continue;
+      }
+
+      const alertState = this.classifyOperationalTaskAlertState(task, nowMs);
+      if (alertState === 'OVERDUE') {
+        const expectedDedupKey = `notif:operational_task_overdue:${task.id}`;
+        const alreadyExists = (this.data.notifications || []).some(
+          n => n.dedupKey === expectedDedupKey
+        );
+
+        const notif = this.notifyOverdueOperationalTask(task, nowMs);
+        if (notif && !alreadyExists) {
+          createdNotifications.push(notif);
+        }
+      } else if (alertState === 'DUE_SOON') {
+        const responsibleUserId = task.responsibleUserId ? task.responsibleUserId.trim() : '';
+        if (!responsibleUserId || !task.dueAt) {
+          continue;
+        }
+
+        const dueWindowIso = new Date(task.dueAt).toISOString();
+        const expectedDedupKey = `notif:operational_task_due_soon:${task.id}:${dueWindowIso}`;
+        const alreadyExists = (this.data.notifications || []).some(
+          n => n.dedupKey === expectedDedupKey
+        );
+
+        const notif = this.notifyDueSoonOperationalTask(task, nowMs);
+        if (notif && !alreadyExists) {
+          createdNotifications.push(notif);
+        }
+      }
+    }
+
+    return createdNotifications;
+  }
+
+  /**
+   * Bloco 6.9C.6: Runner central e controlado para processamento de prazos de OperationalTask,
+   * reutilizando integralmente processOverdueOperationalTasks (OVERDUE + DUE_SOON) sem duplicar regras.
+   */
+  processOperationalTaskDeadlines(nowMs: number = Date.now()): NotificationItem[] {
+    return this.processOverdueOperationalTasks(nowMs);
+  }
+
+  /**
    * Criação de Tarefa Operacional vinculada obrigatoriamente a uma Admissão
    */
   createOperationalTask(
@@ -12235,7 +12484,9 @@ export class Database {
     const allowedPriorities: OperationalPriority[] = ['NORMAL', 'ALTA', 'CRITICA'];
     const priority = allowedPriorities.includes(input.priority) ? input.priority : 'NORMAL';
 
-    // Tratar prazo operacional (dueAt)
+    const nowIso = new Date().toISOString();
+
+    // Tratar prazo operacional (dueAt) — preserva se informado explicitamente; aplica SLA básico quando omitido
     let dueAt: string | null = null;
     if (input.dueAt) {
       const parsedDate = new Date(input.dueAt);
@@ -12243,6 +12494,8 @@ export class Database {
         throw new Error('O prazo informado não é uma data válida.');
       }
       dueAt = parsedDate.toISOString();
+    } else if (input.dueAt === undefined) {
+      dueAt = this.calculateTaskSlaDueAt(priority, nowIso);
     }
 
     // Tratar responsável operacional (reutilizando mecanismo 6.4)
@@ -12270,7 +12523,7 @@ export class Database {
       responsibleUserId = targetUser.id;
       responsibleUserName = targetUser.name;
       responsibleUserEmail = targetUser.email;
-      assignedAt = new Date().toISOString();
+      assignedAt = nowIso;
       assignedBy = creatorUser.name;
     }
 
@@ -12292,7 +12545,6 @@ export class Database {
       }
     }
 
-    const nowIso = new Date().toISOString();
     const taskId = 'task-' + crypto.randomUUID().slice(0, 8);
     const admissionCode = admission.id.replace('adm-', 'ADM-').slice(0, 10).toUpperCase();
 
@@ -12390,7 +12642,7 @@ export class Database {
     }
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -12403,17 +12655,22 @@ export class Database {
       this.data.operationalTasks = [];
     }
 
-    const now = Date.now();
+    const now =
+      typeof filters.nowMs === 'number' && Number.isFinite(filters.nowMs)
+        ? filters.nowMs
+        : Date.now();
 
-    // 1. Atualizar flag isOverdue dinamicamente para todas as tarefas
-    const allTasks = this.data.operationalTasks.map(t => {
-      const isOverdue = t.dueAt
-        ? new Date(t.dueAt).getTime() < now && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
-        : false;
-      return { ...t, isOverdue };
-    });
+    // 1. Atualizar flags dinâmicas (isOverdue, isDueSoon, effectivePriority, alertState/deadlineState) na leitura sem mutar o banco e sem duplicar a mesma tarefa
+    const seenTaskIds = new Set<string>();
+    const allTasks: OperationalTask[] = [];
+    for (const rawTask of this.data.operationalTasks) {
+      if (!rawTask || !rawTask.id || seenTaskIds.has(rawTask.id)) continue;
+      seenTaskIds.add(rawTask.id);
+      allTasks.push(this.enrichTaskWithDynamicDeadlineAndPriority(rawTask, now));
+    }
 
-    // 2. Resumo analítico global
+    // 2. Resumo analítico global consolidado (Bloco 6.9D.3: sem duplicidade e sem contar CONCLUIDA/CANCELADA como ativas)
+    let active = 0;
     let pending = 0;
     let inProgress = 0;
     let completed = 0;
@@ -12423,6 +12680,8 @@ export class Database {
     let myTasks = 0;
     let critical = 0;
     let overdue = 0;
+    let dueSoon = 0;
+    let normal = 0;
 
     const currentUserId = filters.currentUserId || 'user-rh-01';
 
@@ -12434,14 +12693,26 @@ export class Database {
       if (t.status === 'CANCELADA') cancelled++;
 
       const isActive = t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA';
-      if (isActive && !t.responsibleUserId) unassigned++;
-      if (isActive && t.responsibleUserId === currentUserId) myTasks++;
-      if (isActive && t.priority === 'CRITICA') critical++;
-      if (isActive && t.isOverdue) overdue++;
+      if (isActive) {
+        active++;
+        const effectivePriority = t.effectivePriority || t.priority;
+        if (!t.responsibleUserId) unassigned++;
+        if (t.responsibleUserId === currentUserId) myTasks++;
+        if (effectivePriority === 'CRITICA') critical++;
+
+        if (t.alertState === 'OVERDUE') {
+          overdue++;
+        } else if (t.alertState === 'DUE_SOON') {
+          dueSoon++;
+        } else {
+          normal++;
+        }
+      }
     });
 
     const summary: OperationalTaskSummary = {
       total: allTasks.length,
+      active,
       pending,
       inProgress,
       completed,
@@ -12450,15 +12721,18 @@ export class Database {
       unassigned,
       myTasks,
       critical,
-      overdue
+      overdue,
+      dueSoon,
+      normal
     };
 
-    // 3. Aplicação dos filtros
+    // 3. Aplicação dos filtros padronizados (Bloco 6.9D.2)
     let filtered = [...allTasks];
 
     // Modo de visualização rápido
-    if (filters.viewMode) {
-      switch (filters.viewMode) {
+    if (filters.viewMode && typeof filters.viewMode === 'string') {
+      const vm = filters.viewMode.trim().toLowerCase();
+      switch (vm) {
         case 'minhas':
           filtered = filtered.filter(
             t => t.responsibleUserId === currentUserId && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
@@ -12471,11 +12745,19 @@ export class Database {
           break;
         case 'criticas':
           filtered = filtered.filter(
-            t => t.priority === 'CRITICA' && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
+            t => (t.effectivePriority || t.priority) === 'CRITICA' && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
           );
           break;
         case 'vencidas':
-          filtered = filtered.filter(t => t.isOverdue);
+          filtered = filtered.filter(t => t.isOverdue === true);
+          break;
+        case 'proximas':
+        case 'due_soon':
+          filtered = filtered.filter(t => t.isDueSoon === true);
+          break;
+        case 'ativas':
+        case 'active':
+          filtered = filtered.filter(t => t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA');
           break;
         case 'concluidas':
           filtered = filtered.filter(t => t.status === 'CONCLUIDA');
@@ -12486,55 +12768,143 @@ export class Database {
       }
     }
 
-    // Filtro de Status
-    if (filters.status && filters.status !== 'TODOS' && filters.status !== 'all') {
-      filtered = filtered.filter(t => t.status === filters.status);
+    // Filtro de Status / Situação da Tarefa
+    if (filters.status !== undefined && filters.status !== null) {
+      const st = String(filters.status).trim().toUpperCase();
+      if (st !== '' && st !== 'TODOS' && st !== 'TODAS' && st !== 'ALL') {
+        if (st === 'ATIVA' || st === 'ATIVAS' || st === 'ACTIVE') {
+          filtered = filtered.filter(t => t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA');
+        } else {
+          filtered = filtered.filter(t => t.status === st);
+        }
+      }
     }
 
-    // Filtro de Prioridade
-    if (filters.priority && filters.priority !== 'TODAS' && filters.priority !== 'all') {
-      filtered = filtered.filter(t => t.priority === filters.priority);
+    const rawSituation = filters.situation ?? (filters as any).situacao;
+    if (rawSituation !== undefined && rawSituation !== null) {
+      const sit = String(rawSituation).trim().toUpperCase();
+      if (sit !== '' && sit !== 'TODOS' && sit !== 'TODAS' && sit !== 'ALL') {
+        if (sit === 'ATIVA' || sit === 'ATIVAS' || sit === 'ACTIVE') {
+          filtered = filtered.filter(t => t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA');
+        } else if (sit === 'INATIVA' || sit === 'INATIVAS' || sit === 'ENCERRADA' || sit === 'ENCERRADAS') {
+          filtered = filtered.filter(t => t.status === 'CONCLUIDA' || t.status === 'CANCELADA');
+        } else if (sit === 'OVERDUE' || sit === 'VENCIDA' || sit === 'VENCIDAS' || sit === 'ATRASADA' || sit === 'ATRASADAS') {
+          filtered = filtered.filter(t => t.alertState === 'OVERDUE');
+        } else if (sit === 'DUE_SOON' || sit === 'DUESOON' || sit === 'PROXIMA' || sit === 'PROXIMAS' || sit === 'PROXIMO_VENCIMENTO') {
+          filtered = filtered.filter(t => t.alertState === 'DUE_SOON');
+        } else if (sit === 'NORMAL' || sit === 'EM_DIA' || sit === 'NO_PRAZO') {
+          filtered = filtered.filter(t => t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA' && t.alertState === 'NORMAL');
+        } else {
+          filtered = filtered.filter(t => t.status === sit);
+        }
+      }
     }
 
-    // Filtro de Responsável
-    if (filters.responsible) {
-      if (filters.responsible === 'sem_responsavel') {
-        filtered = filtered.filter(t => !t.responsibleUserId);
-      } else {
-        filtered = filtered.filter(
-          t => t.responsibleUserId === filters.responsible || t.responsibleUserName === filters.responsible
-        );
+    // Filtro por Estado do Prazo (deadlineState / alertState / prazo / isOverdue / isDueSoon)
+    const rawDeadlineState = filters.deadlineState ?? filters.alertState ?? (filters as any).prazo;
+    if (rawDeadlineState !== undefined && rawDeadlineState !== null) {
+      const ds = String(rawDeadlineState).trim().toUpperCase();
+      if (ds !== '' && ds !== 'TODOS' && ds !== 'TODAS' && ds !== 'ALL') {
+        if (ds === 'OVERDUE' || ds === 'VENCIDA' || ds === 'VENCIDAS' || ds === 'ATRASADA' || ds === 'ATRASADAS') {
+          filtered = filtered.filter(t => t.alertState === 'OVERDUE');
+        } else if (ds === 'DUE_SOON' || ds === 'DUESOON' || ds === 'PROXIMA' || ds === 'PROXIMAS' || ds === 'PROXIMO_VENCIMENTO') {
+          filtered = filtered.filter(t => t.alertState === 'DUE_SOON');
+        } else if (ds === 'NORMAL' || ds === 'EM_DIA' || ds === 'NO_PRAZO') {
+          filtered = filtered.filter(t => t.alertState === 'NORMAL');
+        } else {
+          filtered = filtered.filter(t => t.alertState === ds);
+        }
+      }
+    }
+
+    if (filters.isOverdue !== undefined && filters.isOverdue !== null && filters.isOverdue !== '') {
+      const ovStr = String(filters.isOverdue).trim().toLowerCase();
+      if (ovStr === 'true' || ovStr === '1') {
+        filtered = filtered.filter(t => t.isOverdue === true);
+      } else if (ovStr === 'false' || ovStr === '0') {
+        filtered = filtered.filter(t => t.isOverdue === false);
+      }
+    }
+
+    if (filters.isDueSoon !== undefined && filters.isDueSoon !== null && filters.isDueSoon !== '') {
+      const dsStr = String(filters.isDueSoon).trim().toLowerCase();
+      if (dsStr === 'true' || dsStr === '1') {
+        filtered = filtered.filter(t => t.isDueSoon === true);
+      } else if (dsStr === 'false' || dsStr === '0') {
+        filtered = filtered.filter(t => t.isDueSoon === false);
+      }
+    }
+
+    // Filtro de Prioridade Efetiva (priority / effectivePriority / prioridade)
+    const rawEffectivePriority = filters.effectivePriority ?? filters.priority ?? (filters as any).prioridade;
+    if (rawEffectivePriority !== undefined && rawEffectivePriority !== null) {
+      const prio = String(rawEffectivePriority).trim().toUpperCase();
+      if (prio !== '' && prio !== 'TODAS' && prio !== 'TODOS' && prio !== 'ALL') {
+        filtered = filtered.filter(t => (t.effectivePriority || t.priority) === prio);
+      }
+    }
+
+    // Filtro de Responsável (responsible / responsibleUserId / responsavel)
+    const rawResponsible = filters.responsible ?? filters.responsibleUserId ?? (filters as any).responsavel;
+    if (rawResponsible !== undefined && rawResponsible !== null) {
+      const resp = String(rawResponsible).trim();
+      if (resp !== '' && resp.toUpperCase() !== 'TODOS' && resp.toUpperCase() !== 'TODAS' && resp.toLowerCase() !== 'all') {
+        const respLower = resp.toLowerCase();
+        if (respLower === 'sem_responsavel' || respLower === 'unassigned' || respLower === 'none' || respLower === 'null') {
+          filtered = filtered.filter(t => !t.responsibleUserId);
+        } else if (respLower === 'com_responsavel' || respLower === 'assigned') {
+          filtered = filtered.filter(t => Boolean(t.responsibleUserId));
+        } else {
+          filtered = filtered.filter(
+            t =>
+              t.responsibleUserId === resp ||
+              t.responsibleUserName === resp ||
+              (t.responsibleUserName && t.responsibleUserName.toLowerCase() === respLower) ||
+              (t.responsibleUserEmail && t.responsibleUserEmail.toLowerCase() === respLower)
+          );
+        }
       }
     }
 
     // Filtro de Origem
-    if (filters.sourceType && filters.sourceType !== 'TODAS' && filters.sourceType !== 'all') {
-      filtered = filtered.filter(t => t.sourceType === filters.sourceType);
+    if (filters.sourceType !== undefined && filters.sourceType !== null) {
+      const src = String(filters.sourceType).trim().toUpperCase();
+      if (src !== '' && src !== 'TODAS' && src !== 'TODOS' && src !== 'ALL') {
+        filtered = filtered.filter(t => t.sourceType === src);
+      }
     }
 
     // Filtro por Unidade
-    if (filters.unit && filters.unit !== 'TODAS' && filters.unit !== 'all') {
-      filtered = filtered.filter(t => t.employeeUnit === filters.unit);
+    if (filters.unit !== undefined && filters.unit !== null) {
+      const u = String(filters.unit).trim();
+      if (u !== '' && u.toUpperCase() !== 'TODAS' && u.toUpperCase() !== 'TODOS' && u.toLowerCase() !== 'all') {
+        filtered = filtered.filter(t => t.employeeUnit === u);
+      }
     }
 
     // Filtro por Departamento
-    if (filters.department && filters.department !== 'TODOS' && filters.department !== 'all') {
-      filtered = filtered.filter(t => t.employeeDepartment === filters.department);
+    if (filters.department !== undefined && filters.department !== null) {
+      const dept = String(filters.department).trim();
+      if (dept !== '' && dept.toUpperCase() !== 'TODOS' && dept.toUpperCase() !== 'TODAS' && dept.toLowerCase() !== 'all') {
+        filtered = filtered.filter(t => t.employeeDepartment === dept);
+      }
     }
 
     // Filtro por Admissão
-    if (filters.admissionId) {
-      filtered = filtered.filter(t => t.admissionId === filters.admissionId);
+    if (filters.admissionId !== undefined && filters.admissionId !== null && String(filters.admissionId).trim() !== '') {
+      const admId = String(filters.admissionId).trim();
+      filtered = filtered.filter(t => t.admissionId === admId);
     }
 
     // Filtro por Funcionário
-    if (filters.employeeId) {
-      filtered = filtered.filter(t => t.employeeId === filters.employeeId);
+    if (filters.employeeId !== undefined && filters.employeeId !== null && String(filters.employeeId).trim() !== '') {
+      const empId = String(filters.employeeId).trim();
+      filtered = filtered.filter(t => t.employeeId === empId);
     }
 
     // Busca Textual (Título, Descrição, Funcionário, CPF mascarado, Código de Admissão)
-    if (filters.search && filters.search.trim() !== '') {
-      const q = filters.search.trim().toLowerCase();
+    if (filters.search !== undefined && filters.search !== null && String(filters.search).trim() !== '') {
+      const q = String(filters.search).trim().toLowerCase();
       filtered = filtered.filter(t => {
         return (
           t.title.toLowerCase().includes(q) ||
@@ -12555,17 +12925,20 @@ export class Database {
       NORMAL: 1
     };
 
-    const sortBy = filters.sortBy || 'priority';
-    const sortOrder = filters.sortOrder || 'desc';
+    const validSortFields = ['priority', 'dueAt', 'createdAt', 'updatedAt', 'status', 'title'];
+    const sortBy = validSortFields.includes(String(filters.sortBy)) ? String(filters.sortBy) : 'priority';
+    const sortOrder = String(filters.sortOrder).toLowerCase() === 'asc' ? 'asc' : 'desc';
 
     filtered.sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'priority') {
-        comparison = priorityWeight[a.priority] - priorityWeight[b.priority];
+        const effA = a.effectivePriority || a.priority;
+        const effB = b.effectivePriority || b.priority;
+        comparison = (priorityWeight[effA] || 1) - (priorityWeight[effB] || 1);
       } else if (sortBy === 'dueAt') {
         const timeA = a.dueAt ? new Date(a.dueAt).getTime() : 9999999999999;
         const timeB = b.dueAt ? new Date(b.dueAt).getTime() : 9999999999999;
-        comparison = timeA - timeB;
+        comparison = (isNaN(timeA) ? 9999999999999 : timeA) - (isNaN(timeB) ? 9999999999999 : timeB);
       } else if (sortBy === 'createdAt') {
         comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       } else if (sortBy === 'updatedAt') {
@@ -12579,9 +12952,11 @@ export class Database {
       return sortOrder === 'desc' ? -comparison : comparison;
     });
 
-    // 5. Paginação
-    const page = filters.page && filters.page > 0 ? filters.page : 1;
-    const limit = filters.limit && filters.limit > 0 ? filters.limit : 20;
+    // 5. Paginação segura (evita NaN ou números negativos)
+    const rawPage = Number(filters.page);
+    const rawLimit = Number(filters.limit);
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 1000) : 20;
     const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const paginatedItems = filtered.slice((page - 1) * limit, page * limit);
@@ -12634,7 +13009,13 @@ export class Database {
           { key: 'CONCLUIDA', label: 'Concluída' },
           { key: 'CANCELADA', label: 'Cancelada' }
         ],
-        priorities: ['CRITICA', 'ALTA', 'NORMAL']
+        priorities: ['CRITICA', 'ALTA', 'NORMAL'],
+        deadlineStates: [
+          { key: 'TODOS', label: 'Todos os prazos' },
+          { key: 'OVERDUE', label: 'Vencidas' },
+          { key: 'DUE_SOON', label: 'Próximas do vencimento (24h)' },
+          { key: 'NORMAL', label: 'Dentro do prazo' }
+        ]
       }
     };
   }
@@ -12642,7 +13023,7 @@ export class Database {
   /**
    * Busca Tarefa Operacional por ID
    */
-  getOperationalTaskById(id: string): OperationalTask {
+  getOperationalTaskById(id: string, nowMs: number = Date.now()): OperationalTask {
     if (!this.data.operationalTasks) {
       this.data.operationalTasks = [];
     }
@@ -12651,11 +13032,17 @@ export class Database {
       throw new Error(`Tarefa com identificador "${id}" não encontrada.`);
     }
 
-    const now = Date.now();
-    task.isOverdue = task.dueAt
-      ? new Date(task.dueAt).getTime() < now && task.status !== 'CONCLUIDA' && task.status !== 'CANCELADA'
-      : false;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, nowMs);
+  }
 
+  private getMutableOperationalTaskById(id: string): OperationalTask {
+    if (!this.data.operationalTasks) {
+      this.data.operationalTasks = [];
+    }
+    const task = this.data.operationalTasks.find(t => t.id === id);
+    if (!task) {
+      throw new Error(`Tarefa com identificador "${id}" não encontrada.`);
+    }
     return task;
   }
 
@@ -12668,7 +13055,7 @@ export class Database {
     performer: { id?: string; name: string },
     reason?: string
   ): OperationalTask {
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
       throw new Error(`Não é permitido alterar o responsável de uma tarefa ${task.status.toLowerCase()}. Reabra a tarefa primeiro.`);
     }
@@ -12765,14 +13152,14 @@ export class Database {
 
     task.updatedAt = nowIso;
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
    * Inicia o andamento de uma tarefa operacional
    */
   startOperationalTask(taskId: string, performer: { id?: string; name: string }): OperationalTask {
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status === 'CONCLUIDA') {
       throw new Error('A tarefa já está concluída.');
     }
@@ -12783,7 +13170,7 @@ export class Database {
       throw new Error('A tarefa está bloqueada. Desbloqueie-a antes de iniciar.');
     }
     if (task.status === 'EM_ANDAMENTO') {
-      return task; // Idempotente
+      return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now()); // Idempotente
     }
 
     const previousStatus = task.status;
@@ -12815,7 +13202,7 @@ export class Database {
     });
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -12826,9 +13213,9 @@ export class Database {
     completionNotes: string | undefined,
     performer: { id?: string; name: string }
   ): OperationalTask {
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status === 'CONCLUIDA') {
-      return task; // Idempotência contra duplo clique
+      return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now()); // Idempotência contra duplo clique
     }
     if (task.status === 'CANCELADA') {
       throw new Error('Não é possível concluir uma tarefa cancelada. Reabra-a antes.');
@@ -12870,7 +13257,7 @@ export class Database {
     this.executeAutomationOnTaskCompleted(task, performer.name);
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -12886,7 +13273,7 @@ export class Database {
       throw new Error('O motivo do bloqueio é obrigatório e deve ter no mínimo 3 caracteres.');
     }
 
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
       throw new Error(`Não é possível bloquear uma tarefa ${task.status.toLowerCase()}.`);
     }
@@ -12925,7 +13312,7 @@ export class Database {
     });
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -12936,7 +13323,7 @@ export class Database {
     reason: string | undefined,
     performer: { id?: string; name: string }
   ): OperationalTask {
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status !== 'BLOQUEADA') {
       throw new Error('Apenas tarefas com status BLOQUEADA podem ser desbloqueadas.');
     }
@@ -12975,7 +13362,7 @@ export class Database {
     });
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -12991,7 +13378,7 @@ export class Database {
       throw new Error('O motivo da reabertura é obrigatório e deve ter no mínimo 3 caracteres.');
     }
 
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status !== 'CONCLUIDA' && task.status !== 'CANCELADA') {
       throw new Error(`Apenas tarefas concluídas ou canceladas podem ser reabertas. Status atual: ${task.status}.`);
     }
@@ -13036,7 +13423,7 @@ export class Database {
     });
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -13052,9 +13439,9 @@ export class Database {
       throw new Error('O motivo do cancelamento é obrigatório e deve ter no mínimo 3 caracteres.');
     }
 
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status === 'CANCELADA') {
-      return task; // Idempotente
+      return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now()); // Idempotente
     }
 
     const previousStatus = task.status;
@@ -13091,7 +13478,7 @@ export class Database {
     });
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -13102,7 +13489,7 @@ export class Database {
     input: UpdateOperationalTaskInput,
     performer: { id?: string; name: string }
   ): OperationalTask {
-    const task = this.getOperationalTaskById(taskId);
+    const task = this.getMutableOperationalTaskById(taskId);
     if (task.status === 'CONCLUIDA' || task.status === 'CANCELADA') {
       throw new Error(`Não é possível editar uma tarefa ${task.status.toLowerCase()}.`);
     }
@@ -13165,7 +13552,7 @@ export class Database {
     });
 
     this.save();
-    return task;
+    return this.enrichTaskWithDynamicDeadlineAndPriority(task, Date.now());
   }
 
   /**
@@ -13178,12 +13565,7 @@ export class Database {
     const now = Date.now();
     return this.data.operationalTasks
       .filter(t => t.admissionId === admissionId)
-      .map(t => ({
-        ...t,
-        isOverdue: t.dueAt
-          ? new Date(t.dueAt).getTime() < now && t.status !== 'CONCLUIDA' && t.status !== 'CANCELADA'
-          : false
-      }));
+      .map(t => this.enrichTaskWithDynamicDeadlineAndPriority(t, now));
   }
 
   // =========================================================================

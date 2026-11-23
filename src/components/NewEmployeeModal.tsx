@@ -18,19 +18,22 @@ import {
 import { Employee, JobPosition } from '../types/index.ts';
 import { formatCPF, validateCPF, formatPhone, formatCEP, validateCEP, validateEmail } from '../lib/cpf.ts';
 import { safeFetchJson } from '../lib/api.ts';
+import { QuickMessageSender } from './QuickMessageSender.tsx';
 
 interface NewEmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (employee: Employee) => void;
   onOpenExisting?: (employeeId: string) => void;
+  onOpenEmployee?: (employeeId: string) => void;
 }
 
 export const NewEmployeeModal: React.FC<NewEmployeeModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  onOpenExisting
+  onOpenExisting,
+  onOpenEmployee
 }) => {
   const [name, setName] = useState('');
   const [cpf, setCpf] = useState('');
@@ -62,6 +65,28 @@ export const NewEmployeeModal: React.FC<NewEmployeeModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [duplicateEmployee, setDuplicateEmployee] = useState<{ id: string; name: string } | null>(null);
+  const [createdEmployee, setCreatedEmployee] = useState<Employee | null>(null);
+
+  const handleCloseModal = () => {
+    setCreatedEmployee(null);
+    setErrorMessage('');
+    setDuplicateEmployee(null);
+    setName('');
+    setCpf('');
+    setBirthDate('');
+    setPhone('');
+    setSecondaryPhone('');
+    setEmail('');
+    setDepartment('');
+    setRegistrationNumber('');
+    setCep('');
+    setStreet('');
+    setNumber('');
+    setComplement('');
+    setNeighborhood('');
+    setCity('');
+    onClose();
+  };
 
   // Carrega cargos disponíveis
   useEffect(() => {
@@ -229,7 +254,7 @@ export const NewEmployeeModal: React.FC<NewEmployeeModalProps> = ({
       });
 
       onSuccess(res);
-      onClose();
+      setCreatedEmployee(res);
     } catch (err: any) {
       if (err.status === 409 || err.duplicate) {
         setErrorMessage(err.message || 'Já existe um funcionário cadastrado com este CPF.');
@@ -258,22 +283,77 @@ export const NewEmployeeModal: React.FC<NewEmployeeModalProps> = ({
         {/* Header */}
         <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
-              <UserPlus className="w-5 h-5" />
+            <div className={`p-2 rounded-lg ${createdEmployee ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+              {createdEmployee ? <CheckCircle2 className="w-5 h-5" /> : <UserPlus className="w-5 h-5" />}
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800">Novo Funcionário</h2>
-              <p className="text-xs text-slate-500">Cadastro administrativo na base permanente da empresa</p>
+              <h2 className="text-lg font-bold text-slate-800">
+                {createdEmployee ? 'Funcionário Cadastrado!' : 'Novo Funcionário'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {createdEmployee
+                  ? 'Cadastro salvo com sucesso. Opcionalmente, envie a mensagem inicial para o colaborador.'
+                  : 'Cadastro administrativo na base permanente da empresa'}
+              </p>
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200 transition-colors"
+            type="button"
+            onClick={handleCloseModal}
+            aria-label="Fechar janela"
+            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {createdEmployee ? (
+          <>
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="font-bold text-emerald-950 text-sm">
+                    {createdEmployee.name} cadastrado com sucesso!
+                  </p>
+                  <p className="text-emerald-800">
+                    Cargo: <strong>{createdEmployee.role}</strong> · Setor: <strong>{createdEmployee.department}</strong> · Unidade: <strong>{createdEmployee.unit}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <QuickMessageSender
+                recipientName={createdEmployee.name}
+                recipientPhone={createdEmployee.phone}
+                recipientEmail={createdEmployee.email}
+                role={createdEmployee.role}
+              />
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCloseModal}
+                className="px-4 py-2 text-slate-700 hover:bg-slate-200 text-sm font-medium rounded-lg transition cursor-pointer"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const empId = createdEmployee.id;
+                  handleCloseModal();
+                  onOpenEmployee?.(empId);
+                }}
+                className="inline-flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition cursor-pointer"
+              >
+                <ExternalLink className="w-4 h-4" />
+                <span>Ver Ficha do Funcionário</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         {/* Content */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* Mensagem de Erro / Alerta de Duplicidade */}
@@ -609,7 +689,7 @@ export const NewEmployeeModal: React.FC<NewEmployeeModalProps> = ({
         <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCloseModal}
             disabled={isSubmitting}
             className="px-4 py-2 text-slate-700 hover:bg-slate-200 text-sm font-medium rounded-lg transition"
           >
@@ -634,6 +714,8 @@ export const NewEmployeeModal: React.FC<NewEmployeeModalProps> = ({
             )}
           </button>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -74,6 +74,17 @@ function getAuthenticatedUser(req: Request) {
     };
   }
 
+  if (roleHeader && ['RH', 'ADMIN', 'GESTOR'].includes(roleHeader)) {
+    return {
+      id: `user-${roleHeader.toLowerCase()}-01`,
+      email,
+      name: roleHeader === 'ADMIN' ? 'Administrador' : roleHeader === 'GESTOR' ? 'Gestor' : 'Mariana Silveira',
+      role: roleHeader as any,
+      department: roleHeader === 'RH' ? 'Recursos Humanos' : 'Administração',
+      createdAt: new Date().toISOString()
+    };
+  }
+
   return {
     id: 'user-rh-01',
     email: 'rh@empresa.com',
@@ -789,7 +800,7 @@ router.get('/dashboard/stats', (req: Request, res: Response) => {
 // BLOCO 4.2: CENTRAL DE PENDÊNCIAS (RH)
 // Fila de trabalho operacional com RLS, IDOR e LGPD (máscara de CPF)
 // =========================================================================
-router.get('/pendencias', (req: Request, res: Response) => {
+router.get(['/api/pendencias', '/pendencias', '/api/pendings', '/pendings'], (req: Request, res: Response) => {
   const auth = checkRhAuth(req, res);
   if (!auth) return;
 
@@ -812,35 +823,42 @@ router.get('/pendencias', (req: Request, res: Response) => {
     sortOrder
   } = req.query;
 
-  const result = db.getPendingHubData({
-    tipo: tipo as string | undefined,
-    status: status as string | undefined,
-    cargo: cargo as string | undefined,
-    setor: setor as string | undefined,
-    unidade: unidade as string | undefined,
-    documento: documento as string | undefined,
-    responsavel: responsavel as string | undefined,
-    prioridade: prioridade as string | undefined,
-    search: search as string | undefined,
-    periodo: periodo as string | undefined,
-    startDate: startDate as string | undefined,
-    endDate: endDate as string | undefined,
-    page: page ? Number(page) : undefined,
-    limit: limit ? Number(limit) : undefined,
-    sortBy: sortBy as string | undefined,
-    sortOrder: sortOrder as 'asc' | 'desc' | undefined
-  });
+  try {
+    const parsedPage = page !== undefined ? Number(page) : undefined;
+    const parsedLimit = limit !== undefined ? Number(limit) : undefined;
 
-  // LGPD: Higienização rigorosa de CPF nos dados retornados para o frontend
-  const sanitizedItems = result.items.map(item => ({
-    ...item,
-    employeeCpf: maskCPF(item.employeeCpf)
-  }));
+    const result = db.getPendingHubData({
+      tipo: tipo as string | undefined,
+      status: status as string | undefined,
+      cargo: cargo as string | undefined,
+      setor: setor as string | undefined,
+      unidade: unidade as string | undefined,
+      documento: documento as string | undefined,
+      responsavel: responsavel as string | undefined,
+      prioridade: prioridade as string | undefined,
+      search: search as string | undefined,
+      periodo: periodo as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      page: parsedPage !== undefined && Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1,
+      limit: parsedLimit !== undefined && Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(Math.floor(parsedLimit), 500) : 15,
+      sortBy: sortBy as string | undefined,
+      sortOrder: sortOrder === 'asc' || sortOrder === 'desc' ? sortOrder : undefined
+    });
 
-  return res.json({
-    ...result,
-    items: sanitizedItems
-  });
+    // LGPD: Higienização rigorosa de CPF nos dados retornados para o frontend
+    const sanitizedItems = (result.items || []).map(item => ({
+      ...item,
+      employeeCpf: maskCPF(item.employeeCpf)
+    }));
+
+    return res.json({
+      ...result,
+      items: sanitizedItems
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Erro ao carregar central de pendências.' });
+  }
 });
 
 // =========================================================================
@@ -972,7 +990,7 @@ router.get(['/communications/logs', '/communications/history'], (req: Request, r
  * Retorna lista operacional de prazos e acompanhamento, resumo operacional,
  * contadores de situação, itens prioritários e filtros dinâmicos.
  */
-router.get(['/tracking', '/prazos'], (req: Request, res: Response) => {
+router.get(['/api/tracking', '/api/prazos', '/tracking', '/prazos'], (req: Request, res: Response) => {
   const auth = checkRhAuth(req, res);
   if (!auth) return;
 
@@ -993,24 +1011,31 @@ router.get(['/tracking', '/prazos'], (req: Request, res: Response) => {
     sortOrder
   } = req.query;
 
-  const result = db.getTrackingHubData({
-    period: period as string | undefined,
-    startDate: startDate as string | undefined,
-    endDate: endDate as string | undefined,
-    status: status as string | undefined,
-    cargo: cargo as string | undefined,
-    setor: setor as string | undefined,
-    unidade: unidade as string | undefined,
-    situacao: situacao as string | undefined,
-    tempoSemMovimentacao: tempoSemMovimentacao as string | undefined,
-    search: search as string | undefined,
-    page: page ? Number(page) : undefined,
-    limit: limit ? Number(limit) : undefined,
-    sortBy: sortBy as string | undefined,
-    sortOrder: sortOrder as 'asc' | 'desc' | undefined
-  });
+  try {
+    const parsedPage = page !== undefined ? Number(page) : undefined;
+    const parsedLimit = limit !== undefined ? Number(limit) : undefined;
 
-  return res.json(result);
+    const result = db.getTrackingHubData({
+      period: period as string | undefined,
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      status: status as string | undefined,
+      cargo: cargo as string | undefined,
+      setor: setor as string | undefined,
+      unidade: unidade as string | undefined,
+      situacao: situacao as string | undefined,
+      tempoSemMovimentacao: tempoSemMovimentacao as string | undefined,
+      search: search as string | undefined,
+      page: parsedPage !== undefined && Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1,
+      limit: parsedLimit !== undefined && Number.isFinite(parsedLimit) && parsedLimit > 0 ? Math.min(Math.floor(parsedLimit), 500) : 15,
+      sortBy: sortBy as string | undefined,
+      sortOrder: sortOrder === 'asc' || sortOrder === 'desc' ? sortOrder : undefined
+    });
+
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Erro ao carregar prazos operacionais.' });
+  }
 });
 
 /**
@@ -2449,7 +2474,7 @@ router.get('/audit-logs', (req: Request, res: Response) => {
 // ------------------------------------------------------------------
 // NOTIFICAÇÕES (Bloco 6.7B)
 // ------------------------------------------------------------------
-router.get('/notifications', (req: Request, res: Response) => {
+router.get(['/api/notifications', '/notifications', '/api/notificacoes', '/notificacoes'], (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   const userIdHeader = (req.headers['x-user-id'] as string) || undefined;
   const effectiveUserId = userIdHeader || user?.id;
@@ -2514,12 +2539,12 @@ router.get('/notifications', (req: Request, res: Response) => {
   return res.json(notifications || []);
 });
 
-router.all('/notifications/:id/read', (req: Request, res: Response) => {
+router.all(['/api/notifications/:id/read', '/notifications/:id/read', '/api/notificacoes/:id/ler', '/notificacoes/:id/ler'], (req: Request, res: Response) => {
   const success = db.markNotificationRead(req.params.id);
   return res.json({ success });
 });
 
-router.all('/notifications/read-all', (req: Request, res: Response) => {
+router.all(['/api/notifications/read-all', '/notifications/read-all', '/api/notificacoes/ler-todas', '/notificacoes/ler-todas'], (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   const userId = (req.query.userId as string) || (req.body?.userId as string) || (user?.role === 'FUNCIONARIO' ? user.id : undefined);
   db.markAllNotificationsRead(userId);
@@ -3690,8 +3715,19 @@ router.get(['/api/tarefas', '/api/tasks', '/tarefas', '/tasks'], (req: Request, 
   const {
     search,
     status,
+    situation,
+    situacao,
     priority,
+    effectivePriority,
+    prioridade,
     responsible,
+    responsibleUserId,
+    responsavel,
+    deadlineState,
+    alertState,
+    prazo,
+    isOverdue,
+    isDueSoon,
     sourceType,
     unit,
     department,
@@ -3701,25 +3737,40 @@ router.get(['/api/tarefas', '/api/tasks', '/tarefas', '/tasks'], (req: Request, 
     page,
     limit,
     sortBy,
-    sortOrder
+    sortOrder,
+    nowMs
   } = req.query;
 
   try {
+    const parsedPage = page !== undefined ? parseInt(String(page), 10) : 1;
+    const parsedLimit = limit !== undefined ? parseInt(String(limit), 10) : 20;
+    const parsedNowMs = nowMs !== undefined ? Number(nowMs) : undefined;
+
     const result = db.getOperationalTasks({
-      search: search ? String(search) : undefined,
-      status: status ? (String(status) as any) : undefined,
-      priority: priority ? (String(priority) as any) : undefined,
-      responsible: responsible ? String(responsible) : undefined,
-      sourceType: sourceType ? (String(sourceType) as any) : undefined,
-      unit: unit ? String(unit) : undefined,
-      department: department ? String(department) : undefined,
-      admissionId: admissionId ? String(admissionId) : undefined,
-      employeeId: employeeId ? String(employeeId) : undefined,
-      viewMode: viewMode ? (String(viewMode) as any) : undefined,
-      page: page ? parseInt(String(page), 10) : 1,
-      limit: limit ? parseInt(String(limit), 10) : 20,
-      sortBy: sortBy ? (String(sortBy) as any) : 'priority',
-      sortOrder: sortOrder ? (String(sortOrder) as any) : 'desc',
+      search: search !== undefined ? String(search) : undefined,
+      status: status !== undefined ? String(status) : undefined,
+      situation: (situation ?? situacao) !== undefined ? String(situation ?? situacao) : undefined,
+      priority: (priority ?? prioridade) !== undefined ? String(priority ?? prioridade) : undefined,
+      effectivePriority: effectivePriority !== undefined ? String(effectivePriority) : undefined,
+      responsible: (responsible ?? responsibleUserId ?? responsavel) !== undefined
+        ? String(responsible ?? responsibleUserId ?? responsavel)
+        : undefined,
+      deadlineState: (deadlineState ?? alertState ?? prazo) !== undefined
+        ? String(deadlineState ?? alertState ?? prazo)
+        : undefined,
+      isOverdue: isOverdue !== undefined ? String(isOverdue) : undefined,
+      isDueSoon: isDueSoon !== undefined ? String(isDueSoon) : undefined,
+      sourceType: sourceType !== undefined ? String(sourceType) : undefined,
+      unit: unit !== undefined ? String(unit) : undefined,
+      department: department !== undefined ? String(department) : undefined,
+      admissionId: admissionId !== undefined ? String(admissionId) : undefined,
+      employeeId: employeeId !== undefined ? String(employeeId) : undefined,
+      viewMode: viewMode !== undefined ? String(viewMode) : undefined,
+      page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1,
+      limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 20,
+      sortBy: sortBy !== undefined ? String(sortBy) : 'priority',
+      sortOrder: sortOrder !== undefined ? String(sortOrder) : 'desc',
+      nowMs: parsedNowMs !== undefined && Number.isFinite(parsedNowMs) ? parsedNowMs : undefined,
       currentUserId: auth.user.id,
       currentUserEmail: auth.user.email
     });
@@ -3751,12 +3802,12 @@ router.post(['/api/tarefas', '/api/tasks', '/tarefas', '/tasks'], (req: Request,
     stepKey,
     documentId,
     approvalId
-  } = req.body;
+  } = req.body || {};
 
   if (!admissionId) {
     return res.status(400).json({ error: 'Identificador da admissão (admissionId) é obrigatório.' });
   }
-  if (!title || title.trim().length < 3) {
+  if (!title || String(title).trim().length < 3) {
     return res.status(400).json({ error: 'O título da tarefa deve ter no mínimo 3 caracteres.' });
   }
 
@@ -3767,7 +3818,7 @@ router.post(['/api/tarefas', '/api/tasks', '/tarefas', '/tasks'], (req: Request,
         title,
         description,
         priority: priority || 'NORMAL',
-        dueAt: dueAt || null,
+        dueAt: dueAt !== undefined ? dueAt : undefined,
         responsibleUserId: responsibleUserId !== undefined ? responsibleUserId : null,
         sourceType: sourceType || 'ADMISSAO',
         sourceId,
@@ -3802,9 +3853,11 @@ router.get(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'],
   if (!auth) return;
 
   const { id } = req.params;
+  const rawNowMs = req.query?.nowMs !== undefined ? Number(req.query.nowMs) : undefined;
+  const nowMs = rawNowMs !== undefined && Number.isFinite(rawNowMs) ? rawNowMs : undefined;
 
   try {
-    const task = db.getOperationalTaskById(id);
+    const task = db.getOperationalTaskById(id, nowMs);
     return res.json({ task });
   } catch (error: any) {
     return res.status(404).json({ error: error.message || 'Tarefa não encontrada.' });
@@ -3812,15 +3865,15 @@ router.get(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'],
 });
 
 /**
- * PUT /api/tarefas/:id & /api/tasks/:id
+ * PUT/PATCH /api/tarefas/:id & /api/tasks/:id
  * Atualiza campos gerais de uma tarefa operacional
  */
-router.put(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'], (req: Request, res: Response) => {
+const handleUpdateTask = (req: Request, res: Response) => {
   const auth = checkRhAuth(req, res);
   if (!auth) return;
 
   const { id } = req.params;
-  const { title, description, priority, dueAt, reason } = req.body;
+  const { title, description, priority, dueAt, reason } = req.body || {};
 
   try {
     const task = db.updateOperationalTask(
@@ -3836,7 +3889,9 @@ router.put(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'],
   } catch (error: any) {
     return res.status(400).json({ error: error.message || 'Erro ao atualizar tarefa.' });
   }
-});
+};
+router.put(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'], handleUpdateTask);
+router.patch(['/api/tarefas/:id', '/api/tasks/:id', '/tarefas/:id', '/tasks/:id'], handleUpdateTask);
 
 /**
  * POST /api/tarefas/:id/atribuir & /api/tasks/:id/assign
@@ -3847,7 +3902,7 @@ router.post(['/api/tarefas/:id/atribuir', '/api/tasks/:id/assign', '/tarefas/:id
   if (!auth) return;
 
   const { id } = req.params;
-  const { responsibleUserId, reason } = req.body;
+  const { responsibleUserId, reason } = req.body || {};
 
   try {
     const task = db.assignOperationalTask(
@@ -3898,7 +3953,7 @@ router.post(['/api/tarefas/:id/concluir', '/api/tasks/:id/complete', '/tarefas/:
   if (!auth) return;
 
   const { id } = req.params;
-  const { completionNotes } = req.body;
+  const { completionNotes } = req.body || {};
 
   try {
     const task = db.completeOperationalTask(
@@ -3925,7 +3980,7 @@ router.post(['/api/tarefas/:id/bloquear', '/api/tasks/:id/block', '/tarefas/:id/
   if (!auth) return;
 
   const { id } = req.params;
-  const { blockReason } = req.body;
+  const { blockReason } = req.body || {};
 
   if (!blockReason || blockReason.trim().length < 3) {
     return res.status(400).json({ error: 'O motivo do bloqueio é obrigatório e deve ter no mínimo 3 caracteres.' });
@@ -3956,7 +4011,7 @@ router.post(['/api/tarefas/:id/desbloquear', '/api/tasks/:id/unblock', '/tarefas
   if (!auth) return;
 
   const { id } = req.params;
-  const { reason } = req.body;
+  const { reason } = req.body || {};
 
   try {
     const task = db.unblockOperationalTask(
@@ -3983,7 +4038,7 @@ router.post(['/api/tarefas/:id/reabrir', '/api/tasks/:id/reopen', '/tarefas/:id/
   if (!auth) return;
 
   const { id } = req.params;
-  const { reopenReason } = req.body;
+  const { reopenReason } = req.body || {};
 
   if (!reopenReason || reopenReason.trim().length < 3) {
     return res.status(400).json({ error: 'O motivo da reabertura é obrigatório e deve ter no mínimo 3 caracteres.' });
@@ -4014,7 +4069,7 @@ router.post(['/api/tarefas/:id/cancelar', '/api/tasks/:id/cancel', '/tarefas/:id
   if (!auth) return;
 
   const { id } = req.params;
-  const { cancelReason } = req.body;
+  const { cancelReason } = req.body || {};
 
   if (!cancelReason || cancelReason.trim().length < 3) {
     return res.status(400).json({ error: 'O motivo do cancelamento é obrigatório e deve ter no mínimo 3 caracteres.' });
@@ -4115,6 +4170,121 @@ router.patch(['/api/automations/:key', '/api/automacoes/:key', '/automations/:ke
     return res.status(500).json({ error: 'Erro ao atualizar rotina de automação: ' + error.message });
   }
 });
+
+// =========================================================================
+// BLOCO 6.9C.7 — ROTA INTERNA DE ADMINISTRAÇÃO PARA EXECUÇÃO MANUAL DO RUNNER DE PRAZOS
+// =========================================================================
+
+/**
+ * POST /api/admin/tasks/process-deadlines & /api/admin/tarefas/processar-prazos
+ * Executa manualmente o runner central de prazos (processOperationalTaskDeadlines).
+ * Acesso restrito aos perfis ADMIN e RH (demais perfis recebem 403).
+ */
+router.post(
+  [
+    '/api/admin/tasks/process-deadlines',
+    '/admin/tasks/process-deadlines',
+    '/api/admin/tarefas/processar-prazos',
+    '/admin/tarefas/processar-prazos',
+    '/api/tasks/process-deadlines',
+    '/tasks/process-deadlines',
+    '/api/tarefas/processar-prazos',
+    '/tarefas/processar-prazos'
+  ],
+  (req: Request, res: Response) => {
+    const user = getAuthenticatedUser(req);
+    if (!user) {
+      return res.status(401).json({ error: 'Sessão inválida ou não autenticada.' });
+    }
+
+    if (user.role !== 'ADMIN' && user.role !== 'RH') {
+      return res.status(403).json({
+        error: 'Acesso negado. Apenas os perfis ADMIN e RH podem executar o processamento de prazos.'
+      });
+    }
+
+    try {
+      const nowMs = typeof req.body?.nowMs === 'number' ? req.body.nowMs : undefined;
+      const notifications = db.processOperationalTaskDeadlines(nowMs);
+      return res.status(200).json({
+        success: true,
+        processedCount: notifications.length,
+        notificationsGenerated: notifications.length,
+        notifications
+      });
+    } catch (error: any) {
+      return res.status(500).json({
+        error: error.message || 'Erro ao executar o processamento de prazos das tarefas.'
+      });
+    }
+  }
+);
+
+// =========================================================================
+// BLOCO 6.9C.9 — ROTA EXCLUSIVA PARA EXECUÇÃO AUTOMÁTICA (VERCEL CRON)
+// =========================================================================
+
+const CRON_DEADLINE_PATHS = [
+  '/api/cron/tasks/process-deadlines',
+  '/cron/tasks/process-deadlines',
+  '/api/cron/process-operational-task-deadlines',
+  '/cron/process-operational-task-deadlines',
+  '/api/cron/tarefas/processar-prazos',
+  '/cron/tarefas/processar-prazos'
+];
+
+function handleCronProcessOperationalTaskDeadlines(req: Request, res: Response) {
+  const cronSecret = process.env.CRON_SECRET?.trim();
+  const authHeader = req.headers.authorization;
+
+  if (
+    !cronSecret ||
+    typeof authHeader !== 'string' ||
+    authHeader !== `Bearer ${cronSecret}`
+  ) {
+    return res.status(401).json({
+      error: 'Não autorizado. Credencial CRON_SECRET ausente ou inválida.'
+    });
+  }
+
+  try {
+    const queryNowMs = req.query?.nowMs !== undefined ? Number(req.query.nowMs) : undefined;
+    const bodyNowMs = typeof req.body?.nowMs === 'number' ? req.body.nowMs : undefined;
+    const nowMs =
+      bodyNowMs !== undefined
+        ? bodyNowMs
+        : queryNowMs !== undefined && !Number.isNaN(queryNowMs)
+        ? queryNowMs
+        : undefined;
+
+    const notifications = db.processOperationalTaskDeadlines(nowMs);
+
+    db.addAuditLog({
+      userName: 'Sistema (Cron)',
+      performedBy: 'Sistema (Cron)',
+      action: 'cron_operational_task_deadlines_processed',
+      entityType: 'automation',
+      entityName: 'Processamento Automático de Prazos (Cron)',
+      newValue: String(notifications.length),
+      details: `[Execução Automática / Cron] Processamento de prazos de tarefas operacionais executado via endpoint Cron. Notificações geradas: ${notifications.length}.`,
+      isAutomatic: true
+    });
+
+    return res.status(200).json({
+      success: true,
+      processedCount: notifications.length,
+      notificationsGenerated: notifications.length,
+      notifications
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      error: error.message || 'Erro ao executar o processamento automático de prazos.'
+    });
+  }
+}
+
+router.get(CRON_DEADLINE_PATHS, handleCronProcessOperationalTaskDeadlines);
+router.post(CRON_DEADLINE_PATHS, handleCronProcessOperationalTaskDeadlines);
 
 export default router;
 

@@ -82,6 +82,16 @@ export interface CommunicationTemplateConfig {
   templateText: string;
 }
 
+export const RAITZ_RECRUITMENT_FORM_URL =
+  'https://forms.office.com/Pages/ResponsePage.aspx?id=Rm71rDoniEuk9TsXvsiUOj06PglpGvNGh0Rz9gqwUHBUREkxQlo1WFlBWVVDNFI5TU9PNlJQVzZCMC4u';
+
+export function buildRaitzRecruitmentMessage(role?: string): string {
+  const vacancy = role && role.trim() ? role.trim() : 'Auxiliar de Produção';
+  return `Olá \n\nSomos da empresa Raitz Resende, recebemos o seu currículo para vaga de ${vacancy} e estamos felizes em saber que você tem interesse em fazer parte do nosso time.\n\npedimos por gentileza que preencha o link abaixo:\n\n${RAITZ_RECRUITMENT_FORM_URL}\n\nApós o preenchimento do link peço por gentileza que aguarde, retornaremos o contato em breve.\n\nBoa sorte!`;
+}
+
+export const DEFAULT_RAITZ_RECRUITMENT_MESSAGE = buildRaitzRecruitmentMessage('Auxiliar de Produção');
+
 export const COMMUNICATION_TEMPLATES: Record<CommunicationType, CommunicationTemplateConfig> = {
   documents_pending: {
     id: 'documents_pending',
@@ -148,6 +158,13 @@ Pedimos que acesse seu link de admissão e verifique se todos os documentos soli
 [LINK]`
   },
 
+  recruitment_form: {
+    id: 'recruitment_form',
+    title: 'Formulário Raitz Resende',
+    description: 'Mensagem de boas-vindas com o link do formulário inicial para vaga de Auxiliar de Produção.',
+    templateText: DEFAULT_RAITZ_RECRUITMENT_MESSAGE
+  },
+
   general_notice: {
     id: 'general_notice',
     title: 'Aviso geral',
@@ -165,13 +182,19 @@ export interface RenderTemplateOptions {
   inviteUrl: string;
   documentName?: string;
   rejectionReason?: string;
+  role?: string;
 }
 
 /**
  * Renderiza o template de mensagem substituindo placeholders de forma segura.
- * Suporta [NOME], [LINK], [DOCUMENTO], [MOTIVO].
+ * Suporta [NOME], [LINK], [DOCUMENTO], [MOTIVO], [CARGO].
  */
 export function renderTemplate(template: string, options: RenderTemplateOptions): string {
+  // Se for o template exato de recrutamento sem placeholders, preserva exatamente a formatação original
+  if (template === DEFAULT_RAITZ_RECRUITMENT_MESSAGE) {
+    return template;
+  }
+
   let text = template;
 
   // Substitui [NOME]
@@ -180,6 +203,9 @@ export function renderTemplate(template: string, options: RenderTemplateOptions)
 
   // Substitui [LINK]
   text = text.replace(/\[LINK\]/g, options.inviteUrl || '');
+
+  // Substitui [CARGO]
+  text = text.replace(/\[CARGO\]/g, options.role?.trim() || 'Auxiliar de Produção');
 
   // Substitui [DOCUMENTO] se presente
   if (options.documentName) {

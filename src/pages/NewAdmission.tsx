@@ -49,6 +49,7 @@ export const NewAdmission: React.FC = () => {
   const [serverError, setServerError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableJobPositions, setAvailableJobPositions] = useState<JobPosition[]>([]);
+  const [openWithRecruitmentForm, setOpenWithRecruitmentForm] = useState<boolean>(true);
   
   // Estados para o Bloco 3.4 — Prévia automática do checklist por cargo
   const [selectedCargoDocs, setSelectedCargoDocs] = useState<JobPositionDocument[]>([]);
@@ -616,6 +617,24 @@ export const NewAdmission: React.FC = () => {
             )}
           </div>
 
+          {/* Opção de Mensagem de Boas-vindas / Formulário após cadastro */}
+          <label className="flex items-start gap-3 p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl cursor-pointer hover:bg-emerald-50 transition-colors">
+            <input
+              type="checkbox"
+              checked={openWithRecruitmentForm}
+              onChange={(e) => setOpenWithRecruitmentForm(e.target.checked)}
+              className="mt-0.5 w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+            />
+            <div className="text-xs">
+              <span className="font-semibold text-slate-800 block">
+                Abrir opção de envio da mensagem do formulário (Raitz Resende) após cadastrar
+              </span>
+              <span className="text-[11px] text-slate-600 block mt-0.5">
+                Permite enviar imediatamente por WhatsApp, E-mail ou copiar a mensagem com o link do formulário de inscrição.
+              </span>
+            </div>
+          </label>
+
           {/* Nota de conformidade LGPD */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-start gap-3">
             <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
@@ -653,6 +672,7 @@ export const NewAdmission: React.FC = () => {
       <InviteModal
         admission={createdAdmission}
         isOpen={!!createdAdmission}
+        initialTab={openWithRecruitmentForm ? 'recruitment_form' : 'portal'}
         onClose={() => {
           setCreatedAdmission(null);
           navigate('/dashboard');

@@ -126,8 +126,9 @@ export const CommunicationHubPage: React.FC = () => {
 
       const data = await safeFetchJson<CommunicationHubResponse>(`/api/communications?${q.toString()}`);
       if (data) {
-        setItems(Array.isArray(data.items) ? data.items : []);
-        setTotal(data.total ?? (Array.isArray(data.items) ? data.items.length : 0));
+        const safeItems = Array.isArray(data.items) ? data.items : [];
+        setItems(safeItems);
+        setTotal(data.total ?? safeItems.length);
         setTotalPages(data.totalPages ?? 1);
         if (data.summary) {
           setSummary({

@@ -374,10 +374,8 @@ export const ReportsPage: React.FC = () => {
           totalDocuments: 0,
           approvedDocuments: 0,
           pendingDocuments: 0,
-          rejectedDocuments: 0,
-          documentApprovalRate: 0,
-          stalledAdmissionsCount: 0,
-          criticalPendingsCount: 0
+          reviewingDocuments: 0,
+          documentApprovalRate: 0
         }} 
         reportType={reportType} 
         periodLabel={getPeriodLabel()} 

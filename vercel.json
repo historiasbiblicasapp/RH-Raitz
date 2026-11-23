@@ -15,5 +15,11 @@
       "source": "/((?!api/|auth/|assets/|favicon\\.ico|favicon\\.png|raitz-logo\\.jpg|.*\\.[a-zA-Z0-9]+$).*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/tasks/process-deadlines",
+      "schedule": "0 8 * * *"
+    }
   ]
 }

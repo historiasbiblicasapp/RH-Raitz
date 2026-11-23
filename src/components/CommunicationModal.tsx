@@ -345,7 +345,7 @@ export const CommunicationModal: React.FC<CommunicationModalProps> = ({
             <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Modelo de Mensagem
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
               {(Object.keys(COMMUNICATION_TEMPLATES) as CommunicationType[])
                 .filter(key => key !== 'general_notice')
                 .map((key) => {

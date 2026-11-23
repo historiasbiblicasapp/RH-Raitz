@@ -245,6 +245,7 @@ export const OperationalTasksPage: React.FC = () => {
 
   const summary = data?.summary || {
     total: 0,
+    active: 0,
     pending: 0,
     inProgress: 0,
     completed: 0,
@@ -253,7 +254,9 @@ export const OperationalTasksPage: React.FC = () => {
     unassigned: 0,
     myTasks: 0,
     critical: 0,
-    overdue: 0
+    overdue: 0,
+    dueSoon: 0,
+    normal: 0
   };
 
   const taskItems = Array.isArray(data?.items) ? data.items : [];

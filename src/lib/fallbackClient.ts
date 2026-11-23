@@ -1185,10 +1185,10 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
   }
 
   // 17.5 Histórico e Logs de Comunicação (Bloco 4.3 / 6.8D)
-  if (path === '/api/communications/log' && init?.method === 'POST') {
+  if (path === '/api/communications/log' && method === 'POST') {
     let bodyData: any = {};
     try {
-      bodyData = typeof init.body === 'string' ? JSON.parse(init.body) : init.body || {};
+      bodyData = typeof options?.body === 'string' ? JSON.parse(options.body) : options?.body || {};
     } catch {}
     if (!db.communicationLogs) db.communicationLogs = [];
     const newLog = {

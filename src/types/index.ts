@@ -623,7 +623,7 @@ export interface AuditLog {
 }
 
 export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent' | string;
-export type NotificationCategory = 'admission' | 'document' | 'approval' | 'task' | 'system' | 'general' | string;
+export type NotificationCategory = 'admission' | 'document' | 'approval' | 'task' | 'system' | 'general' | 'PRAZOS' | string;
 
 export interface NotificationItem {
   id: string;
@@ -825,6 +825,7 @@ export type CommunicationType =
   | 'document_approved'
   | 'reminder' 
   | 'admission_upcoming'
+  | 'recruitment_form'
   | 'general_notice';
 
 export type CommunicationChannel = 'whatsapp' | 'copy';
@@ -2257,6 +2258,11 @@ export type OperationalTaskStatus =
   | 'CANCELADA' 
   | 'BLOQUEADA';
 
+export type OperationalTaskAlertState =
+  | 'NORMAL'
+  | 'DUE_SOON'
+  | 'OVERDUE';
+
 export type OperationalTaskSourceType = 
   | 'ADMISSAO' 
   | 'ETAPA' 
@@ -2336,6 +2342,10 @@ export interface OperationalTask {
   // Prazo Operacional
   dueAt?: string | null; // Data e hora limite operacional ou null se sem prazo
   isOverdue?: boolean;
+  isDueSoon?: boolean; // Calculado dinamicamente na leitura (vencimento nas próximas 24h)
+  effectivePriority?: OperationalPriority; // Prioridade efetiva calculada dinamicamente na leitura (sem sobrescrever priority original)
+  alertState?: OperationalTaskAlertState; // Estado consolidado do prazo ('NORMAL' | 'DUE_SOON' | 'OVERDUE')
+  deadlineState?: OperationalTaskAlertState; // Alias padronizado para o estado do prazo ('NORMAL' | 'DUE_SOON' | 'OVERDUE')
 
   // Ciclo de Vida: Conclusão
   completedAt?: string;
@@ -2367,6 +2377,7 @@ export interface OperationalTask {
 
 export interface OperationalTaskSummary {
   total: number;
+  active: number;
   pending: number;
   inProgress: number;
   completed: number;
@@ -2376,23 +2387,33 @@ export interface OperationalTaskSummary {
   myTasks: number;
   critical: number;
   overdue: number;
+  dueSoon: number;
+  normal: number;
 }
 
 export interface OperationalTaskFilters {
   search?: string;
-  status?: OperationalTaskStatus | 'TODOS' | 'all';
-  priority?: OperationalPriority | 'TODAS' | 'all';
+  status?: OperationalTaskStatus | 'ATIVA' | 'ATIVAS' | 'ACTIVE' | 'TODOS' | 'TODAS' | 'all' | string;
+  situation?: OperationalTaskStatus | OperationalTaskAlertState | 'ATIVA' | 'ATIVAS' | 'ACTIVE' | 'TODOS' | 'TODAS' | 'all' | string;
+  priority?: OperationalPriority | 'TODAS' | 'TODOS' | 'all' | string;
+  effectivePriority?: OperationalPriority | 'TODAS' | 'TODOS' | 'all' | string;
   responsible?: string;
-  sourceType?: OperationalTaskSourceType | 'TODAS' | 'all';
+  responsibleUserId?: string;
+  deadlineState?: OperationalTaskAlertState | 'TODOS' | 'TODAS' | 'all' | string;
+  alertState?: OperationalTaskAlertState | 'TODOS' | 'TODAS' | 'all' | string;
+  isOverdue?: boolean | string;
+  isDueSoon?: boolean | string;
+  sourceType?: OperationalTaskSourceType | 'TODAS' | 'TODOS' | 'all' | string;
   unit?: string;
   department?: string;
   admissionId?: string;
   employeeId?: string;
-  viewMode?: 'todas' | 'minhas' | 'sem_responsavel' | 'criticas' | 'vencidas' | 'concluidas';
+  viewMode?: 'todas' | 'minhas' | 'sem_responsavel' | 'criticas' | 'vencidas' | 'proximas' | 'due_soon' | 'ativas' | 'concluidas' | string;
   page?: number;
   limit?: number;
-  sortBy?: 'priority' | 'dueAt' | 'createdAt' | 'updatedAt' | 'status' | 'title';
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: 'priority' | 'dueAt' | 'createdAt' | 'updatedAt' | 'status' | 'title' | string;
+  sortOrder?: 'asc' | 'desc' | string;
+  nowMs?: number;
 }
 
 export interface OperationalTasksResponse {
@@ -2409,6 +2430,7 @@ export interface OperationalTasksResponse {
     departments: string[];
     statuses: { key: string; label: string }[];
     priorities: string[];
+    deadlineStates?: { key: string; label: string }[];
   };
 }
 
