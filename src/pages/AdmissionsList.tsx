@@ -638,7 +638,7 @@ export const AdmissionsList: React.FC = () => {
 
                     {/* CPF Mascarado */}
                     <td className="py-3.5 px-4 font-mono text-slate-600 font-medium">
-                      {(adm.employee as any).cpfMasked || maskCPF(adm.employee.cpf)}
+                      {(adm.employee as any).cpfMasked || (adm.employee.cpf ? maskCPF(adm.employee.cpf) : 'Não informado')}
                     </td>
 
                     {/* Setor e Unidade */}
@@ -649,7 +649,9 @@ export const AdmissionsList: React.FC = () => {
 
                     {/* Data Prevista */}
                     <td className="py-3.5 px-4 text-slate-700">
-                      {new Date(adm.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                      {adm.employee.expectedStartDate
+                        ? new Date(adm.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')
+                        : 'A definir'}
                     </td>
 
                     {/* Progresso com barra */}
@@ -769,7 +771,7 @@ export const AdmissionsList: React.FC = () => {
                     <h3 className="text-sm font-bold text-slate-900">{adm.employee.name}</h3>
                     <p className="text-xs text-slate-500">{adm.employee.role} • {adm.employee.department}</p>
                     <p className="text-[11px] font-mono text-slate-400 mt-0.5">
-                      CPF: {(adm.employee as any).cpfMasked || maskCPF(adm.employee.cpf)}
+                      CPF: {(adm.employee as any).cpfMasked || (adm.employee.cpf ? maskCPF(adm.employee.cpf) : 'Não informado')}
                     </p>
                   </div>
                   <StatusBadge status={adm.status} size="sm" />
@@ -797,7 +799,9 @@ export const AdmissionsList: React.FC = () => {
 
                 <div className="flex items-center justify-between text-xs pt-1">
                   <span className="text-slate-400 text-[11px]">
-                    Previsto: {new Date(adm.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                    Previsto: {adm.employee.expectedStartDate
+                      ? new Date(adm.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')
+                      : 'A definir'}
                   </span>
 
                   <div className="flex items-center gap-1.5 flex-wrap">

@@ -1869,37 +1869,42 @@ router.post('/admissions', (req: Request, res: Response) => {
     const user = getAuthenticatedUser(req);
     const { 
       name, 
-      cpf, 
-      birthDate, 
+      cpf = '', 
+      birthDate = '', 
       phone, 
-      email, 
-      role, 
+      email = '', 
+      role = '', 
       jobPositionId,
-      department, 
-      unit, 
-      expectedStartDate 
+      department = '', 
+      unit = '', 
+      expectedStartDate = '' 
     } = req.body;
 
-    // Validações essenciais
-    if (!name || !cpf || !birthDate || !phone || !email || !role || !department || !unit || !expectedStartDate) {
-      return res.status(400).json({ error: 'Todos os campos são obrigatórios.' });
+    // Validações essenciais: apenas Nome e Telefone são obrigatórios
+    if (!name || typeof name !== 'string' || name.trim().length < 3) {
+      return res.status(400).json({ error: 'Informe o nome completo (mínimo 3 caracteres).' });
     }
 
-    if (!validateCPF(cpf)) {
+    const cleanPhone = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+    if (cleanPhone.length < 10) {
+      return res.status(400).json({ error: 'Informe um telefone válido com DDD.' });
+    }
+
+    if (cpf && typeof cpf === 'string' && cpf.replace(/\D/g, '').length > 0 && !validateCPF(cpf)) {
       return res.status(400).json({ error: 'O CPF informado é inválido.' });
     }
 
     const newAdmission = db.createAdmission({
-      name,
-      cpf,
-      birthDate,
-      phone,
-      email,
-      role,
+      name: name.trim(),
+      cpf: typeof cpf === 'string' ? cpf : '',
+      birthDate: typeof birthDate === 'string' ? birthDate : '',
+      phone: typeof phone === 'string' ? phone.trim() : cleanPhone,
+      email: typeof email === 'string' ? email.trim() : '',
+      role: typeof role === 'string' && role.trim() ? role.trim() : 'Auxiliar de Produção',
       jobPositionId,
-      department,
-      unit,
-      expectedStartDate
+      department: typeof department === 'string' && department.trim() ? department.trim() : 'Produção',
+      unit: typeof unit === 'string' && unit.trim() ? unit.trim() : 'Matriz',
+      expectedStartDate: typeof expectedStartDate === 'string' ? expectedStartDate : ''
     }, user.name);
 
     return res.status(201).json(newAdmission);

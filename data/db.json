@@ -128153,6 +128153,74 @@
   ],
   "auditLogs": [
     {
+      "id": "audit-24f9c0c7-d92b-4389-ad91-c93509893331",
+      "timestamp": "2026-11-23T19:37:12.207Z",
+      "userName": "Mariana Silveira",
+      "action": "Admissão excluída permanentemente pelo RH",
+      "details": "O cadastro da admissão de Teste Candidato Simples (Auxiliar de Produção) e seus respectivos documentos foram excluídos por Mariana Silveira."
+    },
+    {
+      "id": "audit-a8e198e6-7ca9-472f-be83-fabdd9cc524d",
+      "timestamp": "2026-11-23T19:37:11.999Z",
+      "userName": "Sistema",
+      "action": "Convite gerado",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "employeeName": "Teste Candidato Simples",
+      "details": "Token de acesso criptografado gerado com validade até 23/12/2026"
+    },
+    {
+      "id": "audit-990d28fd-5dc7-434b-98b1-e89a7a860dc7",
+      "timestamp": "2026-11-23T19:37:11.983Z",
+      "userName": "Mariana Silveira",
+      "action": "admission_document_checklist_created",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "employeeName": "Teste Candidato Simples",
+      "details": "Checklist da admissão gerado para o cargo \"Auxiliar de Produção\": 0 documentos (0 obrigatórios, 0 opcionais)."
+    },
+    {
+      "id": "audit-bb5a3ea7-1b29-4570-abe6-cd8b602d5384",
+      "timestamp": "2026-11-23T19:37:11.983Z",
+      "userName": "Mariana Silveira",
+      "action": "admission_process_step_completed",
+      "entityType": "admission_process_step",
+      "entityId": "step-snap-279fb2c2-5f38-4a7f-9614-b80d9b394956",
+      "entityName": "Cadastro da Admissão",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "employeeName": "Teste Candidato Simples",
+      "details": "Etapa 1 \"Cadastro da Admissão\" concluída na abertura do processo."
+    },
+    {
+      "id": "audit-9aa85a75-4200-4da0-a6e2-d22150347673",
+      "timestamp": "2026-11-23T19:37:11.983Z",
+      "userName": "Mariana Silveira",
+      "action": "admission_process_started",
+      "entityType": "admission_process",
+      "entityId": "proc-ver-1",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "employeeName": "Teste Candidato Simples",
+      "details": "Processo admissional iniciado com a Versão 1 (6 etapas no snapshot)."
+    },
+    {
+      "id": "audit-d72c4196-73f2-4b0f-afd5-563e853a5e7c",
+      "timestamp": "2026-11-23T19:37:11.983Z",
+      "userName": "Mariana Silveira",
+      "action": "approval_created",
+      "entityType": "admission_approval",
+      "entityId": "appr-adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "employeeName": "Teste Candidato Simples",
+      "details": "Aprovação interna (GESTOR) cadastrada no fluxo como PENDENTE sob responsabilidade de GESTOR."
+    },
+    {
+      "id": "audit-553af6ab-57b4-47f8-b988-c80a6340be50",
+      "timestamp": "2026-11-23T19:37:11.983Z",
+      "userName": "Mariana Silveira",
+      "action": "RH criou uma nova admissão",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "employeeName": "Teste Candidato Simples",
+      "details": "Admissão cadastrada para o cargo Auxiliar de Produção (Produção - Matriz)"
+    },
+    {
       "id": "audit-5100f9e9-68e8-4c1c-8d13-1616f6c804d6",
       "timestamp": "2026-10-09T10:29:19.465Z",
       "userName": "Sistema (Cron)",
@@ -186838,6 +186906,19 @@
     }
   ],
   "notifications": [
+    {
+      "id": "notif-cee7cc3c-385b-4f1b-9ff3-6f08ed54770b",
+      "timestamp": "2026-11-23T19:37:11.999Z",
+      "createdAt": "2026-11-23T19:37:11.999Z",
+      "read": false,
+      "title": "Nova admissão criada",
+      "message": "Admissão de Teste Candidato Simples (Auxiliar de Produção) foi criada com sucesso com 0 documentos no checklist.",
+      "type": "admission_created",
+      "admissionId": "adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "link": "/admissoes/adm-c989623d-a52d-4821-b65e-aac6c262e4de",
+      "category": "general",
+      "priority": "normal"
+    },
     {
       "id": "notif-b747931a-fba0-4f01-9f2f-f2a8c1a8200f",
       "timestamp": "2026-10-07T12:56:01.309Z",

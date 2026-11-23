@@ -3415,18 +3415,20 @@ export class Database {
   }
 
   createAdmission(
-    employeeData: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'> & { jobPositionId?: string }, 
+    employeeData: Partial<Omit<Employee, 'id' | 'createdAt' | 'updatedAt'>> & { name: string; phone: string; jobPositionId?: string }, 
     createdByUserName: string
   ): Admission {
-    // Validação de CPF duplicado em admissões ativas
-    const cleanCPF = employeeData.cpf.replace(/\D/g, '');
-    const duplicate = this.data.admissions.find(a => 
-      a.status !== 'Cancelada' && 
-      a.employee.cpf.replace(/\D/g, '') === cleanCPF
-    );
+    // Validação de CPF duplicado em admissões ativas (somente quando CPF for informado)
+    const cleanCPF = (employeeData.cpf || '').replace(/\D/g, '');
+    if (cleanCPF.length > 0) {
+      const duplicate = this.data.admissions.find(a => 
+        a.status !== 'Cancelada' && 
+        (a.employee.cpf || '').replace(/\D/g, '') === cleanCPF
+      );
 
-    if (duplicate) {
-      throw new Error(`Já existe uma admissão ativa (${duplicate.status}) cadastrada para este CPF.`);
+      if (duplicate) {
+        throw new Error(`Já existe uma admissão ativa (${duplicate.status}) cadastrada para este CPF.`);
+      }
     }
 
     const employeeId = 'emp-' + crypto.randomUUID();
@@ -3436,7 +3438,15 @@ export class Database {
     const employee: Employee = {
       id: employeeId,
       ...employeeData,
+      name: employeeData.name.trim(),
+      phone: employeeData.phone.trim(),
       cpf: cleanCPF,
+      birthDate: employeeData.birthDate?.trim() || '',
+      email: employeeData.email?.trim() || '',
+      role: employeeData.role?.trim() || 'Auxiliar de Produção',
+      department: employeeData.department?.trim() || 'Produção',
+      unit: employeeData.unit?.trim() || 'Matriz',
+      expectedStartDate: employeeData.expectedStartDate?.trim() || '',
       createdAt: now,
       updatedAt: now
     };

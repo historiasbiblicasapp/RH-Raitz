@@ -747,7 +747,7 @@ export const AdmissionDetails: React.FC = () => {
                 <span>•</span>
                 <span>{admission.employee.unit}</span>
                 <span>•</span>
-                <span>Início previsto: <strong>{new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}</strong></span>
+                <span>Início previsto: <strong>{admission.employee.expectedStartDate ? new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR') : 'A definir'}</strong></span>
               </div>
             </div>
           </div>
@@ -1128,13 +1128,17 @@ export const AdmissionDetails: React.FC = () => {
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">CPF (Protegido LGPD)</span>
-              <p className="font-bold text-slate-900 font-mono text-sm">{maskCPF(admission.employee.cpf)}</p>
+              <p className="font-bold text-slate-900 font-mono text-sm">
+                {admission.employee.cpf ? maskCPF(admission.employee.cpf) : 'Não informado'}
+              </p>
             </div>
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Data de Nascimento</span>
               <p className="font-bold text-slate-900 text-sm">
-                {new Date(admission.employee.birthDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                {admission.employee.birthDate
+                  ? new Date(admission.employee.birthDate + 'T00:00:00').toLocaleDateString('pt-BR')
+                  : 'Não informada'}
               </p>
             </div>
 
@@ -1145,28 +1149,32 @@ export const AdmissionDetails: React.FC = () => {
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">E-mail</span>
-              <p className="font-bold text-slate-900 text-sm truncate">{admission.employee.email}</p>
+              <p className="font-bold text-slate-900 text-sm truncate">
+                {admission.employee.email || 'Não informado'}
+              </p>
             </div>
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Cargo Contratado</span>
-              <p className="font-bold text-slate-900 text-sm">{admission.employee.role}</p>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.role || 'A definir'}</p>
             </div>
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Setor / Departamento</span>
-              <p className="font-bold text-slate-900 text-sm">{admission.employee.department}</p>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.department || 'A definir'}</p>
             </div>
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Unidade / Filial</span>
-              <p className="font-bold text-slate-900 text-sm">{admission.employee.unit}</p>
+              <p className="font-bold text-slate-900 text-sm">{admission.employee.unit || 'A definir'}</p>
             </div>
 
             <div className="space-y-1">
               <span className="text-slate-400 font-semibold block text-[11px] uppercase tracking-wider">Data Prevista de Início</span>
               <p className="font-bold text-slate-900 text-sm">
-                {new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                {admission.employee.expectedStartDate
+                  ? new Date(admission.employee.expectedStartDate + 'T00:00:00').toLocaleDateString('pt-BR')
+                  : 'A definir'}
               </p>
             </div>
           </div>

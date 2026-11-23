@@ -551,12 +551,16 @@ export const EmployeePortal: React.FC = () => {
               </div>
               <div className="flex justify-between pt-2">
                 <span className="text-slate-500">CPF:</span>
-                <span className="font-bold text-slate-900 font-mono">{formatCPF(admission.employee.cpf)}</span>
+                <span className="font-bold text-slate-900 font-mono">
+                  {admission.employee.cpf ? formatCPF(admission.employee.cpf) : 'Não informado'}
+                </span>
               </div>
               <div className="flex justify-between pt-2">
                 <span className="text-slate-500">Data de nascimento:</span>
                 <span className="font-semibold text-slate-900">
-                  {new Date(admission.employee.birthDate + 'T00:00:00').toLocaleDateString('pt-BR')}
+                  {admission.employee.birthDate
+                    ? new Date(admission.employee.birthDate + 'T00:00:00').toLocaleDateString('pt-BR')
+                    : 'Não informada'}
                 </span>
               </div>
               <div className="flex justify-between pt-2">
@@ -565,7 +569,9 @@ export const EmployeePortal: React.FC = () => {
               </div>
               <div className="flex justify-between pt-2">
                 <span className="text-slate-500">E-mail:</span>
-                <span className="font-semibold text-slate-900 truncate max-w-[180px]">{admission.employee.email}</span>
+                <span className="font-semibold text-slate-900 truncate max-w-[180px]">
+                  {admission.employee.email || 'Não informado'}
+                </span>
               </div>
               <div className="flex justify-between pt-2">
                 <span className="text-slate-500">Cargo:</span>
