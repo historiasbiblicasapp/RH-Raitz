@@ -1,5 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Response } from 'express';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { Response } from 'express';
 
 // Configuração de ambiente do Supabase
 const supabaseUrl = process.env.SUPABASE_URL || '';

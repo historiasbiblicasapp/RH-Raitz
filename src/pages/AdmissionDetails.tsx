@@ -62,6 +62,7 @@ import { ApprovalDecisionModal } from '../components/ApprovalDecisionModal.tsx';
 import { UnifiedHistoryTimeline } from '../components/history/UnifiedHistoryTimeline.tsx';
 import { AssignResponsibleModal } from '../components/AssignResponsibleModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
+import { buildInviteUrl } from '../lib/appUrl.ts';
 
 type ActiveTab = 'resumo' | 'etapas' | 'aprovacao' | 'checklist' | 'tarefas' | 'dados' | 'documentos' | 'pendencias' | 'prazos' | 'historico' | 'convite';
 
@@ -272,7 +273,7 @@ export const AdmissionDetails: React.FC = () => {
 
   const handleCopyLink = () => {
     if (!admission) return;
-    const url = `${window.location.origin}/convite/${admission.inviteToken}`;
+    const url = buildInviteUrl(admission.inviteToken);
     navigator.clipboard.writeText(url);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
@@ -396,7 +397,7 @@ export const AdmissionDetails: React.FC = () => {
     );
   }
 
-  const inviteUrl = `${window.location.origin}/convite/${admission.inviteToken}`;
+  const inviteUrl = buildInviteUrl(admission.inviteToken);
   const maskedToken = admission.inviteToken ? `${admission.inviteToken.slice(0, 7)}...${admission.inviteToken.slice(-4)}` : '';
 
   // Cálculos de documentos

@@ -61,7 +61,7 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 </html>`);
   }
 
-  res.status(500).json({ error: 'Não foi possível abrir o documento. Tente novamente.' });
+  res.status(500).json({ error: err?.message || 'Erro interno no servidor.' });
 });
 
 export default app;

@@ -1,10 +1,10 @@
-import express, { Request, Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { db, STORAGE_DIR } from './db.ts';
-import { NotificationFilterOptions } from '../src/types/index.ts';
+import type { NotificationFilterOptions } from '../src/types/index.ts';
 import { maskCPF, validateCPF } from '../src/lib/cpf.ts';
 import { generateSupabaseSignedUrl, isSupabaseStorageEnabled, renderFriendlyDocumentError } from './storage.ts';
 
@@ -13,7 +13,20 @@ const router = express.Router();
 // Configuração do Multer com restrições de segurança LGPD e tipos permitidos
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, STORAGE_DIR);
+    try {
+      if (!fs.existsSync(STORAGE_DIR)) {
+        fs.mkdirSync(STORAGE_DIR, { recursive: true });
+      }
+      cb(null, STORAGE_DIR);
+    } catch {
+      const tmpStorage = '/tmp/admissao_data/storage';
+      try {
+        if (!fs.existsSync(tmpStorage)) {
+          fs.mkdirSync(tmpStorage, { recursive: true });
+        }
+      } catch {}
+      cb(null, tmpStorage);
+    }
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -1820,7 +1833,7 @@ router.get('/invites', (_req: Request, res: Response) => {
 router.post('/admissions/:id/invite/regenerate', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   try {
-    const admission = db.regenerateInvite(req.params.id, user.name);
+    const admission = db.regenerateInvite(req.params.id, user?.name || 'RH');
     return res.json({ 
       success: true, 
       admission, 
@@ -1838,7 +1851,7 @@ router.put('/admissions/:id/invite', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   const { extendDays, newExpiresAt, phone, email, unrevoke } = req.body;
   try {
-    const admission = db.updateInvite(req.params.id, { extendDays, newExpiresAt, phone, email, unrevoke }, user.name);
+    const admission = db.updateInvite(req.params.id, { extendDays, newExpiresAt, phone, email, unrevoke }, user?.name || 'RH');
     return res.json({ 
       success: true, 
       admission, 
@@ -1853,7 +1866,7 @@ router.put('/admissions/:id/invite', (req: Request, res: Response) => {
 router.post('/admissions/:id/invite/revoke', (req: Request, res: Response) => {
   const user = getAuthenticatedUser(req);
   try {
-    const admission = db.revokeInvite(req.params.id, user.name);
+    const admission = db.revokeInvite(req.params.id, user?.name || 'RH');
     return res.json({ 
       success: true, 
       admission, 
@@ -1878,7 +1891,7 @@ router.post('/admissions', (req: Request, res: Response) => {
       department = '', 
       unit = '', 
       expectedStartDate = '' 
-    } = req.body;
+    } = req.body || {};
 
     // Validações essenciais: apenas Nome e Telefone são obrigatórios
     if (!name || typeof name !== 'string' || name.trim().length < 3) {
@@ -1905,7 +1918,7 @@ router.post('/admissions', (req: Request, res: Response) => {
       department: typeof department === 'string' && department.trim() ? department.trim() : 'Produção',
       unit: typeof unit === 'string' && unit.trim() ? unit.trim() : 'Matriz',
       expectedStartDate: typeof expectedStartDate === 'string' ? expectedStartDate : ''
-    }, user.name);
+    }, user?.name || 'RH');
 
     return res.status(201).json(newAdmission);
   } catch (error: any) {
@@ -1920,7 +1933,7 @@ router.post('/admissions/:id/invite-whatsapp', (req: Request, res: Response) => 
     return res.status(404).json({ error: 'Admissão não encontrada.' });
   }
 
-  db.markInviteSentWhatsApp(admission.id, user.name);
+  db.markInviteSentWhatsApp(admission.id, user?.name || 'RH');
   return res.json({ success: true, message: 'Status do envio atualizado com sucesso.' });
 });
 

@@ -73,7 +73,7 @@ export async function safeFetchJson<T = any>(
         try {
           data = JSON.parse(text);
         } catch {
-          // Se for HTML ou texto não JSON em erro
+          // Se for HTML ou texto não JSON em erro (ex: Vercel FUNCTION_INVOCATION_FAILED ou host estático)
           if (!res.ok || isHtml) {
             const fallback = handleFallbackApiRoute(url, mergedInit);
             if (fallback !== undefined) {
@@ -88,8 +88,18 @@ export async function safeFetchJson<T = any>(
 
             const cleanSnippet = text.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
             let userMsg = `O servidor respondeu com status ${res.status}.`;
-            if (cleanSnippet.length > 5 && !cleanSnippet.toLowerCase().includes('the page') && !cleanSnippet.toLowerCase().includes('action required')) {
-              userMsg = cleanSnippet.slice(0, 120);
+            const lowerSnippet = cleanSnippet.toLowerCase();
+            if (
+              lowerSnippet.includes('a server error has occurred') ||
+              lowerSnippet.includes('function_invocation_failed')
+            ) {
+              userMsg = 'Erro interno no servidor ao processar a solicitação. Tente novamente em instantes.';
+            } else if (
+              cleanSnippet.length > 5 &&
+              !lowerSnippet.includes('the page') &&
+              !lowerSnippet.includes('action required')
+            ) {
+              userMsg = cleanSnippet.slice(0, 140);
             } else {
               userMsg = 'Serviço temporariamente indisponível. Por favor, aguarde alguns instantes e tente novamente.';
             }
@@ -100,9 +110,18 @@ export async function safeFetchJson<T = any>(
       }
 
       if (!res.ok) {
-        const fallback = handleFallbackApiRoute(url, mergedInit);
-        if (fallback !== undefined) {
-          return fallback as T;
+        // Apenas utiliza fallback para falhas de infraestrutura (>= 500) ou rota de API ausente em deploy estático,
+        // preservando erros reais de negócio em JSON (400, 401, 403, 404, 409) retornados pelo backend Express.
+        const isMissingApiRoute =
+          res.status === 404 &&
+          (!data?.error || (typeof data.error === 'string' && data.error.includes('não encontrada') && data.error.includes('Rota de API')));
+        const isInfraError = res.status >= 500;
+
+        if (isInfraError || isMissingApiRoute) {
+          const fallback = handleFallbackApiRoute(url, mergedInit);
+          if (fallback !== undefined) {
+            return fallback as T;
+          }
         }
 
         let errMsg = `Erro no servidor (${res.status}).`;

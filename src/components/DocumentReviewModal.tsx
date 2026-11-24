@@ -28,6 +28,7 @@ import {
 import { AdmissionDocument, Admission, REJECTION_REASONS } from '../types/index.ts';
 import { StatusBadge } from './StatusBadge.tsx';
 import { normalizeBrazilianPhone, generateWhatsAppLink } from '../lib/communication.ts';
+import { buildInviteUrl } from '../lib/appUrl.ts';
 
 interface DocumentReviewModalProps {
   document: AdmissionDocument | null;
@@ -72,7 +73,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const phoneValidation = normalizeBrazilianPhone(admission?.employee.phone);
   const firstName = admission?.employee.name.split(' ')[0] || 'Colaborador';
   const inviteUrl = typeof window !== 'undefined' && admission?.inviteToken 
-    ? `${window.location.origin}/convite/${admission.inviteToken}` 
+    ? buildInviteUrl(admission.inviteToken) 
     : '';
 
   // Efeito para registrar auditoria de visualização e resetar controles ao abrir

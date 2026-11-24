@@ -18,6 +18,13 @@ import { StatusBadge } from './StatusBadge.tsx';
 import { MobileSimulatorModal } from './MobileSimulatorModal.tsx';
 import { QuickMessageSender } from './QuickMessageSender.tsx';
 import { safeFetchJson } from '../lib/api.ts';
+import {
+  buildInviteUrl,
+  getSavedPublicUrl,
+  isPrivatePreviewUrl,
+  setSavedPublicUrl,
+  type SystemUrlConfig
+} from '../lib/appUrl.ts';
 
 interface InviteModalProps {
   admission: Admission | null;
@@ -40,23 +47,20 @@ export const InviteModal: React.FC<InviteModalProps> = ({
   const [showSimulator, setShowSimulator] = useState(false);
   const [showDomainConfig, setShowDomainConfig] = useState(false);
 
-  const [systemConfig, setSystemConfig] = useState<{
-    appUrl: string;
-    detectedUrl: string;
-    envUrl: string;
-    isLocalhost: boolean;
-  } | null>(null);
-
-  const [customBaseUrl, setCustomBaseUrl] = useState<string>('');
+  const [systemConfig, setSystemConfig] = useState<SystemUrlConfig | null>(null);
+  const [customBaseUrl, setCustomBaseUrl] = useState<string>(() => getSavedPublicUrl());
 
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
-      safeFetchJson<{ appUrl: string; detectedUrl: string; envUrl: string; isLocalhost: boolean }>('/api/system-config')
+      const saved = getSavedPublicUrl();
+      if (saved) setCustomBaseUrl(saved);
+
+      safeFetchJson<SystemUrlConfig>('/api/system-config')
         .then(data => {
           if (data) {
             setSystemConfig(data);
-            if (data.envUrl && !data.envUrl.includes('localhost')) {
+            if (!saved && data.envUrl && !isPrivatePreviewUrl(data.envUrl)) {
               setCustomBaseUrl(data.envUrl);
             }
           }
@@ -69,17 +73,16 @@ export const InviteModal: React.FC<InviteModalProps> = ({
 
   if (!isOpen || !admission) return null;
 
-  const isLocalhost = Boolean(
-    window.location.hostname === 'localhost' || 
-    window.location.hostname === '127.0.0.1' ||
+  const isPrivateHost = Boolean(
+    isPrivatePreviewUrl(window.location.origin) ||
     systemConfig?.isLocalhost
   );
 
   // Calcula a URL efetiva para o convite
-  const effectiveOrigin = customBaseUrl.trim() || 
-    (systemConfig?.envUrl && !systemConfig.envUrl.includes('localhost') ? systemConfig.envUrl : window.location.origin);
-  
-  const inviteUrl = `${effectiveOrigin.replace(/\/$/, '')}/convite/${admission.inviteToken}`;
+  const effectiveOrigin = customBaseUrl.trim() ||
+    (systemConfig?.envUrl && !isPrivatePreviewUrl(systemConfig.envUrl) ? systemConfig.envUrl : window.location.origin);
+
+  const inviteUrl = buildInviteUrl(admission.inviteToken, customBaseUrl, systemConfig);
   const localRelativeUrl = `/convite/${admission.inviteToken}`;
   const firstName = admission.employee.name.split(' ')[0];
 
@@ -280,8 +283,8 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                   </div>
                 </div>
 
-                {/* Aviso inteligente caso esteja em localhost ou precise de domínio público */}
-                {isLocalhost && !customBaseUrl && (
+                {/* Aviso inteligente caso esteja em localhost/ais-dev ou precise de domínio público */}
+                {isPrivateHost && !customBaseUrl && (
                   <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 flex items-start gap-2.5 text-xs text-amber-900">
                     <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                     <div className="flex-1">
@@ -289,7 +292,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                         Aviso para envio por WhatsApp em Celular Externo:
                       </p>
                       <p className="text-amber-800 mt-0.5 text-[11px]">
-                        Como o sistema está rodando localmente (<code>localhost</code>), celulares externos não conseguem se conectar diretamente a este computador (o que gera a mensagem de erro/dinossauro no navegador móvel).
+                        O endereço atual (<code>{window.location.hostname.includes('ais-dev-') ? 'ais-dev (ambiente privado)' : 'localhost'}</code>) exige sessão do desenvolvedor e não abre no celular de candidatos externos. Para testar aqui, use o Simulador; para enviar a funcionários, configure a URL pública publicada.
                       </p>
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
@@ -321,15 +324,21 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                     <div className="flex items-center gap-2">
                       <input
                         type="url"
-                        placeholder="https://seu-dominio.com ou https://meu-rh.run.app"
+                        placeholder="https://seu-dominio.vercel.app"
                         value={customBaseUrl}
-                        onChange={(e) => setCustomBaseUrl(e.target.value)}
+                        onChange={(e) => {
+                          setCustomBaseUrl(e.target.value);
+                          setSavedPublicUrl(e.target.value);
+                        }}
                         className="flex-1 bg-white border border-slate-300 text-xs rounded-lg px-3 py-2 text-slate-800 focus:outline-blue-500"
                       />
                       {customBaseUrl && (
                         <button
                           type="button"
-                          onClick={() => setCustomBaseUrl('')}
+                          onClick={() => {
+                            setCustomBaseUrl('');
+                            setSavedPublicUrl('');
+                          }}
                           className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1"
                         >
                           Limpar
@@ -337,7 +346,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                       )}
                     </div>
                     <p className="text-[11px] text-slate-500">
-                      Insira o link onde sua aplicação está publicada na web para que colaboradores consigam abrir de qualquer celular.
+                      Insira o link público da aplicação publicada para que colaboradores consigam abrir de qualquer celular.
                     </p>
                   </div>
                 )}

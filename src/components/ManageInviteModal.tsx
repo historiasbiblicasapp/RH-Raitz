@@ -15,9 +15,18 @@ import {
   KeyRound,
   MessageCircle,
   HelpCircle,
-  RefreshCw
+  RefreshCw,
+  Globe
 } from 'lucide-react';
 import { Admission } from '../types/index.ts';
+import { safeFetchJson } from '../lib/api.ts';
+import {
+  buildInviteUrl,
+  getSavedPublicUrl,
+  isPrivatePreviewUrl,
+  setSavedPublicUrl,
+  type SystemUrlConfig
+} from '../lib/appUrl.ts';
 
 interface ManageInviteModalProps {
   admission: Admission;
@@ -37,12 +46,30 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [extendDays, setExtendDays] = useState<number>(15);
+  const [systemConfig, setSystemConfig] = useState<SystemUrlConfig | null>(null);
+  const [customBaseUrl, setCustomBaseUrl] = useState<string>(() => getSavedPublicUrl());
+  const [showDomainConfig, setShowDomainConfig] = useState(false);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const saved = getSavedPublicUrl();
+    if (saved) setCustomBaseUrl(saved);
+    safeFetchJson<SystemUrlConfig>('/api/system-config')
+      .then((cfg) => {
+        if (cfg) {
+          setSystemConfig(cfg);
+          if (!saved && cfg.envUrl && !isPrivatePreviewUrl(cfg.envUrl)) {
+            setCustomBaseUrl(cfg.envUrl);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const origin = window.location.origin;
-  const inviteUrl = `${origin}/convite/${admission.inviteToken}`;
+  const isPrivateHost = Boolean(isPrivatePreviewUrl(window.location.origin) || systemConfig?.isLocalhost);
+  const inviteUrl = buildInviteUrl(admission.inviteToken, customBaseUrl, systemConfig);
   const isExpired = new Date(admission.inviteExpiresAt).getTime() < Date.now();
   const isRevoked = !!admission.inviteRevoked;
 
@@ -59,12 +86,9 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
     try {
       setLoading(true);
       setActionMessage(null);
-      const res = await fetch(`/api/admissions/${admission.id}/invite/regenerate`, {
+      const data = await safeFetchJson<{ admission: Admission }>(`/api/admissions/${admission.id}/invite/regenerate`, {
         method: 'POST'
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao gerar novo convite.');
-      
       setActionMessage({ type: 'success', text: 'Novo token e link de convite gerados com sucesso!' });
       onUpdate(data.admission);
     } catch (err: any) {
@@ -78,14 +102,11 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
     try {
       setLoading(true);
       setActionMessage(null);
-      const res = await fetch(`/api/admissions/${admission.id}/invite`, {
+      const data = await safeFetchJson<{ admission: Admission }>(`/api/admissions/${admission.id}/invite`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ extendDays: days, unrevoke: true })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Erro ao prorrogar convite.');
-
       setActionMessage({ type: 'success', text: `Validade prorrogada em +${days} dias com sucesso!` });
       onUpdate(data.admission);
     } catch (err: any) {
@@ -100,23 +121,17 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
       setLoading(true);
       setActionMessage(null);
       if (isRevoked) {
-        // Reativar
-        const res = await fetch(`/api/admissions/${admission.id}/invite`, {
+        const data = await safeFetchJson<{ admission: Admission }>(`/api/admissions/${admission.id}/invite`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ unrevoke: true, extendDays: 7 })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erro ao reativar convite.');
         setActionMessage({ type: 'success', text: 'Convite reativado com sucesso (+7 dias adicionados)!' });
         onUpdate(data.admission);
       } else {
-        // Revogar
-        const res = await fetch(`/api/admissions/${admission.id}/invite/revoke`, {
+        const data = await safeFetchJson<{ admission: Admission }>(`/api/admissions/${admission.id}/invite/revoke`, {
           method: 'POST'
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erro ao revogar convite.');
         setActionMessage({ type: 'success', text: 'Convite revogado com sucesso. O candidato não poderá mais entrar por este link.' });
         onUpdate(data.admission);
       }
@@ -128,6 +143,14 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
   };
 
   const openWhatsApp = () => {
+    if (isRevoked) {
+      setActionMessage({ type: 'error', text: 'Este convite está revogado. Reative o acesso antes de enviar ao candidato.' });
+      return;
+    }
+    if (isExpired) {
+      setActionMessage({ type: 'error', text: 'Este convite está expirado. Clique em "+15 Dias" ou "Regenerar Novo Token" antes de enviar ao candidato.' });
+      return;
+    }
     const firstName = admission.employee.name.split(' ')[0];
     const text = encodeURIComponent(
       `Olá, ${firstName}! Aqui é da Galvanização Raitz.\n\n` +
@@ -135,9 +158,9 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
       `${inviteUrl}\n\n` +
       `Em caso de qualquer dúvida, estamos à disposição!`
     );
-    const cleanPhone = admission.employee.phone.replace(/\D/g, '');
+    const cleanPhone = (admission.employee.phone || '').replace(/\D/g, '');
     const phoneWithCountry = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-    window.open(`https://wa.me/${phoneWithCountry}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${phoneWithCountry}?text=${text}`, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -223,7 +246,48 @@ export const ManageInviteModal: React.FC<ManageInviteModalProps> = ({
 
         {/* Link do Convite com Copiar */}
         <div className="space-y-1.5">
-          <label className="block font-semibold text-slate-700">Link Direto do Candidato</label>
+          <div className="flex items-center justify-between">
+            <label className="block font-semibold text-slate-700">Link Direto do Candidato</label>
+            <button
+              type="button"
+              onClick={() => setShowDomainConfig(prev => !prev)}
+              className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1"
+            >
+              <Globe className="w-3 h-3" />
+              <span>{showDomainConfig ? 'Ocultar domínio' : 'Ajustar URL pública'}</span>
+            </button>
+          </div>
+          {isPrivateHost && !customBaseUrl && (
+            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900">
+              Este endereço (<code>{window.location.hostname.includes('ais-dev-') ? 'ais-dev' : 'localhost'}</code>) é privado do ambiente de desenvolvimento e exige login Google no celular externo. Configure a URL pública publicada para enviar ao candidato.
+            </div>
+          )}
+          {showDomainConfig && (
+            <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+              <input
+                type="url"
+                placeholder="https://seu-dominio.vercel.app"
+                value={customBaseUrl}
+                onChange={(e) => {
+                  setCustomBaseUrl(e.target.value);
+                  setSavedPublicUrl(e.target.value);
+                }}
+                className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-800 focus:outline-blue-500"
+              />
+              {customBaseUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomBaseUrl('');
+                    setSavedPublicUrl('');
+                  }}
+                  className="text-[11px] text-slate-500 hover:text-slate-700 px-2"
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <div className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] font-mono text-slate-700 truncate select-all">
               {inviteUrl}

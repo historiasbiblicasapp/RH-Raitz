@@ -21,6 +21,7 @@ import {
   renderTemplate, 
   generateWhatsAppLink 
 } from '../lib/communication.ts';
+import { buildInviteUrl } from '../lib/appUrl.ts';
 
 export interface CommunicationModalProps {
   isOpen: boolean;
@@ -69,7 +70,7 @@ export const CommunicationModal: React.FC<CommunicationModalProps> = ({
   const phoneValidation = normalizeBrazilianPhone(employeePhone);
 
   // Link do convite
-  const inviteUrl = inviteToken ? `${window.location.origin}/convite/${inviteToken}` : `${window.location.origin}/admissoes/${admissionId}`;
+  const inviteUrl = inviteToken ? buildInviteUrl(inviteToken) : `${window.location.origin}/admissoes/${admissionId}`;
 
   // Modelo selecionado
   const defaultTemplateId: CommunicationType = initialReason?.type || 'documents_pending';

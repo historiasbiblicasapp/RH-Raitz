@@ -187,7 +187,11 @@ export const MobileSimulatorModal: React.FC<MobileSimulatorModalProps> = ({
           <div className="flex items-center gap-2 text-slate-400 text-center sm:text-left">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span className="line-clamp-1">
-              Token de acesso individual: <strong className="text-slate-200 font-mono">{admission.inviteToken.slice(0, 16)}...</strong>
+              {admission?.inviteToken ? (
+                <>Token de acesso individual: <strong className="text-slate-200 font-mono">{admission.inviteToken.slice(0, 16)}...</strong></>
+              ) : (
+                <>Acesso individual protegido por token seguro</>
+              )}
             </span>
           </div>
 

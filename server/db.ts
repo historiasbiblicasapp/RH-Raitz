@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { 
+import type { 
   Admission, 
   Employee, 
   EmployeeStatus,
@@ -167,7 +167,46 @@ import {
   filterAndPaginateChecklist 
 } from './operationalChecklistService.ts';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const SEED_DATA_DIR = path.join(process.cwd(), 'data');
+const SEED_DB_FILE = path.join(SEED_DATA_DIR, 'db.json');
+const TMP_DATA_DIR = '/tmp/admissao_data';
+
+function resolveWritableDataDir(): string {
+  // Em ambientes serverless somente leitura (ex: Vercel /var/task), usa /tmp/admissao_data
+  if (process.env.VERCEL === '1' || process.env.VERCEL_ENV) {
+    try {
+      if (!fs.existsSync(TMP_DATA_DIR)) {
+        fs.mkdirSync(TMP_DATA_DIR, { recursive: true });
+      }
+      return TMP_DATA_DIR;
+    } catch {
+      return SEED_DATA_DIR;
+    }
+  }
+
+  try {
+    if (!fs.existsSync(SEED_DATA_DIR)) {
+      fs.mkdirSync(SEED_DATA_DIR, { recursive: true });
+    }
+    const testStorage = path.join(SEED_DATA_DIR, 'storage');
+    if (!fs.existsSync(testStorage)) {
+      fs.mkdirSync(testStorage, { recursive: true });
+    }
+    fs.accessSync(SEED_DATA_DIR, fs.constants.W_OK);
+    return SEED_DATA_DIR;
+  } catch {
+    try {
+      if (!fs.existsSync(TMP_DATA_DIR)) {
+        fs.mkdirSync(TMP_DATA_DIR, { recursive: true });
+      }
+    } catch {
+      // Silencioso em modo puramente memória
+    }
+    return TMP_DATA_DIR;
+  }
+}
+
+const DATA_DIR = resolveWritableDataDir();
 const STORAGE_DIR = path.join(DATA_DIR, 'storage');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 
@@ -382,11 +421,15 @@ export function generateDefaultSettings(): SystemSettings {
 
 
 function ensureDirectories() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(STORAGE_DIR)) {
-    fs.mkdirSync(STORAGE_DIR, { recursive: true });
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(STORAGE_DIR)) {
+      fs.mkdirSync(STORAGE_DIR, { recursive: true });
+    }
+  } catch {
+    // Em ambientes somente leitura, fallback para memória /tmp sem interromper inicialização
   }
 }
 
@@ -1086,9 +1129,12 @@ export class Database {
 
   constructor() {
     ensureDirectories();
-    if (fs.existsSync(DB_FILE)) {
+    const activeDbPath = fs.existsSync(DB_FILE)
+      ? DB_FILE
+      : (fs.existsSync(SEED_DB_FILE) ? SEED_DB_FILE : null);
+    if (activeDbPath) {
       try {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
+        const raw = fs.readFileSync(activeDbPath, 'utf-8');
         this.data = JSON.parse(raw);
         if (!this.data.users) this.data.users = [];
         if (!this.data.communicationLogs) this.data.communicationLogs = [];
@@ -1287,8 +1333,11 @@ export class Database {
         let employeesNeedSave = false;
         for (const adm of (this.data.admissions || [])) {
           if (adm.employee) {
-            const cleanCpf = adm.employee.cpf.replace(/\D/g, '');
-            const existingEmp = this.data.employees.find(e => e.id === adm.employeeId || e.cpf.replace(/\D/g, '') === cleanCpf);
+            const cleanCpf = (adm.employee.cpf || '').replace(/\D/g, '');
+            const existingEmp = this.data.employees.find(e =>
+              e.id === adm.employeeId ||
+              (cleanCpf.length > 0 && (e.cpf || '').replace(/\D/g, '') === cleanCpf)
+            );
             if (!existingEmp) {
               this.data.employees.push({
                 ...adm.employee,
@@ -3533,6 +3582,44 @@ export class Database {
         };
 
         documents.push(docSnapshot);
+      }
+    }
+
+    // Fallback para checklist padrão quando o cargo não possui documentos vinculados
+    if (documents.length === 0 && this.data.documentTypes) {
+      const defaultDocTypes = this.data.documentTypes
+        .filter(dt => dt.active && dt.required_by_default)
+        .sort((a, b) => (a.sort_order ?? 999) - (b.sort_order ?? 999));
+
+      for (let i = 0; i < defaultDocTypes.length; i++) {
+        const docType = defaultDocTypes[i];
+        if (seenDocTypeIds.has(docType.id)) continue;
+        seenDocTypeIds.add(docType.id);
+
+        documents.push({
+          id: 'doc-' + crypto.randomUUID(),
+          admissionId,
+          documentType: docType.name,
+          document_type_id: docType.id,
+          document_type_name: docType.name,
+          category: docType.category,
+          required: true,
+          sort_order: docType.sort_order ?? (i + 1),
+          instructions: docType.description,
+          requires_expiration_date: Boolean(docType.requires_expiration_date),
+          allowed_file_types: docType.allowed_file_types && docType.allowed_file_types.length > 0
+            ? [...docType.allowed_file_types]
+            : ['PDF', 'JPG', 'JPEG', 'PNG'],
+          max_file_size_mb: docType.max_file_size_mb || 10,
+          source_config_version: '1.0',
+          status: 'Não enviado',
+          currentVersion: 0,
+          versions: [],
+          createdAt: now,
+          updatedAt: now,
+          created_by: createdByUserName || 'Sistema',
+          updated_by: createdByUserName || 'Sistema'
+        });
       }
     }
 

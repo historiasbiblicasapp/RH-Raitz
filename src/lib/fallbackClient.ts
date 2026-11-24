@@ -152,15 +152,111 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
         filters: { roles, departments, units }
       };
     }
+
+    if (method === 'POST') {
+      let body: any = {};
+      try {
+        body = typeof options?.body === 'string' ? JSON.parse(options.body) : options?.body || {};
+      } catch {}
+
+      const name = String(body.name || '').trim();
+      const phone = String(body.phone || '').trim();
+      if (name.length < 3 || phone.replace(/\D/g, '').length < 10) {
+        return undefined;
+      }
+
+      const now = new Date().toISOString();
+      const admId = 'adm-' + Date.now();
+      const empId = 'emp-' + Date.now();
+      const randomHex = Array.from({ length: 24 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+      const inviteToken = `tok_${randomHex}`;
+      const inviteExpiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
+
+      const employee = {
+        id: empId,
+        name,
+        phone,
+        cpf: String(body.cpf || '').replace(/\D/g, ''),
+        birthDate: String(body.birthDate || ''),
+        email: String(body.email || ''),
+        role: String(body.role || '').trim() || 'Auxiliar de Produção',
+        department: String(body.department || '').trim() || 'Produção',
+        unit: String(body.unit || '').trim() || 'Matriz',
+        expectedStartDate: String(body.expectedStartDate || ''),
+        active: true,
+        status: 'Ativo',
+        createdAt: now,
+        updatedAt: now
+      };
+
+      const sourceDocTypes =
+        Array.isArray(db.documentTypes) && db.documentTypes.length > 0
+          ? db.documentTypes
+          : (initialDbData as any).documentTypes || [];
+      const defaultDocTypes = sourceDocTypes.filter((dt: any) => dt.active && dt.required_by_default);
+      const documents = defaultDocTypes.map((dt: any, idx: number) => ({
+        id: `doc-${Date.now()}-${idx}`,
+        admissionId: admId,
+        documentType: dt.name,
+        document_type_id: dt.id,
+        document_type_name: dt.name,
+        category: dt.category,
+        required: true,
+        sort_order: dt.sort_order ?? idx + 1,
+        instructions: dt.description,
+        requires_expiration_date: Boolean(dt.requires_expiration_date),
+        allowed_file_types: dt.allowed_file_types || ['PDF', 'JPG', 'JPEG', 'PNG'],
+        max_file_size_mb: dt.max_file_size_mb || 10,
+        status: 'Não enviado',
+        currentVersion: 0,
+        versions: [],
+        createdAt: now,
+        updatedAt: now
+      }));
+
+      const newAdmission: any = {
+        id: admId,
+        employeeId: empId,
+        employee,
+        status: 'Aguardando documentos',
+        inviteToken,
+        inviteExpiresAt,
+        inviteSentViaWhatsApp: false,
+        consentGiven: false,
+        dataConfirmed: false,
+        documents,
+        progressPercent: 0,
+        totalDocuments: documents.length,
+        approvedDocuments: 0,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      if (!db.employees) db.employees = [];
+      if (!db.admissions) db.admissions = [];
+      db.employees.unshift(employee);
+      db.admissions.unshift(newAdmission);
+      saveLocalData(db);
+      return newAdmission;
+    }
   }
 
-  // 3. Single Admission by ID
+  // 3. Single Admission by ID (GET / DELETE)
   const admMatch = path.match(/^\/api\/admissions\/([^/]+)$/);
   if (admMatch) {
     const id = admMatch[1];
+    if (method === 'DELETE') {
+      const idx = (db.admissions || []).findIndex((a: any) => a.id === id);
+      if (idx >= 0) {
+        db.admissions.splice(idx, 1);
+        saveLocalData(db);
+        return { success: true, message: 'Admissão excluída com sucesso.' };
+      }
+      return undefined;
+    }
     const item = (db.admissions || []).find((a: any) => a.id === id);
-    if (item) return { admission: item };
-    return { admission: db.admissions?.[0] };
+    if (item) return item;
+    return undefined;
   }
 
   // 4. Job Positions
@@ -315,14 +411,131 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
     };
   }
 
+  // 15.9 Gestão de Convites (/api/invites e ações)
+  if (path === '/api/invites') {
+    const invites = (db.admissions || []).map((a: any) => {
+      const isExpired = new Date(a.inviteExpiresAt).getTime() < Date.now();
+      let statusLabel = 'Pendente de envio';
+      if (a.inviteRevoked) statusLabel = 'Revogado';
+      else if (isExpired) statusLabel = 'Expirado';
+      else if (a.inviteAccessCount > 0) statusLabel = 'Acessado';
+      else if (a.inviteSentViaWhatsApp) statusLabel = 'Ativo';
+
+      return {
+        admissionId: a.id,
+        employeeId: a.employeeId,
+        employeeName: a.employee?.name || '',
+        employeeEmail: a.employee?.email || '',
+        employeePhone: a.employee?.phone || '',
+        employeeCpf: a.employee?.cpf || '',
+        employeeRole: a.employee?.role || 'Auxiliar de Produção',
+        employeeDepartment: a.employee?.department || 'Produção',
+        employeeUnit: a.employee?.unit || 'Matriz',
+        admissionStatus: a.status,
+        inviteToken: a.inviteToken,
+        inviteExpiresAt: a.inviteExpiresAt,
+        inviteSentViaWhatsApp: !!a.inviteSentViaWhatsApp,
+        inviteSentAt: a.inviteSentAt,
+        inviteAccessCount: a.inviteAccessCount || 0,
+        inviteLastAccessedAt: a.inviteLastAccessedAt,
+        inviteRevoked: !!a.inviteRevoked,
+        isExpired,
+        statusLabel,
+        createdAt: a.createdAt
+      };
+    });
+    return { invites };
+  }
+
+  const inviteRegenMatch = path.match(/^\/api\/admissions\/([^/]+)\/invite\/regenerate$/);
+  if (inviteRegenMatch && method === 'POST') {
+    const adm = (db.admissions || []).find((a: any) => a.id === inviteRegenMatch[1]);
+    if (adm) {
+      const randomHex = Array.from({ length: 24 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+      adm.inviteToken = `tok_${randomHex}`;
+      adm.inviteExpiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
+      adm.inviteRevoked = false;
+      adm.inviteAccessCount = 0;
+      adm.updatedAt = new Date().toISOString();
+      saveLocalData(db);
+      return { success: true, admission: adm, inviteToken: adm.inviteToken, inviteExpiresAt: adm.inviteExpiresAt };
+    }
+  }
+
+  const inviteUpdateMatch = path.match(/^\/api\/admissions\/([^/]+)\/invite$/);
+  if (inviteUpdateMatch && method === 'PUT') {
+    const adm = (db.admissions || []).find((a: any) => a.id === inviteUpdateMatch[1]);
+    if (adm) {
+      const body = typeof options?.body === 'string' ? JSON.parse(options.body) : options?.body || {};
+      if (body.extendDays && body.extendDays > 0) {
+        const base = Math.max(Date.now(), new Date(adm.inviteExpiresAt).getTime() || Date.now());
+        adm.inviteExpiresAt = new Date(base + body.extendDays * 86400000).toISOString();
+      }
+      if (body.unrevoke) {
+        adm.inviteRevoked = false;
+      }
+      adm.updatedAt = new Date().toISOString();
+      saveLocalData(db);
+      return { success: true, admission: adm };
+    }
+  }
+
+  const inviteRevokeMatch = path.match(/^\/api\/admissions\/([^/]+)\/invite\/revoke$/);
+  if (inviteRevokeMatch && method === 'POST') {
+    const adm = (db.admissions || []).find((a: any) => a.id === inviteRevokeMatch[1]);
+    if (adm) {
+      adm.inviteRevoked = true;
+      adm.updatedAt = new Date().toISOString();
+      saveLocalData(db);
+      return { success: true, admission: adm };
+    }
+  }
+
   // 16. Convite do Candidato (/api/invite/:token)
   const inviteMatch = path.match(/^\/api\/invite\/([^/]+)$/);
   if (inviteMatch) {
     const token = inviteMatch[1];
     const match = (db.admissions || []).find((a: any) => a.inviteToken === token);
-    if (match) return match;
-    // Fallback: primeira admissão aguardando documentos
-    return (db.admissions || []).find((a: any) => a.status === 'Aguardando documentos') || db.admissions?.[0];
+    if (!match || match.inviteRevoked || new Date(match.inviteExpiresAt).getTime() < Date.now()) {
+      return undefined;
+    }
+    return match;
+  }
+
+  const inviteConsentMatch = path.match(/^\/api\/invite\/([^/]+)\/consent$/);
+  if (inviteConsentMatch && method === 'POST') {
+    const match = (db.admissions || []).find((a: any) => a.inviteToken === inviteConsentMatch[1]);
+    if (match) {
+      match.consentGiven = true;
+      match.consentDate = new Date().toISOString();
+      match.updatedAt = new Date().toISOString();
+      saveLocalData(db);
+      return { success: true, consent: { acceptedAt: match.consentDate } };
+    }
+  }
+
+  const inviteConfirmMatch = path.match(/^\/api\/invite\/([^/]+)\/confirm-data$/);
+  if (inviteConfirmMatch && method === 'POST') {
+    const match = (db.admissions || []).find((a: any) => a.inviteToken === inviteConfirmMatch[1]);
+    if (match) {
+      match.dataConfirmed = true;
+      match.dataConfirmedAt = new Date().toISOString();
+      match.updatedAt = new Date().toISOString();
+      saveLocalData(db);
+      return { success: true, admission: match };
+    }
+  }
+
+  const inviteCorrectionMatch = path.match(/^\/api\/invite\/([^/]+)\/request-correction$/);
+  if (inviteCorrectionMatch && method === 'POST') {
+    const match = (db.admissions || []).find((a: any) => a.inviteToken === inviteCorrectionMatch[1]);
+    if (match) {
+      const body = typeof options?.body === 'string' ? JSON.parse(options.body) : options?.body || {};
+      match.correctionRequest = { details: body.details || '', requestedAt: new Date().toISOString() };
+      match.updatedAt = new Date().toISOString();
+      saveLocalData(db);
+      return { success: true, admission: match };
+    }
   }
 
   // 16.1. Finalização do Envio pelo Candidato em Fallback (/api/invite/:token/finish)
@@ -1329,6 +1542,21 @@ export function handleFallbackApiRoute(urlStr: string, options?: RequestInit): a
         statuses: ['Rascunho', 'Aguardando documentos', 'Em conferência', 'Pendência', 'Concluída', 'Cancelada']
       }
     };
+  }
+
+  if (path === '/api/system-config' || path === '/system-config') {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
+    return {
+      appUrl: origin,
+      detectedUrl: origin,
+      envUrl: '',
+      isLocalhost: isLocal
+    };
+  }
+
+  if ((path === '/api/communications/log' || path === '/communications/log') && method === 'POST') {
+    return { success: true };
   }
 
   return undefined;

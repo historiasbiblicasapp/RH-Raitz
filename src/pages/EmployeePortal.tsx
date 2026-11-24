@@ -289,13 +289,20 @@ export const EmployeePortal: React.FC = () => {
   }
 
   if (error || !admission) {
+    const lowerErr = (error || '').toLowerCase();
+    const errorTitle = lowerErr.includes('expir')
+      ? 'Convite Expirado'
+      : lowerErr.includes('revog')
+      ? 'Convite Revogado'
+      : 'Convite Não Encontrado';
+
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full bg-white rounded-2xl border border-slate-200 p-6 text-center shadow-sm">
           <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
             <AlertCircle className="w-6 h-6" />
           </div>
-          <h2 className="text-base font-bold text-slate-900 mb-1">Convite Não Encontrado</h2>
+          <h2 className="text-base font-bold text-slate-900 mb-1">{errorTitle}</h2>
           <p className="text-xs text-slate-500 mb-4">
             {error || 'O link pode estar expirado ou incorreto. Por favor, entre em contato com a equipe de Recursos Humanos da empresa.'}
           </p>
@@ -666,7 +673,7 @@ export const EmployeePortal: React.FC = () => {
         {(admission.dataConfirmed || admission.correctionRequest || activeStep === 3) && (() => {
           const requiredDocs = admission.documents.filter(d => d.required);
           const pendingRequiredDocs = requiredDocs.filter(d => d.status === 'Não enviado' || d.currentVersion === 0);
-          const isAllRequiredSent = requiredDocs.length > 0 && pendingRequiredDocs.length === 0;
+          const isAllRequiredSent = pendingRequiredDocs.length === 0;
 
           return (
             <div className="space-y-4">
@@ -1077,7 +1084,7 @@ export const EmployeePortal: React.FC = () => {
       {admission && (admission.dataConfirmed || admission.correctionRequest || activeStep === 3) && (() => {
         const requiredDocs = admission.documents.filter(d => d.required);
         const pendingRequiredDocs = requiredDocs.filter(d => d.status === 'Não enviado' || d.currentVersion === 0);
-        const isAllRequiredSent = requiredDocs.length > 0 && pendingRequiredDocs.length === 0;
+        const isAllRequiredSent = pendingRequiredDocs.length === 0;
 
         return (
           <aside aria-label="Ações de Conclusão e Fechamento" className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-xl px-4 py-3">

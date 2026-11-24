@@ -20,7 +20,8 @@ import {
   Calendar,
   AlertTriangle,
   Send,
-  Plus
+  Plus,
+  Globe
 } from 'lucide-react';
 import { InviteItem, Admission } from '../types/index.ts';
 import { ManageInviteModal } from '../components/ManageInviteModal.tsx';
@@ -30,6 +31,14 @@ import { MobileSimulatorModal } from '../components/MobileSimulatorModal.tsx';
 import { maskCPF } from '../lib/cpf.ts';
 import { safeFetchJson } from '../lib/api.ts';
 import { handleFallbackApiRoute } from '../lib/fallbackClient.ts';
+import {
+  buildInviteUrl,
+  getSavedPublicUrl,
+  setSavedPublicUrl,
+  isPrivatePreviewUrl,
+  resolvePublicOrigin,
+  type SystemUrlConfig
+} from '../lib/appUrl.ts';
 
 export const InvitesPage: React.FC = () => {
   const [invites, setInvites] = useState<InviteItem[]>([]);
@@ -37,8 +46,16 @@ export const InvitesPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ATIVO' | 'ACESSADO' | 'PENDENTE' | 'EXPIRADO' | 'REVOGADO'>('TODOS');
   
-  // Feedback de cópia
+  // Feedback de cópia e ações
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [extendingId, setExtendingId] = useState<string | null>(null);
+
+  // Domínio público para compartilhamento externo
+  const [systemConfig, setSystemConfig] = useState<SystemUrlConfig | null>(null);
+  const [customBaseUrl, setCustomBaseUrl] = useState<string>(() => getSavedPublicUrl());
+  const [urlDraft, setUrlDraft] = useState<string>(() => getSavedPublicUrl());
+  const [showPublicUrlEditor, setShowPublicUrlEditor] = useState(false);
 
   // Modais de ação
   const [selectedAdmissionForInvite, setSelectedAdmissionForInvite] = useState<Admission | null>(null);
@@ -69,10 +86,31 @@ export const InvitesPage: React.FC = () => {
 
   useEffect(() => {
     fetchInvites();
+    safeFetchJson<SystemUrlConfig>('/api/system-config')
+      .then((cfg) => {
+        if (cfg) setSystemConfig(cfg);
+      })
+      .catch(() => {});
   }, []);
 
+  const effectiveOrigin = customBaseUrl.trim() || resolvePublicOrigin(systemConfig);
+  const isPrivateDomain = isPrivatePreviewUrl(effectiveOrigin);
+
+  const handleSavePublicUrl = () => {
+    const normalized = urlDraft.trim().replace(/\/$/, '');
+    setSavedPublicUrl(normalized);
+    setCustomBaseUrl(normalized);
+    setShowPublicUrlEditor(false);
+    setActionFeedback({
+      type: 'success',
+      text: normalized
+        ? `Domínio público atualizado para ${normalized}.`
+        : 'Domínio público personalizado removido; usando URL padrão.'
+    });
+  };
+
   const handleCopyLink = (token: string) => {
-    const link = `${window.location.origin}/convite/${token}`;
+    const link = buildInviteUrl(token, customBaseUrl, systemConfig);
     navigator.clipboard.writeText(link);
     setCopiedToken(token);
     setTimeout(() => setCopiedToken(null), 2500);
@@ -108,28 +146,71 @@ export const InvitesPage: React.FC = () => {
     }
   };
 
+  const handleExtendInvite = async (invite: InviteItem) => {
+    try {
+      setExtendingId(invite.admissionId);
+      setActionFeedback(null);
+      await safeFetchJson(`/api/admissions/${invite.admissionId}/invite`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expiresInDays: 15,
+          reactivate: true
+        })
+      });
+      await fetchInvites();
+      setActionFeedback({
+        type: 'success',
+        text: `Convite de ${invite.employeeName} renovado por +15 dias e pronto para envio.`
+      });
+    } catch (err: any) {
+      setActionFeedback({
+        type: 'error',
+        text: err.message || 'Não foi possível prorrogar a validade do convite.'
+      });
+    } finally {
+      setExtendingId(null);
+    }
+  };
+
   const handleDeleteAdmission = async () => {
     if (!admissionToDelete) return;
     try {
       setIsDeleting(true);
-      const res = await fetch(`/api/admissions/${admissionToDelete.id}`, {
+      await safeFetchJson(`/api/admissions/${admissionToDelete.id}`, {
         method: 'DELETE'
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Erro ao excluir cadastro.');
-      }
       setAdmissionToDelete(null);
       fetchInvites();
     } catch (err: any) {
-      alert(err.message || 'Falha ao excluir');
+      setActionFeedback({
+        type: 'error',
+        text: err.message || 'Falha ao excluir cadastro.'
+      });
     } finally {
       setIsDeleting(false);
     }
   };
 
   const openWhatsApp = (invite: InviteItem) => {
-    const link = `${window.location.origin}/convite/${invite.inviteToken}`;
+    if (invite.inviteRevoked || invite.isExpired) {
+      setActionFeedback({
+        type: 'error',
+        text: `O convite de ${invite.employeeName} está ${invite.inviteRevoked ? 'revogado' : 'expirado'} e apresentará erro ao candidato. Clique em "Prorrogar +15 dias" antes de enviar.`
+      });
+      return;
+    }
+
+    const cleanPhone = (invite.employeePhone || '').replace(/\D/g, '');
+    if (!cleanPhone) {
+      setActionFeedback({
+        type: 'error',
+        text: `O candidato ${invite.employeeName} não possui telefone cadastrado para WhatsApp.`
+      });
+      return;
+    }
+
+    const link = buildInviteUrl(invite.inviteToken, customBaseUrl, systemConfig);
     const firstName = invite.employeeName.split(' ')[0];
     const text = encodeURIComponent(
       `Olá, ${firstName}! Aqui é da Galvanização Raitz.\n\n` +
@@ -137,20 +218,21 @@ export const InvitesPage: React.FC = () => {
       `${link}\n\n` +
       `Qualquer dúvida, estamos à disposição!`
     );
-    const cleanPhone = (invite.employeePhone || '').replace(/\D/g, '');
     const phoneWithCountry = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-    window.open(`https://wa.me/${phoneWithCountry}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${phoneWithCountry}?text=${text}`, '_blank', 'noopener,noreferrer');
   };
 
   // Filtragem
   const filteredInvites = invites.filter((inv) => {
+    const cleanSearch = searchTerm.toLowerCase();
+    const cleanDigits = searchTerm.replace(/\D/g, '');
     const matchesSearch = 
-      inv.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inv.employeeRole.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      inv.employeeDepartment.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inv.employeeCpf && inv.employeeCpf.includes(searchTerm.replace(/\D/g, ''))) ||
-      (inv.employeePhone && inv.employeePhone.includes(searchTerm)) ||
-      inv.inviteToken.toLowerCase().includes(searchTerm.toLowerCase());
+      inv.employeeName.toLowerCase().includes(cleanSearch) ||
+      inv.employeeRole.toLowerCase().includes(cleanSearch) ||
+      inv.employeeDepartment.toLowerCase().includes(cleanSearch) ||
+      (cleanDigits && inv.employeeCpf && inv.employeeCpf.includes(cleanDigits)) ||
+      (inv.employeePhone && inv.employeePhone.toLowerCase().includes(cleanSearch)) ||
+      inv.inviteToken.toLowerCase().includes(cleanSearch);
 
     if (!matchesSearch) return false;
 
@@ -187,20 +269,93 @@ export const InvitesPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={fetchInvites}
-            className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-600 transition-colors shadow-xs"
+            className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-600 transition-colors shadow-xs cursor-pointer"
             title="Atualizar lista"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button
-            onClick={() => navigate('/nova-admissao')}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-colors"
+            onClick={() => navigate('/admissoes/nova')}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Nova Admissão / Gerar Convite</span>
           </button>
         </div>
       </div>
+
+      {/* Alerta de URL Privada (ais-dev / localhost) */}
+      {isPrivateDomain && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-950 space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-amber-900">
+                  Link gerado em ambiente restrito ({effectiveOrigin.replace(/^https?:\/\//, '')})
+                </p>
+                <p className="text-amber-800 mt-0.5 leading-relaxed">
+                  Endereços <code className="bg-amber-100 px-1 rounded">ais-dev-...</code> e <code className="bg-amber-100 px-1 rounded">localhost</code> exigem sessão privada e não abrem no celular do candidato. Configure abaixo a URL pública publicada do app para gerar links externos funcionais.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowPublicUrlEditor((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-900 hover:bg-amber-950 text-white font-semibold rounded-xl shrink-0 self-start sm:self-center cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>{showPublicUrlEditor ? 'Fechar' : 'Configurar URL Pública'}</span>
+            </button>
+          </div>
+
+          {showPublicUrlEditor && (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-amber-200">
+              <input
+                type="url"
+                value={urlDraft}
+                onChange={(e) => setUrlDraft(e.target.value)}
+                placeholder="https://admissao.suaempresa.com.br"
+                className="flex-1 bg-white border border-amber-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <button
+                type="button"
+                onClick={handleSavePublicUrl}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl cursor-pointer"
+              >
+                Salvar URL
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Feedback de ações */}
+      {actionFeedback && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between gap-3 ${
+            actionFeedback.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-800'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {actionFeedback.type === 'error' ? (
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 shrink-0" />
+            )}
+            <span className="font-medium">{actionFeedback.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionFeedback(null)}
+            className="text-xs font-bold underline shrink-0 cursor-pointer"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
 
       {/* Cards de Métricas de Convites */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -275,7 +430,7 @@ export const InvitesPage: React.FC = () => {
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-xl font-semibold whitespace-nowrap transition-colors ${
+              className={`px-3 py-1.5 rounded-xl font-semibold whitespace-nowrap transition-colors cursor-pointer ${
                 statusFilter === st 
                   ? 'bg-blue-600 text-white shadow-xs' 
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -307,8 +462,9 @@ export const InvitesPage: React.FC = () => {
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredInvites.map((inv) => {
-              const inviteLink = `${window.location.origin}/convite/${inv.inviteToken}`;
+              const inviteLink = buildInviteUrl(inv.inviteToken, customBaseUrl, systemConfig);
               const isCopied = copiedToken === inv.inviteToken;
+              const isInactive = inv.inviteRevoked || inv.isExpired;
 
               return (
                 <div key={inv.admissionId} className="p-4 sm:p-5 hover:bg-slate-50/60 transition-colors space-y-3">
@@ -325,15 +481,23 @@ export const InvitesPage: React.FC = () => {
                             {inv.employeeRole}
                           </span>
                           <span className="text-[11px] text-slate-400 font-mono">
-                            CPF: {maskCPF(inv.employeeCpf || '')}
+                            CPF: {inv.employeeCpf ? maskCPF(inv.employeeCpf) : 'Não informado'}
                           </span>
                         </div>
                         <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
                           <span>{inv.employeeDepartment} • {inv.employeeUnit}</span>
-                          <span>•</span>
-                          <span>{inv.employeePhone}</span>
-                          <span>•</span>
-                          <span>{inv.employeeEmail}</span>
+                          {inv.employeePhone && (
+                            <>
+                              <span>•</span>
+                              <span>{inv.employeePhone}</span>
+                            </>
+                          )}
+                          {inv.employeeEmail && (
+                            <>
+                              <span>•</span>
+                              <span>{inv.employeeEmail}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -374,7 +538,7 @@ export const InvitesPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleCopyLink(inv.inviteToken)}
-                        className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-colors shrink-0"
+                        className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-white rounded-lg border border-transparent hover:border-slate-200 transition-colors shrink-0 cursor-pointer"
                         title="Copiar link do convite"
                       >
                         {isCopied ? (
@@ -396,19 +560,31 @@ export const InvitesPage: React.FC = () => {
                   {/* Botões de Ação do Convite (CRUD) */}
                   <div className="flex items-center justify-between gap-2 pt-1 text-xs flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => openWhatsApp(inv)}
-                        className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold px-3 py-1.5 rounded-lg border border-emerald-200 transition-colors"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>WhatsApp</span>
-                      </button>
+                      {isInactive ? (
+                        <button
+                          type="button"
+                          onClick={() => handleExtendInvite(inv)}
+                          disabled={extendingId === inv.admissionId}
+                          className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${extendingId === inv.admissionId ? 'animate-spin' : ''}`} />
+                          <span>{inv.inviteRevoked ? 'Reativar +15 dias' : 'Prorrogar +15 dias'}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openWhatsApp(inv)}
+                          className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold px-3 py-1.5 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>WhatsApp</span>
+                        </button>
+                      )}
 
                       <button
                         type="button"
                         onClick={() => setSimulatorUrl(inviteLink)}
-                        className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold px-3 py-1.5 rounded-lg border border-blue-200 transition-colors"
+                        className="flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold px-3 py-1.5 rounded-lg border border-blue-200 transition-colors cursor-pointer"
                       >
                         <Smartphone className="w-3.5 h-3.5" />
                         <span>Simulador</span>
@@ -417,7 +593,7 @@ export const InvitesPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleOpenInviteManager(inv.admissionId)}
-                        className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                        className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                       >
                         <KeyRound className="w-3.5 h-3.5 text-slate-600" />
                         <span>Gerenciar Validade & Token</span>
@@ -428,7 +604,7 @@ export const InvitesPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleOpenEditAdmission(inv.admissionId)}
-                        className="flex items-center gap-1 text-slate-600 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors"
+                        className="flex items-center gap-1 text-slate-600 hover:text-blue-700 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
                         title="Editar dados cadastrais do colaborador"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
@@ -438,7 +614,7 @@ export const InvitesPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => setAdmissionToDelete({ id: inv.admissionId, name: inv.employeeName })}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                         title="Excluir admissão e convite"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -447,7 +623,7 @@ export const InvitesPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => navigate(`/admissoes/${inv.admissionId}`)}
-                        className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors shadow-xs"
+                        className="flex items-center gap-1 bg-slate-900 hover:bg-slate-800 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer"
                       >
                         <span>Ver Admissão</span>
                         <ChevronRight className="w-3.5 h-3.5" />
